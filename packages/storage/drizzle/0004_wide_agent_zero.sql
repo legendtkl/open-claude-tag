@@ -1,0 +1,1 @@
+ALTER TABLE "sessions" ADD COLUMN "pr_last_polled_at" timestamp with time zone;

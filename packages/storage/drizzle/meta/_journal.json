@@ -1,0 +1,251 @@
+{
+  "version": "7",
+  "dialect": "postgresql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "7",
+      "when": 1773715671657,
+      "tag": "0000_fair_cable",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1773762966528,
+      "tag": "0001_brainy_turbo",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1773844773398,
+      "tag": "0002_tearful_the_call",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1774255313375,
+      "tag": "0003_dark_bushwacker",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1774587494262,
+      "tag": "0004_wide_agent_zero",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1774594797514,
+      "tag": "0005_dear_squirrel_girl",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1774792800000,
+      "tag": "0006_add_adhoc_work_dir",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1780454400000,
+      "tag": "0007_feishu_task_tracking",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1780531200000,
+      "tag": "0008_chat_configs",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1780617600000,
+      "tag": "0009_tenant_chat_active_sessions",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1780704000000,
+      "tag": "0010_feishu_task_topic_key",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1780790400000,
+      "tag": "0011_first_class_agent_bot_identity",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1780876800000,
+      "tag": "0012_admin_console_display_names",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1780963200000,
+      "tag": "0013_feishu_app_stored_secret",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1781049600000,
+      "tag": "0014_task_run_events",
+      "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "7",
+      "when": 1781136000000,
+      "tag": "0015_admission_leases",
+      "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1781222400000,
+      "tag": "0016_delegation_trees",
+      "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1781308800000,
+      "tag": "0017_discussions",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1781395200000,
+      "tag": "0018_feishu_gateway_receipts",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1781481600000,
+      "tag": "0019_machines",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1781568000000,
+      "tag": "0020_sdk_session_machine",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1781654400000,
+      "tag": "0021_platform_ownership",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1781740800000,
+      "tag": "0022_console_only_machines",
+      "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1781827200000,
+      "tag": "0023_agent_machine_binding",
+      "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1781913600000,
+      "tag": "0024_machine_disconnect_request",
+      "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1782000000000,
+      "tag": "0025_profile_ownership_machine_name",
+      "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1782086400000,
+      "tag": "0026_agent_runtime_env",
+      "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "7",
+      "when": 1782172800000,
+      "tag": "0027_platform_user_computer_access",
+      "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "7",
+      "when": 1782259200000,
+      "tag": "0028_agent_owner_handle_unique",
+      "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1782345600000,
+      "tag": "0029_inbound_events_nulls_not_distinct",
+      "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1782432000000,
+      "tag": "0030_state_integrity_constraints",
+      "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1782518400000,
+      "tag": "0031_waiting_contracts",
+      "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1782604800000,
+      "tag": "0032_agent_memory_enabled",
+      "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1782691200000,
+      "tag": "0033_shared_context_entries",
+      "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1782777600000,
+      "tag": "0034_chat_memory",
+      "breakpoints": true
+    }
+  ]
+}

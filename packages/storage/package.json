@@ -1,0 +1,39 @@
+{
+  "name": "@open-tag/storage",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "typecheck": "tsc --noEmit",
+    "clean": "rm -rf dist *.tsbuildinfo",
+    "test": "vitest run --passWithNoTests",
+    "test:unit": "vitest run --passWithNoTests",
+    "test:integration": "OPEN_TAG_STORAGE_PG_INTEGRATION=1 vitest run",
+    "db:migrate": "drizzle-kit migrate",
+    "db:generate": "echo \"db:generate is disabled: drizzle meta snapshots end at 0005 while the journal is far ahead — regenerating would produce a destructive full-rebuild diff. Write migrations by hand under drizzle/ and append to meta/_journal.json.\" && exit 1",
+    "db:seed": "tsx src/seed.ts"
+  },
+  "dependencies": {
+    "@open-tag/core-types": "workspace:*",
+    "drizzle-orm": "^0.38.0",
+    "postgres": "^3.4.5",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/node": "^25.5.0",
+    "drizzle-kit": "^0.30.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0",
+    "vitest": "^3.0.0"
+  }
+}
