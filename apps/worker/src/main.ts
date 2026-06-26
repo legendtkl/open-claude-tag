@@ -151,6 +151,11 @@ import {
   createWorkerFeishuClientRegistry,
   type WorkerFeishuClientRegistry,
 } from './feishu-client-registry.js';
+import {
+  createLarkChannelSender,
+  updateRunningFeedbackCard,
+  type ChannelSender,
+} from './channel-sender.js';
 import { runAdmissionReschedulerOnce as runAdmissionRescheduler } from './admission-rescheduler.js';
 import { runDelegationBarrierReconcilerOnce as runDelegationBarrierReconciler } from './delegation-barrier-reconciler.js';
 import { runWaitingContractReconcilerOnce } from './waiting-contract-reconciler.js';
@@ -1080,6 +1085,7 @@ async function processTask(job: { id: string; data: TaskJobData }): Promise<void
 
   let feedback: ThreePhaseFeedback | null = null;
   let taskFeishuClient: FeishuClient | null = null;
+  let taskChannelSender: ChannelSender | null = null;
   let taskAgentId: string | undefined;
   let taskFeishuAppId: string | undefined;
   let admissionHandle: AdmissionHandle | null = null;
@@ -1130,11 +1136,16 @@ async function processTask(job: { id: string; data: TaskJobData }): Promise<void
       if (!shouldFlush) {
         return;
       }
-      await feedback.updateRunning(
-        runningDescription,
-        runningProgress,
-        runningActivity,
-        runningWorkDir,
+      await updateRunningFeedbackCard(
+        taskChannelSender,
+        {
+          ackMessageId,
+          description: runningDescription,
+          progress: runningProgress,
+          recentActivity: runningActivity,
+          workDir: runningWorkDir,
+        },
+        logger,
       );
       lastRunningCardUpdateAt = now;
     }
@@ -1215,6 +1226,10 @@ async function processTask(job: { id: string; data: TaskJobData }): Promise<void
       defaultClient: feishuClient,
     });
     taskFeishuClient = feedbackClientResolution.client;
+    // Route the primary task-feedback card through the neutral ChannelSender.
+    // Wrap the exact client ThreePhaseFeedback uses for done/failed so the
+    // running card cannot drift to a different/rotated client instance.
+    taskChannelSender = taskFeishuClient ? createLarkChannelSender(taskFeishuClient) : null;
 
     // Setup feedback (will update the ACK card if chatId is available).
     // replyToMessageId: thread-aware (only set in topic threads) so completion cards
