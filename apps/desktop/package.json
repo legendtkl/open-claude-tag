@@ -1,0 +1,60 @@
+{
+  "name": "@open-tag/desktop",
+  "version": "0.1.0",
+  "description": "macOS desktop shell for the OpenClaudeTag admin console",
+  "author": "OpenClaudeTag",
+  "private": true,
+  "type": "module",
+  "main": "dist/main.js",
+  "scripts": {
+    "build": "rm -rf dist tsconfig.tsbuildinfo && tsc -p tsconfig.json",
+    "dev": "pnpm run build && electron .",
+    "dist:mac": "pnpm run build && electron-builder --mac dmg zip",
+    "dist:mac:signed": "pnpm run build && electron-builder --mac dmg zip --publish never -c.forceCodeSigning=true",
+    "pack:mac": "pnpm run build && electron-builder --mac dir",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "clean": "rm -rf dist release *.tsbuildinfo"
+  },
+  "build": {
+    "appId": "ai.open-claude-tag.console",
+    "productName": "OpenClaudeTag Console",
+    "asar": true,
+    "icon": "build/icon.icns",
+    "directories": {
+      "output": "release"
+    },
+    "artifactName": "${productName}-${version}-${arch}.${ext}",
+    "files": [
+      "dist/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "../console/dist",
+        "to": "console",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ],
+    "mac": {
+      "category": "public.app-category.developer-tools",
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.inherit.plist",
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "notarize": true,
+      "target": [
+        "dmg",
+        "zip"
+      ]
+    },
+    "dmg": {}
+  },
+  "devDependencies": {
+    "@types/node": "^25.5.0",
+    "electron": "^42.3.3",
+    "electron-builder": "^26.15.0",
+    "typescript": "^5.7.0"
+  }
+}
