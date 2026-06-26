@@ -141,11 +141,17 @@ describe('createTaskCardActionHandler', () => {
     );
 
     expect(response.toast.type).toBe('success');
+    // The retry ack flows through the ThreePhaseFeedback seam
+    // (LarkChannel.deliverNative), which forwards the send-options slot as a
+    // trailing 5th arg — undefined here since no idempotency key is supplied.
+    // This mirrors the worker seam convention asserted in
+    // apps/worker/src/__tests__/channel-sender.test.ts.
     expect(deps.feishuClient.sendMessage).toHaveBeenCalledWith(
       'chat_id',
       'oc_chat_123',
       expect.objectContaining({ msg_type: 'interactive' }),
       'om_123',
+      undefined,
     );
     expect(findInsertedReceipt(deps)).toMatchObject({
       dedupKey: 'task-card-action:task_original:task_retry:unknown-operator',
