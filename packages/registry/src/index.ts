@@ -24,3 +24,13 @@ export {
   type AgentListItem,
   type StorageAgentCommandServiceOptions,
 } from './agent-commands.js';
+export {
+  resolveIdentity,
+  type Identity,
+  type IdentityAgentSource,
+  type IdentityBudget,
+  type IdentityBudgetWindow,
+  type IdentityChannelBinding,
+  type ResolveIdentityOptions,
+  type SoulRef,
+} from './identity.js';
