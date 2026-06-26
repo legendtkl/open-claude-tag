@@ -122,6 +122,18 @@ export const feishuApps = pgTable(
   ],
 );
 
+// A per-agent token/spend budget cap, persisted as the `agents.budget` jsonb.
+// Structurally identical to the registry `IdentityBudget` (kept duplicated here so
+// storage stays a leaf that registry composes over, never the reverse). NULL on
+// the column = no cap = unlimited (the unchanged default). `resolveIdentity` reads
+// this into `Identity.budget`, so the ambient `checkBudget` gate enforces it.
+export type AgentBudgetWindow = 'day' | 'month';
+export interface AgentBudget {
+  tokenCap?: number;
+  spendCap?: number;
+  window: AgentBudgetWindow;
+}
+
 // ── 5. agents ──
 export const agents = pgTable(
   'agents',
@@ -159,6 +171,10 @@ export const agents = pgTable(
     memoryEnabled: boolean('memory_enabled').notNull().default(true),
     projectId: uuid('project_id').references(() => projects.id, { onDelete: 'set null' }),
     accessPolicy: jsonb('access_policy').notNull().default({}),
+    // Per-agent token/spend budget cap (additive, nullable). NULL = unlimited
+    // (the unchanged default). `resolveIdentity` composes this into
+    // `Identity.budget`; the ambient `checkBudget` gate enforces it.
+    budget: jsonb('budget').$type<AgentBudget>(),
     status: varchar('status', { length: 16 }).notNull().default('active'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),

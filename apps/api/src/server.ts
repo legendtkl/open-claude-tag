@@ -2037,11 +2037,12 @@ function buildAmbientJudge(client: LlmClient | null): AmbientJudge | undefined {
  * {@link dispatchAmbientReply} (sender access → agent route), then composes it
  * into an Identity via the registry read model.
  *
- * Budget source: the composed Identity currently carries NO declared budget
- * (`budget` undefined ⇒ the gate treats it as UNLIMITED). Persisting a per-agent
- * / per-identity budget cap and threading it in here is the follow-up that makes
- * enforcement bite; the mechanism (table + checkBudget + this wire) is already
- * live, so once a budget source exists it flows through unchanged.
+ * Budget source: {@link resolveIdentity} composes the responding agent's persisted
+ * `agents.budget` cap into `Identity.budget`. When the agent declares a cap the gate
+ * enforces it against the `identity_usage` window the worker records each completed
+ * turn into; an agent with no cap composes `budget` undefined ⇒ the gate treats the
+ * channel as UNLIMITED (unchanged default). Recording and checking compose the SAME
+ * agent through {@link resolveIdentity}, so the id and window always agree.
  *
  * Returns `undefined` when the responding agent is not accessible to the sender —
  * the budget gate then treats the channel as unlimited (fail-open; never block
@@ -2056,7 +2057,8 @@ async function resolveAmbientIdentity(
   try {
     const senderAccess = await resolveAgentAccessContext(event, feishuAppId);
     const agentRoute = await resolveEventAgentRoute(event, feishuAppId, senderAccess);
-    // No budget source yet (see doc above) — Identity composes with budget undefined.
+    // Composes the agent's persisted `agents.budget` cap into Identity.budget (or
+    // undefined = unlimited). This is the SAME composition the worker records under.
     return resolveIdentity(agentRoute.agent);
   } catch (err) {
     if (err instanceof AgentAccessDeniedError) {

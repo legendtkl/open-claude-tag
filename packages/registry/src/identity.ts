@@ -35,7 +35,11 @@ export interface IdentityChannelBinding {
 
 export type IdentityBudgetWindow = 'day' | 'month';
 
-/** A declared spend/token cap. DECLARATION ONLY — enforcement is a Stage-4 follow-up. */
+/**
+ * A declared spend/token cap. Enforced by the ambient {@link checkBudget} gate over
+ * the `identity_usage` window buckets; the worker records each completed turn's
+ * usage into the SAME `(identityId, window)` bucket via `recordUsage`.
+ */
 export interface IdentityBudget {
   tokenCap?: number;
   spendCap?: number;
@@ -82,7 +86,11 @@ export interface Identity {
    * Stage-4 cut; this is a ref placeholder.
    */
   accessBundleRef?: string;
-  /** Declared spend/token cap. DECLARATION ONLY — enforcement is a Stage-4 follow-up. */
+  /**
+   * Spend/token cap, composed from the persisted `agents.budget`. `undefined` ⇒
+   * unlimited. Enforced by the ambient {@link checkBudget} gate; the worker records
+   * each completed turn's usage into the matching `identity_usage` window bucket.
+   */
   budget?: IdentityBudget;
   /** Mirrors the composed agent's active state (`agent.status === 'active'`). */
   active: boolean;
@@ -101,6 +109,12 @@ export interface IdentityAgentSource {
   scopeType: string;
   scopeId: string;
   status: string;
+  /**
+   * The persisted per-agent budget cap (`agents.budget` jsonb). `null`/absent ⇒ no
+   * cap = unlimited (the default). Structurally an {@link IdentityBudget}; a drizzle
+   * `AgentRecord` (whose `budget` is `AgentBudget | null`) stays assignable here.
+   */
+  budget?: IdentityBudget | null;
 }
 
 export interface ResolveIdentityOptions {
@@ -126,7 +140,10 @@ export interface ResolveIdentityOptions {
   memoryScopeId?: string;
   /** Access bundle ref. Omit for ZERO-ACCESS (the default). */
   accessBundleRef?: string;
-  /** Declared budget cap (enforcement is a follow-up). */
+  /**
+   * Budget-cap override. When omitted, {@link resolveIdentity} composes the
+   * persisted per-agent cap from the agent's `budget` column.
+   */
   budget?: IdentityBudget;
 }
 
@@ -165,7 +182,10 @@ export function resolveIdentity(
     boundChannels,
     memoryScopeId,
     accessBundleRef: options.accessBundleRef,
-    budget: options.budget,
+    // Budget source: an explicit option wins (test/override), else the persisted
+    // per-agent cap (`agents.budget`), else undefined = unlimited (unchanged
+    // default). `null` from the column collapses to undefined.
+    budget: options.budget ?? agent.budget ?? undefined,
     active: agent.status === ACTIVE_STATUS,
   };
 }

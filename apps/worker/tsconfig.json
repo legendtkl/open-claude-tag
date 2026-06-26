@@ -13,6 +13,7 @@
     { "path": "../../packages/observability" },
     { "path": "../../packages/orchestrator" },
     { "path": "../../packages/queue" },
+    { "path": "../../packages/registry" },
     { "path": "../../packages/runtime-adapters" },
     { "path": "../../packages/scheduler" },
     { "path": "../../packages/session" },

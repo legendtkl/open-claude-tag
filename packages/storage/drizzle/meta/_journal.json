@@ -260,6 +260,13 @@
       "when": 1782950400000,
       "tag": "0036_identity_usage",
       "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1783036800000,
+      "tag": "0037_agent_budget",
+      "breakpoints": true
     }
   ]
 }

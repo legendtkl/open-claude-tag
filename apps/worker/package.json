@@ -21,6 +21,7 @@
     "@open-tag/observability": "workspace:^",
     "@open-tag/orchestrator": "workspace:*",
     "@open-tag/queue": "workspace:*",
+    "@open-tag/registry": "workspace:*",
     "@open-tag/runtime-adapters": "workspace:*",
     "@open-tag/scheduler": "workspace:*",
     "@open-tag/session": "workspace:*",

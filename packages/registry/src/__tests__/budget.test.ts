@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
-import { inArray } from 'drizzle-orm';
+import { eq, inArray } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { createDb, identityUsage, type Database } from '@open-tag/storage';
+import { agentProfiles, agents, createDb, identityUsage, type Database } from '@open-tag/storage';
 import { checkBudget, recordUsage, windowKeyFor } from '../budget.js';
 import { resolveIdentity, type Identity, type IdentityAgentSource } from '../identity.js';
 
@@ -48,6 +48,8 @@ const describePg = process.env.OPEN_TAG_STORAGE_PG_INTEGRATION === '1' ? describ
 describePg('budget tracking integration', () => {
   let db: Database;
   const identityIds: string[] = [];
+  const createdAgentIds: string[] = [];
+  const createdProfileIds: string[] = [];
 
   function identityWithBudget(
     id: string,
@@ -66,6 +68,12 @@ describePg('budget tracking integration', () => {
   afterAll(async () => {
     if (identityIds.length) {
       await db.delete(identityUsage).where(inArray(identityUsage.identityId, identityIds));
+    }
+    if (createdAgentIds.length) {
+      await db.delete(agents).where(inArray(agents.id, createdAgentIds));
+    }
+    if (createdProfileIds.length) {
+      await db.delete(agentProfiles).where(inArray(agentProfiles.id, createdProfileIds));
     }
     await db.$client.end({ timeout: 5 });
   });
@@ -150,5 +158,47 @@ describePg('budget tracking integration', () => {
 
     const yesterday = await checkBudget(db, { identity, windowKey: '2026-06-26' });
     expect(yesterday.withinBudget).toBe(false);
+  });
+
+  it('full loop: a persisted agents.budget cap composes into an enforcing Identity', async () => {
+    // Persist a real agent row carrying a `budget` jsonb cap, then prove the whole
+    // loop: load the row → resolveIdentity composes the cap → record usage over the
+    // cap → checkBudget (same composed identity) returns withinBudget=false. This is
+    // exactly the path the ambient gate + worker exercise.
+    const suffix = randomUUID().slice(0, 8);
+    const [profile] = await db
+      .insert(agentProfiles)
+      .values({ name: `budget-loop-${suffix}`, displayName: 'Budget Loop' })
+      .returning({ id: agentProfiles.id });
+    createdProfileIds.push(profile.id);
+
+    const [agentRow] = await db
+      .insert(agents)
+      .values({
+        handle: `budget-loop-${suffix}`,
+        displayName: 'Budget Loop',
+        profileId: profile.id,
+        budget: { tokenCap: 1_000, window: 'day' },
+      })
+      .returning();
+    createdAgentIds.push(agentRow.id);
+    identityIds.push(agentRow.id);
+
+    // Read the row back from the DB and compose it — the budget jsonb round-trips.
+    const [loaded] = await db.select().from(agents).where(eq(agents.id, agentRow.id)).limit(1);
+    const identity = resolveIdentity(loaded);
+    expect(identity.budget).toEqual({ tokenCap: 1_000, window: 'day' });
+
+    const windowKey = windowKeyFor(identity.budget!.window, '2026-06-27T10:00:00.000Z');
+
+    // Under the cap → allowed.
+    await recordUsage(db, { identityId: identity.id, period: 'day', windowKey, tokens: 600 });
+    expect((await checkBudget(db, { identity, windowKey })).withinBudget).toBe(true);
+
+    // Crossing the cap → the gate now blocks (the loop is closed).
+    await recordUsage(db, { identityId: identity.id, period: 'day', windowKey, tokens: 500 });
+    const overCap = await checkBudget(db, { identity, windowKey });
+    expect(overCap.withinBudget).toBe(false);
+    expect(overCap.remaining.tokens).toBe(1_000 - 1_100);
   });
 });

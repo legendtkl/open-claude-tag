@@ -233,6 +233,9 @@ importers:
       '@open-tag/queue':
         specifier: workspace:*
         version: link:../../packages/queue
+      '@open-tag/registry':
+        specifier: workspace:*
+        version: link:../../packages/registry
       '@open-tag/runtime-adapters':
         specifier: workspace:*
         version: link:../../packages/runtime-adapters

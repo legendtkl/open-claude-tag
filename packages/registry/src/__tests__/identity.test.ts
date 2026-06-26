@@ -107,6 +107,26 @@ describe('resolveIdentity', () => {
     expect(identity.budget).toEqual({ tokenCap: 1_000_000, window: 'day' });
   });
 
+  it('composes the budget from the agent row when the column carries a cap', () => {
+    const identity = resolveIdentity(
+      makeAgent({ budget: { tokenCap: 500_000, spendCap: 25, window: 'month' } }),
+    );
+    expect(identity.budget).toEqual({ tokenCap: 500_000, spendCap: 25, window: 'month' });
+  });
+
+  it('leaves budget undefined (unlimited) when the agent row has no cap', () => {
+    // absent column ⇒ undefined; a NULL column likewise collapses to undefined.
+    expect(resolveIdentity(makeAgent()).budget).toBeUndefined();
+    expect(resolveIdentity(makeAgent({ budget: null })).budget).toBeUndefined();
+  });
+
+  it('lets an explicit budget option override the persisted agent cap', () => {
+    const identity = resolveIdentity(makeAgent({ budget: { tokenCap: 100, window: 'day' } }), {
+      budget: { tokenCap: 999, window: 'month' },
+    });
+    expect(identity.budget).toEqual({ tokenCap: 999, window: 'month' });
+  });
+
   it('accepts a persona override (soul-loader directory string)', () => {
     const identity = resolveIdentity(makeAgent(), { persona: '/srv/souls/reviewer' });
     expect(identity.persona).toBe('/srv/souls/reviewer');

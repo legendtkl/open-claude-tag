@@ -40,6 +40,7 @@ import {
   commitChatMemoryUpdate,
 } from '@open-tag/storage';
 import type { Database, DueChatMemoryConfig } from '@open-tag/storage';
+import type { IdentityAgentSource } from '@open-tag/registry';
 import { TaskStatus } from '@open-tag/core-types';
 import type { RuntimeEvent, TaskResult, TaskSpec } from '@open-tag/core-types';
 import { TaskQueue } from '@open-tag/queue';
@@ -68,6 +69,7 @@ import {
   sweepAgentMemoryRuns,
 } from '@open-tag/memory';
 import { recordTurnGistBestEffort } from './shared-context-writeback.js';
+import { recordTaskUsage } from './usage-recording.js';
 import { join as joinPath } from 'path';
 import { randomUUID } from 'node:crypto';
 import { buildContextualExecutionContext, buildContextualGoal } from './context-builders.js';
@@ -1023,6 +1025,30 @@ async function loadAgentExecutionConfig(agentId: string): Promise<AgentExecution
     .limit(1);
 
   return config ? { ...config, runtimeEnv: normalizeRuntimeEnv(config.runtimeEnv) } : null;
+}
+
+/**
+ * Load the agent row as an {@link IdentityAgentSource} (incl. the `budget` cap) so
+ * the worker can compose the SAME identity the ambient budget gate composes when it
+ * records this turn's usage. Returns null when the agent no longer exists.
+ */
+async function loadIdentityAgentSource(agentId: string): Promise<IdentityAgentSource | null> {
+  const [row] = await db
+    .select({
+      id: agents.id,
+      handle: agents.handle,
+      profileId: agents.profileId,
+      defaultRuntime: agents.defaultRuntime,
+      scopeType: agents.scopeType,
+      scopeId: agents.scopeId,
+      status: agents.status,
+      budget: agents.budget,
+    })
+    .from(agents)
+    .where(eq(agents.id, agentId))
+    .limit(1);
+
+  return row ?? null;
 }
 
 // ── Task processor ──
@@ -2642,6 +2668,33 @@ async function processTask(job: { id: string; data: TaskJobData }): Promise<void
       }
       logger.error({ taskId, error: errorMessage }, 'Task failed');
     } else {
+      // Record this turn's token/spend against the running identity's budget
+      // window. Placed before the handoff early-return below so a turn that
+      // consumed tokens then handed off is still charged. Error-isolated: the
+      // runtime already completed, so a usage-record failure must never fail the
+      // task. Idempotent at the task level via the QUEUED guard at the top of
+      // processTask — a duplicate/retry job for the same task is skipped before it
+      // re-runs the runtime, so this never double-counts. `occurredAt` is a single
+      // boundary clock read isolated here (the helper itself reads no wall-clock).
+      if (taskAgentId && taskResult?.metrics) {
+        const usageMetrics = taskResult.metrics;
+        try {
+          const identityAgent = await loadIdentityAgentSource(taskAgentId);
+          if (identityAgent) {
+            await recordTaskUsage(db, {
+              agent: identityAgent,
+              metrics: usageMetrics,
+              occurredAt: new Date().toISOString(),
+            });
+          }
+        } catch (usageErr) {
+          logger.warn(
+            { taskId, agentId: taskAgentId, usageErr },
+            'Failed to record per-identity task usage (non-fatal)',
+          );
+        }
+      }
+
       const outputText = taskResult?.output?.text ?? '';
       const finalReply = extractRuntimeFinalReply(outputText);
       const completionOutputText = finalReply.outputText;

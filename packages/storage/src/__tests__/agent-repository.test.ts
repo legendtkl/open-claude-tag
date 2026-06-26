@@ -32,6 +32,7 @@ function makeAgent(overrides: Partial<AgentRecord> = {}): AgentRecord {
     memoryEnabled: true,
     projectId: null,
     accessPolicy: {},
+    budget: null,
     status: 'active',
     createdAt: now,
     updatedAt: now,
