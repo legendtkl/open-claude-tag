@@ -1,0 +1,14 @@
+node_modules/
+dist/
+*.tsbuildinfo
+.env
+.env.local
+.DS_Store
+coverage/
+*.log
+logs/
+release/
+workspaces/
+.worktrees/
+.worktree/
+.claude/worktrees/
