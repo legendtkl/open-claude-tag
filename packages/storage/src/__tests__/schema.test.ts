@@ -7,6 +7,7 @@ import {
   agentProfiles,
   agentSessionStates,
   agents,
+  channelObservations,
   chatConfigs,
   chatMemoryEntries,
   delegationTrees,
@@ -66,6 +67,28 @@ describe('agent identity schema', () => {
     expect(chatMemoryEntries.chatId.notNull).toBe(true);
     expect(chatMemoryEntries.entryType.notNull).toBe(true);
     expect(chatMemoryEntries.keywords.notNull).toBe(true);
+  });
+
+  it('exports channel-scoped observation memory keyed by scope_id + channel_kind', () => {
+    expect(channelObservations.id).toBeDefined();
+    expect(channelObservations.channelKind.notNull).toBe(true);
+    expect(channelObservations.scopeId.notNull).toBe(true);
+    expect(channelObservations.sourceMessageId.notNull).toBe(true);
+    expect(channelObservations.gist.notNull).toBe(true);
+    expect(channelObservations.occurredAt.notNull).toBe(true);
+    expect(channelObservations.dedupeHash.notNull).toBe(true);
+    expect(channelObservations.decayWeight.notNull).toBe(true);
+    // Dedup is enforced at the DB layer, scoped per (channel_kind, scope_id).
+    expect(summarizeIndexes(channelObservations)).toEqual(
+      expect.arrayContaining([
+        {
+          name: 'idx_channel_observations_dedupe',
+          unique: true,
+          columns: ['channel_kind', 'scope_id', 'dedupe_hash'],
+          where: false,
+        },
+      ]),
+    );
   });
 
   it('exports remote-execution machine tables and binding columns', () => {

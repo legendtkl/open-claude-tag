@@ -1108,3 +1108,41 @@ export const sharedContextEntries = pgTable(
     index('idx_shared_context_status').on(table.status),
   ],
 );
+
+// ── 21. channel_observations ──
+// Channel-scoped observation memory: the always-on "following the channel" write
+// path. Un-addressed channel activity accumulates per channel, keyed by the
+// channel isolation key (`ChannelScope.scopeId`) + `channelKind` — distinct from
+// `shared_context_entries`/`memory_entries`, which store an agent's own task
+// results. Repeated identical content in the same channel is deduped at the DB
+// layer by a UNIQUE (channel_kind, scope_id, dedupe_hash).
+export const channelObservations = pgTable(
+  'channel_observations',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    // The channel vendor (lark / slack / discord) — never narrowed in the core.
+    channelKind: varchar('channel_kind', { length: 32 }).notNull(),
+    // The channel isolation key (ChannelScope.scopeId) — the unit of isolation.
+    scopeId: varchar('scope_id', { length: 256 }).notNull(),
+    // The inbound message this observation was lifted from (InboundMessage.messageId).
+    sourceMessageId: varchar('source_message_id', { length: 256 }).notNull(),
+    // The observation gist (stage-1: the human message text, whitespace-normalized).
+    gist: text('gist').notNull(),
+    // From InboundMessage.occurredAt — never Date.now().
+    occurredAt: timestamp('occurred_at', { withTimezone: true }).notNull(),
+    // sha256(channelKind + scopeId + normalizedText): a stable, channel-scoped key.
+    dedupeHash: varchar('dedupe_hash', { length: 64 }).notNull(),
+    // Recency/decay weight for later ranking; full weight at stage-1.
+    decayWeight: real('decay_weight').notNull().default(1),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('idx_channel_observations_dedupe').on(
+      table.channelKind,
+      table.scopeId,
+      table.dedupeHash,
+    ),
+    index('idx_channel_observations_scope').on(table.channelKind, table.scopeId),
+    index('idx_channel_observations_occurred').on(table.occurredAt),
+  ],
+);
