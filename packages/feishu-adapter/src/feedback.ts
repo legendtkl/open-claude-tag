@@ -1,7 +1,10 @@
 import { escapeAtText } from './text-utils.js';
 import { createLogger } from '@open-tag/observability';
 import { truncateText } from '@open-tag/core-types';
+import type { ConversationRef, DeliveryRef, OutboundMessage } from '@open-tag/channel-core';
 import type { FeishuClient } from './feishu-client.js';
+import { LarkChannel } from './lark-channel.js';
+import type { NormalizerConfig } from './normalizer.js';
 import {
   buildAckCard,
   buildRunningCard,
@@ -11,6 +14,68 @@ import {
   splitTaskCardDetail,
   type InteractiveCard,
 } from './card-builder.js';
+
+/**
+ * The neutral send/update seam {@link ThreePhaseFeedback} delivers its
+ * task-feedback cards through. It is structurally identical to
+ * {@link LarkChannel} (and the worker's `LarkChannelSender`), so a `native`
+ * outbound carries the exact Feishu card/message payload straight through to
+ * `FeishuClient.sendMessage` / `FeishuClient.updateMessage` — byte-identical to
+ * talking to the client directly.
+ */
+export interface FeedbackChannelSender {
+  send(to: ConversationRef, msg: OutboundMessage): Promise<DeliveryRef>;
+  update(ref: DeliveryRef, msg: OutboundMessage): Promise<DeliveryRef>;
+}
+
+// LarkChannel.normalize() is the only consumer of NormalizerConfig; the feedback
+// seam only sends/updates, so it never reads a bot identity.
+const FEEDBACK_NORMALIZER_CONFIG: NormalizerConfig = { botOpenId: '' };
+
+const FEEDBACK_LARK_KIND = 'lark' as const;
+
+/**
+ * Wrap a concrete {@link FeishuClient} as a {@link FeedbackChannelSender}, for
+ * callers that still hold a client (e.g. the API). The resulting send/update
+ * calls delegate to the same client methods with the same arguments.
+ */
+export function createFeishuChannelSender(client: FeishuClient): FeedbackChannelSender {
+  return new LarkChannel(client, FEEDBACK_NORMALIZER_CONFIG);
+}
+
+/**
+ * The conversation a feedback send targets: the task chat, replying to
+ * `replyToMessageId` when present (a non-reply send omits `reply` entirely, so
+ * LarkChannel resolves no reply target — identical to the old `undefined` 4th
+ * arg to `sendMessage`).
+ */
+function feedbackConversationRef(chatId: string, replyToMessageId?: string): ConversationRef {
+  return {
+    kind: FEEDBACK_LARK_KIND,
+    scopeId: chatId,
+    ...(replyToMessageId ? { reply: { parentId: replyToMessageId } } : {}),
+  };
+}
+
+/** A delivery handle over a single existing card, so an update PATCHes that message. */
+function feedbackCardRef(messageId: string): DeliveryRef {
+  return {
+    kind: FEEDBACK_LARK_KIND,
+    logicalMessageId: messageId,
+    revision: 0,
+    physicalIds: [messageId],
+  };
+}
+
+/** Carry a Feishu card/message payload verbatim through the neutral seam. */
+function nativeFeedbackMessage(payload: unknown): OutboundMessage {
+  return { kind: 'native', payload };
+}
+
+/** The physical message id a logical send produced (the tracked feedback id). */
+function deliveredMessageId(ref: DeliveryRef): string | undefined {
+  return ref.physicalIds[0];
+}
 
 interface UpdateDoneOptions {
   completionText?: string;
@@ -115,7 +180,7 @@ export class ThreePhaseFeedback {
   private readonly logger = createLogger('three-phase-feedback');
 
   constructor(
-    private readonly client: FeishuClient,
+    private readonly channelSender: FeedbackChannelSender,
     private readonly chatId: string,
     private readonly replyToMessageId?: string,
     initialAckMessageId?: string,
@@ -127,13 +192,11 @@ export class ThreePhaseFeedback {
 
   async sendAck(description: string): Promise<void> {
     const card = buildAckCard(description);
-    const result = await this.client.sendMessage(
-      'chat_id',
-      this.chatId,
-      card,
-      this.replyToMessageId,
+    const ref = await this.channelSender.send(
+      feedbackConversationRef(this.chatId, this.replyToMessageId),
+      nativeFeedbackMessage(card),
     );
-    this.ackMessageId = result.messageId;
+    this.ackMessageId = deliveredMessageId(ref) ?? null;
   }
 
   async updateRunning(
@@ -145,7 +208,10 @@ export class ThreePhaseFeedback {
     if (!this.ackMessageId) return;
     try {
       const card = buildRunningCard(description, progress, recentActivity, workDir);
-      await this.client.updateMessage(this.ackMessageId, card);
+      await this.channelSender.update(
+        feedbackCardRef(this.ackMessageId),
+        nativeFeedbackMessage(card),
+      );
     } catch (err) {
       this.logger.warn(
         { err, ackMessageId: this.ackMessageId, description },
@@ -165,7 +231,10 @@ export class ThreePhaseFeedback {
     const detailSegments = splitTaskCardDetail(result);
     const cards = buildDoneCardsFromSegments(description, detailSegments);
     try {
-      await this.client.updateMessage(this.ackMessageId, cards[0]);
+      await this.channelSender.update(
+        feedbackCardRef(this.ackMessageId),
+        nativeFeedbackMessage(cards[0]),
+      );
     } catch (err) {
       this.logger.warn(
         { err, ackMessageId: this.ackMessageId, description },
@@ -214,7 +283,10 @@ export class ThreePhaseFeedback {
     const detailSegments = splitTaskCardDetail(error);
     const cards = buildFailedCardsFromSegments(description, detailSegments);
     try {
-      await this.client.updateMessage(this.ackMessageId, cards[0]);
+      await this.channelSender.update(
+        feedbackCardRef(this.ackMessageId),
+        nativeFeedbackMessage(cards[0]),
+      );
     } catch (err) {
       this.logger.warn(
         { err, ackMessageId: this.ackMessageId, description },
@@ -246,11 +318,9 @@ export class ThreePhaseFeedback {
     ].join('\n');
 
     try {
-      await this.client.sendMessage(
-        'chat_id',
-        this.chatId,
-        { msg_type: 'text' as const, content: { text } },
-        this.getFollowUpReplyTarget(),
+      await this.channelSender.send(
+        feedbackConversationRef(this.chatId, this.getFollowUpReplyTarget()),
+        nativeFeedbackMessage({ msg_type: 'text' as const, content: { text } }),
       );
     } catch (err) {
       this.logger.error({ err, description }, 'Failed to send quota exceeded notification');
@@ -274,15 +344,11 @@ export class ThreePhaseFeedback {
     const richCard = notification.richText
       ? buildRichCompletionReplyCard(notification.richText)
       : undefined;
+    const to = feedbackConversationRef(this.chatId, this.getFollowUpReplyTarget());
     if (richCard) {
       try {
-        const result = await this.client.sendMessage(
-          'chat_id',
-          this.chatId,
-          richCard,
-          this.getFollowUpReplyTarget(),
-        );
-        return result.messageId;
+        const ref = await this.channelSender.send(to, nativeFeedbackMessage(richCard));
+        return deliveredMessageId(ref);
       } catch (err) {
         this.logger.warn(
           { err, ackMessageId: this.ackMessageId, description },
@@ -291,16 +357,14 @@ export class ThreePhaseFeedback {
       }
     }
 
-    const result = await this.client.sendMessage(
-      'chat_id',
-      this.chatId,
-      {
+    const ref = await this.channelSender.send(
+      to,
+      nativeFeedbackMessage({
         msg_type: 'text',
         content: { text: notification.text },
-      },
-      this.getFollowUpReplyTarget(),
+      }),
     );
-    return result.messageId;
+    return deliveredMessageId(ref);
   }
 
   private async sendOverflowCards(
@@ -312,14 +376,13 @@ export class ThreePhaseFeedback {
     const sentMessageIds: string[] = [];
     for (const [index, card] of overflowCards.entries()) {
       try {
-        const result = await this.client.sendMessage(
-          'chat_id',
-          this.chatId,
-          card,
-          this.getFollowUpReplyTarget(),
+        const ref = await this.channelSender.send(
+          feedbackConversationRef(this.chatId, this.getFollowUpReplyTarget()),
+          nativeFeedbackMessage(card),
         );
-        if (result.messageId) {
-          sentMessageIds.push(result.messageId);
+        const messageId = deliveredMessageId(ref);
+        if (messageId) {
+          sentMessageIds.push(messageId);
         }
       } catch (err) {
         this.logger.warn(
@@ -360,17 +423,16 @@ export class ThreePhaseFeedback {
         if (segment?.trim()) {
           lines.push('', segment);
         }
-        const result = await this.client.sendMessage(
-          'chat_id',
-          this.chatId,
-          {
+        const ref = await this.channelSender.send(
+          feedbackConversationRef(this.chatId, this.getFollowUpReplyTarget()),
+          nativeFeedbackMessage({
             msg_type: 'text',
             content: { text: lines.join('\n') },
-          },
-          this.getFollowUpReplyTarget(),
+          }),
         );
-        if (result.messageId) {
-          sentMessageIds.push(result.messageId);
+        const messageId = deliveredMessageId(ref);
+        if (messageId) {
+          sentMessageIds.push(messageId);
         }
       }
     } catch (fallbackErr) {

@@ -12,7 +12,7 @@ vi.mock('@open-tag/observability', () => ({
   createLogger: vi.fn(() => loggerMock),
 }));
 
-import { ThreePhaseFeedback } from '../feedback.js';
+import { ThreePhaseFeedback, createFeishuChannelSender } from '../feedback.js';
 import type { FeishuClient } from '../feishu-client.js';
 import { splitTaskCardDetail } from '../card-builder.js';
 
@@ -89,7 +89,7 @@ describe('ThreePhaseFeedback', () => {
 
   beforeEach(() => {
     client = makeClient();
-    feedback = new ThreePhaseFeedback(client, 'chat_123');
+    feedback = new ThreePhaseFeedback(createFeishuChannelSender(client), 'chat_123');
   });
 
   it('sendAck sends interactive card and stores ackMessageId', async () => {
@@ -103,7 +103,7 @@ describe('ThreePhaseFeedback', () => {
   });
 
   it('updateDone patches the existing card and sends a completion notification', async () => {
-    const feedbackWithReply = new ThreePhaseFeedback(client, 'chat_123', 'msg_user_001');
+    const feedbackWithReply = new ThreePhaseFeedback(createFeishuChannelSender(client), 'chat_123', 'msg_user_001');
     await feedbackWithReply.sendAck('写一个快排');
     vi.mocked(client.sendMessage).mockClear();
 
@@ -145,7 +145,7 @@ describe('ThreePhaseFeedback', () => {
   });
 
   it('updateDone uses custom completion notification text with rendered mentions', async () => {
-    const feedbackWithReply = new ThreePhaseFeedback(client, 'chat_123', 'msg_user_001');
+    const feedbackWithReply = new ThreePhaseFeedback(createFeishuChannelSender(client), 'chat_123', 'msg_user_001');
     await feedbackWithReply.sendAck('创建文件');
     vi.mocked(client.sendMessage).mockClear();
 
@@ -304,7 +304,7 @@ describe('ThreePhaseFeedback', () => {
   });
 
   it('updateDone sends overflow continuation cards when result exceeds the card limit', async () => {
-    const feedbackWithReply = new ThreePhaseFeedback(client, 'chat_123', 'msg_user_001');
+    const feedbackWithReply = new ThreePhaseFeedback(createFeishuChannelSender(client), 'chat_123', 'msg_user_001');
     const longResult = 'x'.repeat(4500);
     await feedbackWithReply.sendAck('写一个快排');
     vi.mocked(client.sendMessage).mockClear();
@@ -398,7 +398,7 @@ describe('ThreePhaseFeedback', () => {
   });
 
   it('updateFailed patches the existing card without sending an extra notification', async () => {
-    const feedbackWithReply = new ThreePhaseFeedback(client, 'chat_123', 'msg_user_001');
+    const feedbackWithReply = new ThreePhaseFeedback(createFeishuChannelSender(client), 'chat_123', 'msg_user_001');
     await feedbackWithReply.sendAck('写一个快排');
     vi.mocked(client.sendMessage).mockClear();
     await feedbackWithReply.updateFailed('写一个快排', 'compilation error');
@@ -410,7 +410,7 @@ describe('ThreePhaseFeedback', () => {
   });
 
   it('updateFailed sends overflow continuation cards when error exceeds the card limit', async () => {
-    const feedbackWithReply = new ThreePhaseFeedback(client, 'chat_123', 'msg_user_001');
+    const feedbackWithReply = new ThreePhaseFeedback(createFeishuChannelSender(client), 'chat_123', 'msg_user_001');
     const longError = 'e'.repeat(4500);
     await feedbackWithReply.sendAck('写一个快排');
     vi.mocked(client.sendMessage).mockClear();
@@ -434,7 +434,7 @@ describe('ThreePhaseFeedback', () => {
   });
 
   it('updateDone is no-op when ackMessageId is not set', async () => {
-    const feedbackNoChatId = new ThreePhaseFeedback(client, '');
+    const feedbackNoChatId = new ThreePhaseFeedback(createFeishuChannelSender(client), '');
     await feedbackNoChatId.updateDone('desc', 'result');
     expect(client.sendMessage).not.toHaveBeenCalled();
     expect(client.updateMessage).not.toHaveBeenCalled();
@@ -447,7 +447,7 @@ describe('ThreePhaseFeedback', () => {
 
   it('initialAckMessageId allows updateRunning without calling sendAck first', async () => {
     const feedbackWithAck = new ThreePhaseFeedback(
-      client,
+      createFeishuChannelSender(client),
       'chat_123',
       undefined,
       'existing_ack_msg',
@@ -461,7 +461,7 @@ describe('ThreePhaseFeedback', () => {
 
   it('initialAckMessageId allows updateDone without calling sendAck first', async () => {
     const feedbackWithAck = new ThreePhaseFeedback(
-      client,
+      createFeishuChannelSender(client),
       'chat_123',
       undefined,
       'existing_ack_msg',
@@ -499,7 +499,7 @@ describe('ThreePhaseFeedback', () => {
   });
 
   it('updateDone falls back to text when overflow card delivery fails', async () => {
-    const feedbackWithReply = new ThreePhaseFeedback(client, 'chat_123', 'msg_user_001');
+    const feedbackWithReply = new ThreePhaseFeedback(createFeishuChannelSender(client), 'chat_123', 'msg_user_001');
     const longResult = 'x'.repeat(4500);
     await feedbackWithReply.sendAck('写一个快排');
     vi.mocked(client.sendMessage).mockClear();
@@ -532,7 +532,7 @@ describe('ThreePhaseFeedback', () => {
   });
 
   it('updateDone text fallback preserves structured table continuation boundaries', async () => {
-    const feedbackWithReply = new ThreePhaseFeedback(client, 'chat_123', 'msg_user_001');
+    const feedbackWithReply = new ThreePhaseFeedback(createFeishuChannelSender(client), 'chat_123', 'msg_user_001');
     const tableResult = buildOverflowTableDetail(12);
     const overflowSegments = splitTaskCardDetail(tableResult).slice(1);
     await feedbackWithReply.sendAck('写一个快排');
@@ -569,7 +569,7 @@ describe('ThreePhaseFeedback', () => {
   });
 
   it('updateDone keeps mixed prose aligned with overflow fallback table segments', async () => {
-    const feedbackWithReply = new ThreePhaseFeedback(client, 'chat_123', 'msg_user_001');
+    const feedbackWithReply = new ThreePhaseFeedback(createFeishuChannelSender(client), 'chat_123', 'msg_user_001');
     const mixedResult = buildMixedOverflowDetail(12);
     const overflowSegments = splitTaskCardDetail(mixedResult).slice(1);
     await feedbackWithReply.sendAck('写一个快排');
@@ -608,7 +608,7 @@ describe('ThreePhaseFeedback', () => {
   });
 
   it('updateFailed falls back to text when overflow card delivery fails', async () => {
-    const feedbackWithReply = new ThreePhaseFeedback(client, 'chat_123', 'msg_user_001');
+    const feedbackWithReply = new ThreePhaseFeedback(createFeishuChannelSender(client), 'chat_123', 'msg_user_001');
     const longError = 'e'.repeat(4500);
     await feedbackWithReply.sendAck('写一个快排');
     vi.mocked(client.sendMessage).mockClear();
@@ -635,7 +635,7 @@ describe('ThreePhaseFeedback', () => {
   });
 
   it('updateFailed text fallback preserves structured table continuation boundaries', async () => {
-    const feedbackWithReply = new ThreePhaseFeedback(client, 'chat_123', 'msg_user_001');
+    const feedbackWithReply = new ThreePhaseFeedback(createFeishuChannelSender(client), 'chat_123', 'msg_user_001');
     const tableError = buildOverflowTableDetail(12);
     const overflowSegments = splitTaskCardDetail(tableError).slice(1);
     await feedbackWithReply.sendAck('写一个快排');

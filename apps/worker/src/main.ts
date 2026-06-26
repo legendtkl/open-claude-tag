@@ -1253,8 +1253,8 @@ async function processTask(job: { id: string; data: TaskJobData }): Promise<void
     // replyToMessageId: thread-aware (only set in topic threads) so completion cards
     // follow the same reply convention as other messages.
     // ackMessageId: pre-existing ACK card from the API server for updateRunning to PATCH.
-    if (chatId && taskFeishuClient) {
-      feedback = new ThreePhaseFeedback(taskFeishuClient, chatId, replyToMessageId, ackMessageId);
+    if (chatId && taskChannelSender) {
+      feedback = new ThreePhaseFeedback(taskChannelSender, chatId, replyToMessageId, ackMessageId);
     } else if (chatId && feedbackClientResolution.missingAppClient) {
       logger.error(
         { taskId, feishuAppId: taskFeishuAppId },

@@ -58,6 +58,7 @@ import {
   checkAndRecordEvent,
   markEventProcessed,
   ThreePhaseFeedback,
+  createFeishuChannelSender,
   DrizzleFeishuTaskTrackingRepository,
   FeishuTaskSyncService,
   createFeishuTaskTrackingConfigFromEnv,
@@ -466,7 +467,11 @@ async function handleNormalMessage(
   if (result.type === 'task_created' && result.taskId) {
     const createdTaskId = result.taskId;
     const goalText = result.goal ?? event.content.text ?? '';
-    const feedback = new ThreePhaseFeedback(appContext.client, event.chatId, replyToMessageId);
+    const feedback = new ThreePhaseFeedback(
+      createFeishuChannelSender(appContext.client),
+      event.chatId,
+      replyToMessageId,
+    );
     let ackMessageId: string | null = null;
     // One error boundary for everything between task creation and enqueue:
     // the task row already exists, so an escaping error would strand it in
@@ -3563,7 +3568,7 @@ app.post('/debug/task-feedback', async (request) => {
   }
 
   const feedback = new ThreePhaseFeedback(
-    feishuClient,
+    createFeishuChannelSender(feishuClient),
     chatId,
     replyToMessageId,
     taskRow.feedbackMessageId,

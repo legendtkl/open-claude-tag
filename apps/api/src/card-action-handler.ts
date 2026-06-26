@@ -12,6 +12,7 @@ import {
   WORKDIR_FORM_SUBMIT,
   WORKDIR_FORM_CANCEL,
   ThreePhaseFeedback,
+  createFeishuChannelSender,
   type TaskCardActionValue,
   type WorkDirFormActionValue,
 } from '@open-tag/feishu-adapter';
@@ -484,7 +485,7 @@ export function createTaskCardActionHandler(deps: TaskCardActionHandlerDeps) {
     }
 
     const feedback = new ThreePhaseFeedback(
-      feedbackClient,
+      createFeishuChannelSender(feedbackClient),
       sessionRow.chatId,
       event.open_message_id,
     );
@@ -727,7 +728,11 @@ async function handleWorkDirFormAction(
   if (!feedbackClient) {
     return buildToast('error', 'The task Feishu app client is unavailable.');
   }
-  const feedback = new ThreePhaseFeedback(feedbackClient, chatId, replyToMessageId);
+  const feedback = new ThreePhaseFeedback(
+    createFeishuChannelSender(feedbackClient),
+    chatId,
+    replyToMessageId,
+  );
   await feedback.sendAck(formGoal);
   const ackMessageId = feedback.getAckMessageId();
   const confirmedConstraints = {

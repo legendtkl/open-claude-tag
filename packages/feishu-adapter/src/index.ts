@@ -57,7 +57,8 @@ export type {
   FeishuChatMember,
   FeishuTasklistMember,
 } from './feishu-client.js';
-export { ThreePhaseFeedback } from './feedback.js';
+export { ThreePhaseFeedback, createFeishuChannelSender } from './feedback.js';
+export type { FeedbackChannelSender } from './feedback.js';
 export { markdownToPost } from './markdown-to-post.js';
 export type { PostContent } from './markdown-to-post.js';
 export { LarkCli } from './lark-cli.js';
