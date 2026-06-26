@@ -1,0 +1,71 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: open-claude-tag
+      POSTGRES_PASSWORD: open-claude-tag
+      POSTGRES_DB: open-claude-tag
+    ports:
+      - '5432:5432'
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U open-claude-tag']
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  api:
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile
+      target: api
+    env_file:
+      - ../.env
+    ports:
+      - '3000:3000'
+    environment:
+      PORT: '3000'
+      DATABASE_URL: postgresql://open-claude-tag:open-claude-tag@postgres:5432/open-claude-tag
+      LOG_LEVEL: info
+    volumes:
+      - ${HOME}/.claude:/root/.claude
+      - ${HOME}/.codex:/root/.codex
+      - runtime-state:/tmp/open-claude-tag
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ['CMD', 'wget', '--spider', '-q', 'http://127.0.0.1:3000/health']
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  worker:
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile
+      target: worker
+    env_file:
+      - ../.env
+    ports:
+      # Daemon gateway (pairing REST + daemon WebSocket). Front with a TLS
+      # reverse proxy in production; see doc/deployment/server-mode.md.
+      - '3001:3001'
+    environment:
+      DATABASE_URL: postgresql://open-claude-tag:open-claude-tag@postgres:5432/open-claude-tag
+      LOG_LEVEL: info
+      OPEN_TAG_DEFAULT_RUNTIME: codex
+      DAEMON_GATEWAY_PORT: '3001'
+      DAEMON_GATEWAY_PUBLIC: 'true'
+    volumes:
+      - ${HOME}/.claude:/root/.claude
+      - ${HOME}/.codex:/root/.codex
+      - runtime-state:/tmp/open-claude-tag
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  pgdata:
+  runtime-state:
