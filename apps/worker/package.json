@@ -1,0 +1,40 @@
+{
+  "name": "@open-tag/worker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx --env-file=../../.env src/main.ts",
+    "start": "node dist/main.js",
+    "typecheck": "tsc --noEmit",
+    "clean": "rm -rf dist *.tsbuildinfo",
+    "test": "vitest run --passWithNoTests",
+    "test:unit": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@open-tag/core-types": "workspace:*",
+    "@open-tag/daemon-protocol": "workspace:*",
+    "@open-tag/feishu-adapter": "workspace:*",
+    "@open-tag/llm-client": "workspace:*",
+    "@open-tag/memory": "workspace:*",
+    "@open-tag/observability": "workspace:^",
+    "@open-tag/orchestrator": "workspace:*",
+    "@open-tag/queue": "workspace:*",
+    "@open-tag/runtime-adapters": "workspace:*",
+    "@open-tag/scheduler": "workspace:*",
+    "@open-tag/session": "workspace:*",
+    "@open-tag/storage": "workspace:*",
+    "drizzle-orm": "^0.38.0",
+    "pino": "^9.6.0",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@open-tag/daemon": "workspace:*",
+    "@types/node": "^25.5.0",
+    "@types/ws": "^8.5.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0",
+    "vitest": "^3.0.0"
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "dist",
+    "rootDir": "src"
+  },
+  "include": ["src"],
+  "references": [
+    { "path": "../../packages/core-types" },
+    { "path": "../../packages/daemon-protocol" },
+    { "path": "../../packages/feishu-adapter" },
+    { "path": "../../packages/llm-client" },
+    { "path": "../../packages/observability" },
+    { "path": "../../packages/orchestrator" },
+    { "path": "../../packages/queue" },
+    { "path": "../../packages/runtime-adapters" },
+    { "path": "../../packages/scheduler" },
+    { "path": "../../packages/session" },
+    { "path": "../../packages/storage" }
+  ]
+}
