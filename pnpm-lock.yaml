@@ -271,6 +271,15 @@ importers:
         specifier: ^3.0.0
         version: 3.2.4(@types/debug@4.1.13)(@types/node@25.5.0)(jiti@2.7.0)(jsdom@25.0.1)(tsx@4.21.0)
 
+  packages/ambient:
+    devDependencies:
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
+      vitest:
+        specifier: ^3.0.0
+        version: 3.2.4(@types/debug@4.1.13)(@types/node@25.5.0)(jiti@2.7.0)(jsdom@25.0.1)(tsx@4.21.0)
+
   packages/approval:
     dependencies:
       '@open-tag/core-types':
