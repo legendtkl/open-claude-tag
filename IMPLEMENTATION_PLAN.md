@@ -43,19 +43,19 @@ Incremental, each stage compiles + passes tests + ships. See [`DESIGN.md`](./DES
 **Goal**: A channel installs plugins (e.g. jira/datadog-style) with runtime-injected credentials; memory + access isolated per identity; all work budgeted.
 **Success Criteria**: first-class `Identity` (persona ⊕ channels ⊕ access ⊕ memory ⊕ budget), zero-access by default; `access-bundles` (Identity↔Channel binding + marketplace resolver + runtime-env secret injection); per-identity token/spend caps enforced in the queue/worker admission path.
 **Tests**: a channel installs a plugin with vault-injected creds; `#a` memory invisible to `#b`; a run exceeding budget is admitted/blocked correctly.
-**Status**: Not Started
+**Status**: In Progress — first-class `Identity` type + `resolveIdentity` landed (additive composition over the agents entity; zero-access default; `memoryScopeId` linked to channel memory). Pending: `access-bundles` (plugins + runtime-injected creds), per-identity budget enforcement, DB-backed channel binding.
 
 ## Stage 5: Ambient + conversation-scoped sandbox
 **Goal**: Opt-in channels get gated, budgeted, audited proactive updates; sandboxes persist across a conversation's turns.
 **Success Criteria**: `ambient` package — per-channel toggle; per-message post gate; brokered cross-channel flag (audited, `isPrivate`-excluded); stale-thread scanner. Conversation-scoped workspace keyed to `(channelScope, threadId)`, persists across turns, idle teardown via the reconciler.
 **Tests**: ambient channel posts a gated/budgeted/audited update; a flag surfaces cross-channel through the broker; turn-2 lands in turn-1's workspace.
-**Status**: Not Started
+**Status**: In Progress — opt-in proactive-post gate landed (`ambient` package; default-OFF two-layer; fail-closed; injected judge/budget). Pending: posting wire + pre-addressing tap, brokered cross-channel flag, stale-thread scanner, budget enforcement, conversation-scoped sandbox.
 
 ## Stage 6 (optional): channel-slack
 **Goal**: Prove the Channel abstraction with a second provider.
 **Success Criteria**: `SlackChannel` (`maxUpdateRateHz: 1`, Block Kit, `interaction` for `block_actions`) satisfies the unchanged interface; the same orchestrator/runtime/memory serve Slack with only a new adapter package.
 **Tests**: a Slack `@mention` runs the same end-to-end flow as Lark.
-**Status**: Not Started
+**Status**: In Progress — `SlackChannel implements Channel` landed (`channel-slack` package; fetch-based, Block Kit, type-level interface proof; Slack-accurate capabilities). Pending: inbound Socket Mode/Events wiring + signature verify, OAuth per-workspace tokens, full Block Kit forms/files, outbound segmentation/coalescing.
 
 ---
 
