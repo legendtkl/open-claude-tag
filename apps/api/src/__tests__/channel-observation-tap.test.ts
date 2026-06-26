@@ -124,26 +124,78 @@ describe('tapChannelObservation', () => {
 
 // Source-level guard for the chokepoint wiring: the unit tests above prove the
 // helper's behavior, but not that server.ts actually calls it at the right
-// place. Pin that the tap is invoked exactly once, after the dedup check and
-// before enrichment/routing — so it fires for un-addressed messages too and
-// can't silently regress (removed, moved below @mention routing, or duplicated).
+// places. There are TWO taps now:
+//   1. the addressed tap — `tapChannelObservation(db, event)` — after the dedup
+//      check, before enrichment/routing (the existing task path, unchanged);
+//   2. the un-addressed observation tap — `tapChannelObservation(db,
+//      observationEvent)` — inside the `if (!event)` skip branch, BEFORE any
+//      task work, so un-@-mentioned channel messages are observed but never
+//      routed/ACKed/dispatched.
+// Pinning both placements catches silent regressions (removed, moved below
+// @mention routing, duplicated, or leaked into the task pipeline).
 describe('channel observation tap wiring in server.ts', () => {
   const serverSrc = readFileSync(
     fileURLToPath(new URL('../server.ts', import.meta.url)),
     'utf8',
   );
 
-  it('calls tapChannelObservation exactly once on the inbound chokepoint', () => {
+  it('calls the addressed tap exactly once on the inbound chokepoint', () => {
     const callMatches = serverSrc.match(/tapChannelObservation\(db, event\)/g) ?? [];
     expect(callMatches).toHaveLength(1);
   });
 
-  it('taps after the duplicate-event check and before enrichment/routing', () => {
+  it('addressed tap fires after the duplicate-event check and before enrichment/routing', () => {
     const dedupIdx = serverSrc.indexOf('Duplicate event, skipping');
     const tapIdx = serverSrc.indexOf('tapChannelObservation(db, event)');
     const enrichIdx = serverSrc.indexOf('enrichEventWithCurrentMessageThread(event');
     expect(dedupIdx).toBeGreaterThan(-1);
     expect(tapIdx).toBeGreaterThan(dedupIdx);
     expect(enrichIdx).toBeGreaterThan(tapIdx);
+  });
+
+  it('calls the un-addressed observation tap exactly once', () => {
+    const callMatches = serverSrc.match(/tapChannelObservation\(db, observationEvent\)/g) ?? [];
+    expect(callMatches).toHaveLength(1);
+  });
+
+  it('observes un-addressed messages in the skip branch, strictly before any task work', () => {
+    const skipBranchIdx = serverSrc.indexOf('let event = normalizeEvent(adapted as any, config);');
+    const obsBuildIdx = serverSrc.indexOf(
+      'const observationEvent = normalizeEventForObservation(adapted as any, config);',
+    );
+    const unaddressedTapIdx = serverSrc.indexOf('tapChannelObservation(db, observationEvent)');
+    const skipReturnIdx = serverSrc.indexOf("'Event normalized to null, skipping'");
+    const dedupCallIdx = serverSrc.indexOf('checkAndRecordEvent(db, event.eventId');
+    const sessionIdx = serverSrc.indexOf('resolveSession(db, event)');
+
+    // The un-addressed tap is built and fired between the normalizeEvent null
+    // check and the skip branch's return — i.e. it is inside the dead-end
+    // branch, not the task path.
+    expect(skipBranchIdx).toBeGreaterThan(-1);
+    expect(obsBuildIdx).toBeGreaterThan(skipBranchIdx);
+    expect(unaddressedTapIdx).toBeGreaterThan(obsBuildIdx);
+    expect(skipReturnIdx).toBeGreaterThan(unaddressedTapIdx);
+
+    // And strictly before the dedup record + session resolution + any task
+    // dispatch: an un-addressed message can never reach task creation, ACK, or
+    // dispatch because this branch returns first.
+    expect(dedupCallIdx).toBeGreaterThan(unaddressedTapIdx);
+    expect(sessionIdx).toBeGreaterThan(unaddressedTapIdx);
+  });
+
+  it('un-addressed observation branch returns without creating a task, ACK, or dispatch', () => {
+    // Isolate the `if (!event) { ... }` skip branch body and assert it contains
+    // the observation tap but none of the task-pipeline side effects.
+    const branchStart = serverSrc.indexOf('let event = normalizeEvent(adapted as any, config);');
+    const branchReturn = serverSrc.indexOf('return true;', branchStart);
+    const branchBody = serverSrc.slice(branchStart, branchReturn);
+
+    expect(branchBody).toContain('tapChannelObservation(db, observationEvent)');
+    // No task creation / dedup record / session / ACK send inside the skip branch
+    // (call-paren forms so prose comments can never satisfy the assertion).
+    expect(branchBody).not.toContain('checkAndRecordEvent(');
+    expect(branchBody).not.toContain('resolveSession(');
+    expect(branchBody).not.toContain('.sendMessage(');
+    expect(branchBody).not.toContain('dispatch');
   });
 });

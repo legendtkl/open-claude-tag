@@ -55,6 +55,7 @@ import {
   FeishuClient,
   normalizeDocumentCommentEvent,
   normalizeEvent,
+  normalizeEventForObservation,
   checkAndRecordEvent,
   markEventProcessed,
   ThreePhaseFeedback,
@@ -2008,6 +2009,21 @@ async function processEventInner(
 
   let event = normalizeEvent(adapted as any, config);
   if (!event) {
+    // normalizeEvent drops un-addressed group messages (no @bot mention, @all,
+    // or a slash command not addressed to this bot) so they never create a task.
+    // They still carry channel context, so fold them into the always-on
+    // "following the channel" observation memory here — WITHOUT routing,
+    // acknowledging, or running a task, and without touching the task dedup
+    // table. normalizeEventForObservation re-parses the same payload ignoring
+    // only the group-addressing gate; it returns null for anything that is not a
+    // parseable human message, so non-message events stay skipped.
+    // ingestObservation applies its own bot/command/empty/sensitive/dedup
+    // filters. This branch returns immediately, so an un-addressed message can
+    // never reach the task pipeline below.
+    const observationEvent = normalizeEventForObservation(adapted as any, config);
+    if (observationEvent) {
+      tapChannelObservation(db, observationEvent);
+    }
     logger.info(
       { rawKeys: isObjectRecord(raw) ? Object.keys(raw) : [] },
       'Event normalized to null, skipping',

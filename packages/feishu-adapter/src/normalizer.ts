@@ -609,10 +609,18 @@ export function normalizeDocumentCommentEvent(
   };
 }
 
-export function normalizeEvent(
+/**
+ * Parse a raw Feishu message event into a {@link NormalizedEvent} plus an
+ * `addressed` flag indicating whether it passes the group-addressing (task)
+ * gate. Returns `null` only when the payload is not a parseable human message
+ * (no header/message/sender). The event object is always fully built, even for
+ * un-addressed group messages, so the observation path can follow the channel
+ * without re-implementing the parser.
+ */
+function normalizeEventCore(
   raw: FeishuMessageEvent,
   config: NormalizerConfig,
-): NormalizedEvent | null {
+): { event: NormalizedEvent; addressed: boolean } | null {
   const header = raw.header;
   const event = raw.event;
   if (!header || !event?.message || !event?.sender) return null;
@@ -687,6 +695,14 @@ export function normalizeEvent(
     commandIndex = parsed.commandIndex;
   }
 
+  // Group-addressing (task) gate. For group chats, only messages that explicitly
+  // mention the bot are routed to the task pipeline; the rest are flagged
+  // `addressed: false` instead of being dropped, so the observation path can
+  // still follow them. `normalizeEvent` collapses `addressed: false` to null, so
+  // the task pipeline's "addressed only" behavior is byte-for-byte unchanged.
+  // p2p messages are always addressed. Thread/topic metadata is preserved for
+  // reply/session routing after the gate passes.
+  let addressed = true;
   const commandAddressMention = parsed
     ? findCommandAddressMention(textContent, rawMentions)
     : undefined;
@@ -695,26 +711,24 @@ export function normalizeEvent(
     parsed &&
     (!commandAddressMention || !isBotMention(commandAddressMention, config))
   ) {
-    return null;
+    addressed = false;
   }
 
-  // For group chats, every inbound message must explicitly mention the bot.
-  // Thread/topic metadata is still preserved for reply/session routing after the gate passes.
   if (chatType === 'group') {
     const hasBotMention = mentions.some((m) => m.isBot);
-    // Check for @all - ignore
+    // @all broadcasts never engage the bot (not addressed to it).
     const hasAtAll = textContent.includes('@_all');
-    if (hasAtAll) return null;
+    if (hasAtAll) addressed = false;
     if (parsed) {
       if (!commandAddressMention || !isBotMention(commandAddressMention, config)) {
-        return null;
+        addressed = false;
       }
     } else if (!hasBotMention) {
-      return null;
+      addressed = false;
     }
   }
 
-  return {
+  const normalized: NormalizedEvent = {
     eventId: header.event_id,
     messageId: msg.message_id ?? header.event_id,
     chatId: msg.chat_id ?? '',
@@ -741,4 +755,39 @@ export function normalizeEvent(
     replyLanguage: replyLanguage as ReplyLanguage | undefined,
     timestamp: parseInt(header.create_time, 10) || Date.now(),
   };
+
+  return { event: normalized, addressed };
+}
+
+/**
+ * Normalize a raw Feishu message event for the task pipeline. Returns `null` for
+ * un-addressed group messages (no @bot mention, @all, or a slash command not
+ * addressed to this bot) so they never create a task — the established behavior.
+ */
+export function normalizeEvent(
+  raw: FeishuMessageEvent,
+  config: NormalizerConfig,
+): NormalizedEvent | null {
+  const result = normalizeEventCore(raw, config);
+  return result?.addressed ? result.event : null;
+}
+
+/**
+ * Observation variant: returns the normalized event for any parseable inbound
+ * human message — addressed *and* un-addressed group messages alike — so the
+ * always-on "following the channel" tap can fold un-@-mentioned channel activity
+ * into per-channel memory. Returns `null` only when the raw payload is not a
+ * parseable human message (the same precondition {@link normalizeEvent} uses).
+ *
+ * This deliberately does NOT apply the group-addressing task gate: routing to a
+ * task stays gated on @mention via {@link normalizeEvent}. Content-level
+ * filtering (bot sender / command / empty / sensitive / dedup) is the
+ * observation ingester's responsibility (`ingestObservation`), so it is
+ * intentionally not duplicated here.
+ */
+export function normalizeEventForObservation(
+  raw: FeishuMessageEvent,
+  config: NormalizerConfig,
+): NormalizedEvent | null {
+  return normalizeEventCore(raw, config)?.event ?? null;
 }

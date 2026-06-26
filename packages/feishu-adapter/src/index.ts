@@ -8,7 +8,11 @@ export type {
   ConversationRef,
   ChannelScope,
 } from '@open-tag/channel-core';
-export { normalizeDocumentCommentEvent, normalizeEvent } from './normalizer.js';
+export {
+  normalizeDocumentCommentEvent,
+  normalizeEvent,
+  normalizeEventForObservation,
+} from './normalizer.js';
 export type {
   NormalizedDocumentCommentEvent,
   NormalizedDocumentCommentMention,

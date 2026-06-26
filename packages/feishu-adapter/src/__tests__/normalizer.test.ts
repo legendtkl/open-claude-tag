@@ -1,5 +1,9 @@
 import { describe, it, expect } from 'vitest';
-import { normalizeDocumentCommentEvent, normalizeEvent } from '../normalizer.js';
+import {
+  normalizeDocumentCommentEvent,
+  normalizeEvent,
+  normalizeEventForObservation,
+} from '../normalizer.js';
 
 const BOT_OPEN_ID = 'ou_bot_001';
 const BOT_APP_ID = 'cli_bot_001';
@@ -931,6 +935,90 @@ describe('normalizeEvent', () => {
   it('returns null for missing header', () => {
     const result = normalizeEvent({ event: { message: {} } } as never, config);
     expect(result).toBeNull();
+  });
+});
+
+describe('normalizeEventForObservation', () => {
+  // The observation variant must surface un-addressed group activity that
+  // normalizeEvent (the task gate) drops, while never producing an event for a
+  // payload that isn't a parseable human message.
+  function makeUnaddressedGroupText(text: string) {
+    const raw = makeEvent();
+    raw.event.message = {
+      message_id: 'msg_obs_unaddressed',
+      chat_id: 'oc_chat_001',
+      chat_type: 'group',
+      message_type: 'text',
+      content: JSON.stringify({ text }),
+      mentions: [],
+    } as never;
+    return raw;
+  }
+
+  it('returns the event for an un-addressed group text message (normalizeEvent drops it)', () => {
+    const raw = makeUnaddressedGroupText('the staging deploy uses region us-west-2');
+
+    // normalizeEvent (task gate) still drops it — no task path.
+    expect(normalizeEvent(raw, config)).toBeNull();
+
+    // The observation variant surfaces it so the channel tap can follow it.
+    const observed = normalizeEventForObservation(raw, config);
+    expect(observed).not.toBeNull();
+    expect(observed!.chatType).toBe('group');
+    expect(observed!.content.type).toBe('text');
+    expect(observed!.content.text).toBe('the staging deploy uses region us-west-2');
+    expect(observed!.senderType).toBe('user');
+  });
+
+  it('returns the same addressed event normalizeEvent does for an @bot group message', () => {
+    const raw = makeEvent();
+    const addressed = normalizeEvent(raw, config);
+    const observed = normalizeEventForObservation(raw, config);
+    expect(addressed).not.toBeNull();
+    expect(observed).not.toBeNull();
+    expect(observed!.content.text).toBe('hello world');
+    expect(observed).toEqual(addressed);
+  });
+
+  it('surfaces @all group messages (substantive channel content) that normalizeEvent ignores', () => {
+    const raw = makeUnaddressedGroupText('@_all the prod deploy is broken');
+    expect(normalizeEvent(raw, config)).toBeNull();
+    const observed = normalizeEventForObservation(raw, config);
+    expect(observed).not.toBeNull();
+    expect(observed!.content.type).toBe('text');
+    expect(observed!.content.text).toContain('the prod deploy is broken');
+  });
+
+  it('returns a command-typed event for a slash command not addressed to this bot (ingest filters it)', () => {
+    const raw = makeEvent();
+    raw.event.message.content = JSON.stringify({ text: '@_user_1 /new someone-elses-project' });
+    // @_user_1 resolves to another user, not the bot.
+    raw.event.message.mentions = [
+      { key: '@_user_1', id: { open_id: 'ou_other_user' }, name: 'Someone' },
+    ] as never;
+
+    expect(normalizeEvent(raw, config)).toBeNull();
+    const observed = normalizeEventForObservation(raw, config);
+    expect(observed).not.toBeNull();
+    // content.type 'command' is non-text, so ingestObservation rejects it — the
+    // tap does not need to pre-filter commands here.
+    expect(observed!.content.type).toBe('command');
+  });
+
+  it('returns the event for p2p messages (always addressed, observed too)', () => {
+    const raw = makeEvent();
+    raw.event.message.chat_type = 'p2p';
+    raw.event.message.content = JSON.stringify({ text: 'hello' });
+    raw.event.message.mentions = [];
+    const observed = normalizeEventForObservation(raw, config);
+    expect(observed).not.toBeNull();
+    expect(observed!.chatType).toBe('p2p');
+    expect(observed!.content.text).toBe('hello');
+  });
+
+  it('returns null when the payload is not a parseable human message', () => {
+    expect(normalizeEventForObservation({ event: { message: {} } } as never, config)).toBeNull();
+    expect(normalizeEventForObservation({} as never, config)).toBeNull();
   });
 });
 
