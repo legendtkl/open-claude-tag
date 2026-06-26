@@ -1,4 +1,5 @@
 export { adaptNormalizedEvent } from './inbound-message.js';
+export { LarkChannel } from './lark-channel.js';
 export type {
   InboundMessage,
   AttachmentRef,
