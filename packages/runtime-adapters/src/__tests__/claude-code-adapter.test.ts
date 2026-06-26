@@ -729,6 +729,90 @@ describe('ClaudeCodeAdapter', () => {
     }
   });
 
+  it('emits a plan_update event when a TodoWrite tool_use is seen', async () => {
+    const runId = `test-${randomUUID()}`;
+    const workspace = await createWorkspace(runId);
+
+    try {
+      (mockQuery as any).mockReturnValue(
+        fakeStream([
+          {
+            type: 'assistant',
+            message: {
+              content: [
+                {
+                  type: 'tool_use',
+                  id: 'tu_todo',
+                  name: 'TodoWrite',
+                  input: {
+                    todos: [
+                      {
+                        content: 'Write failing tests',
+                        status: 'completed',
+                        activeForm: 'Writing failing tests',
+                      },
+                      {
+                        content: 'Implement feature',
+                        status: 'in_progress',
+                        activeForm: 'Implementing feature',
+                      },
+                      { content: 'Run build', status: 'pending', activeForm: 'Running build' },
+                    ],
+                  },
+                },
+              ],
+            },
+            session_id: 'sdk-plan-1',
+          },
+          {
+            type: 'assistant',
+            message: {
+              content: [
+                { type: 'tool_use', id: 'tu_bash', name: 'Bash', input: { command: 'pnpm test' } },
+              ],
+            },
+            session_id: 'sdk-plan-1',
+          },
+          {
+            type: 'result',
+            subtype: 'success',
+            session_id: 'sdk-plan-1',
+            result: 'done',
+            duration_ms: 4000,
+            total_cost_usd: 0.01,
+            usage: { input_tokens: 200, output_tokens: 100 },
+          },
+        ]),
+      );
+
+      const spec = makeSpec('task-plan-1', 'do the work');
+      const handle = await adapter.prepare(spec, workspace);
+
+      const events: RuntimeEvent[] = [];
+      for await (const event of adapter.execute(handle, spec)) {
+        events.push(event);
+      }
+
+      const planEvents = events.filter((e) => e.type === 'plan_update');
+      expect(planEvents).toHaveLength(1);
+      expect((planEvents[0] as any).steps).toEqual([
+        { id: 'step-0', title: 'Write failing tests', status: 'done' },
+        { id: 'step-1', title: 'Implement feature', status: 'running' },
+        { id: 'step-2', title: 'Run build', status: 'pending' },
+      ]);
+
+      // Non-TodoWrite tool calls produce a structured tool_use event...
+      const toolUseEvents = events.filter((e) => e.type === 'tool_use');
+      expect(toolUseEvents).toEqual([
+        { type: 'tool_use', name: 'Bash', summary: 'Running: pnpm test', status: 'running' },
+      ]);
+      // ...while the existing progress emission is preserved (additive).
+      expect(events.filter((e) => e.type === 'progress').length).toBeGreaterThan(0);
+    } finally {
+      await cleanupWorkspace(runId).catch(() => {});
+    }
+  });
+
   it('yields status events from tool_use_summary messages', async () => {
     const runId = `test-${randomUUID()}`;
     const workspace = await createWorkspace(runId);

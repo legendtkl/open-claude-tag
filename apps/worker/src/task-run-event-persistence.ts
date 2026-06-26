@@ -26,6 +26,12 @@ function getRuntimeEventMessage(event: RuntimeEvent): string | null {
       return event.error;
     case 'session_created':
       return event.sdkSessionId;
+    case 'tool_use':
+      return event.summary;
+    case 'plan_update': {
+      const titles = event.steps.map((step) => step.title).filter(Boolean);
+      return titles.length > 0 ? titles.join(' · ') : null;
+    }
     case 'runtime_started':
       return null;
   }

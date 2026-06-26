@@ -277,6 +277,16 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
                   percent,
                   message: formatToolPreview(block.name, block.input),
                 };
+                // Additive structured events for the named-stage checklist.
+                // TodoWrite carries the real plan; other tools become tool_use
+                // activity entries. The progress/status emission above is kept
+                // so existing consumers stay unaffected.
+                if (block.name === 'TodoWrite') {
+                  const planUpdate = buildPlanUpdateFromTodos(block.input);
+                  if (planUpdate) yield planUpdate;
+                } else {
+                  yield buildToolUseEvent(block.name, block.input);
+                }
               } else if (block.type === 'thinking' && typeof block.thinking === 'string') {
                 const normalized = block.thinking.replace(/\s+/g, ' ').trim();
                 if (normalized) {
@@ -406,6 +416,52 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
     if (extension === '.webp') return 'image/webp';
     return 'image/png';
   }
+}
+
+type PlanUpdateEvent = Extract<RuntimeEvent, { type: 'plan_update' }>;
+type ToolUseEvent = Extract<RuntimeEvent, { type: 'tool_use' }>;
+type PlanStepStatus = PlanUpdateEvent['steps'][number]['status'];
+
+/** Map the SDK's TodoWrite states onto the 5-status plan-step set. */
+function mapTodoStatus(status: unknown): PlanStepStatus {
+  switch (status) {
+    case 'in_progress':
+      return 'running';
+    case 'completed':
+      return 'done';
+    case 'pending':
+    default:
+      return 'pending';
+  }
+}
+
+/**
+ * Build a `plan_update` event from a TodoWrite tool_use input. Returns null when
+ * the input has no usable todo list so callers can skip emitting an empty plan.
+ */
+function buildPlanUpdateFromTodos(input: Record<string, unknown>): PlanUpdateEvent | null {
+  const todos = input && typeof input === 'object' ? (input as { todos?: unknown }).todos : undefined;
+  if (!Array.isArray(todos)) return null;
+  const steps = todos.map((todo, index) => {
+    const t = (todo ?? {}) as { content?: unknown; activeForm?: unknown; status?: unknown };
+    const content = typeof t.content === 'string' ? t.content.trim() : '';
+    const activeForm = typeof t.activeForm === 'string' ? t.activeForm.trim() : '';
+    const title = content || activeForm || `Step ${index + 1}`;
+    return { id: `step-${index}`, title, status: mapTodoStatus(t.status) };
+  });
+  return { type: 'plan_update', steps };
+}
+
+/** Build a structured `tool_use` activity event for a non-TodoWrite tool call. */
+function buildToolUseEvent(name: string, input: Record<string, unknown>): ToolUseEvent {
+  return {
+    type: 'tool_use',
+    name,
+    summary: formatToolPreview(name, input),
+    // The assistant block represents the model invoking the tool; we don't have
+    // the result yet, so the call is in flight.
+    status: 'running',
+  };
 }
 
 function formatToolPreview(toolName: string, input: Record<string, unknown>): string {

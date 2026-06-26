@@ -46,6 +46,9 @@ export {
   TaskConstraintsSchema,
   ArtifactRefSchema,
   RuntimeEventSchema,
+  PlanStepSchema,
+  PlanStepStatusSchema,
+  ToolUseStatusSchema,
   MemoryItemSchema,
   AgentProfileSchema,
   AgentSchema,
@@ -63,7 +66,16 @@ export {
 
 // Types
 export type { NormalizedEvent, Mention, ReferencedMessage, ReferencedMessageEntry } from './events.js';
-export type { TaskSpec, TaskResult, TaskConstraints, ArtifactRef, RuntimeEvent } from './tasks.js';
+export type {
+  TaskSpec,
+  TaskResult,
+  TaskConstraints,
+  ArtifactRef,
+  RuntimeEvent,
+  PlanStep,
+  PlanStepStatus,
+  ToolUseStatus,
+} from './tasks.js';
 export type { MemoryItem } from './memory.js';
 export type { ReplyLanguage } from './reply-language.js';
 export type {

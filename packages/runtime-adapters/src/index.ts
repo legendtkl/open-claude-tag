@@ -17,6 +17,8 @@ export {
 } from './workspace.js';
 export { ClaudeCodeAdapter } from './claude-code-adapter.js';
 export type { ClaudeCodeConfig } from './claude-code-adapter.js';
+export { ChecklistAccumulator } from './checklist-accumulator.js';
+export type { ChecklistStep, ChecklistStatus, ChecklistSnapshot } from './checklist-accumulator.js';
 export { resolveClaudeAuthToken, resolveClaudeStartupConfig } from './claude-config.js';
 export type { ClaudeAuthEnv, ClaudeStartupEnv } from './claude-config.js';
 export { registerClaudeRuntimeAdapter } from './claude-runtime-registration.js';

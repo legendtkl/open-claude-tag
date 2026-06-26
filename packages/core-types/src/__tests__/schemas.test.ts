@@ -281,6 +281,61 @@ describe('RuntimeEventSchema', () => {
     expect(event.type).toBe('reasoning');
   });
 
+  it('parses plan_update event with structured steps', () => {
+    const event = RuntimeEventSchema.parse({
+      type: 'plan_update',
+      steps: [
+        { id: 'step-0', title: 'Write failing tests', status: 'done' },
+        { id: 'step-1', title: 'Implement feature', status: 'running' },
+        { id: 'step-2', title: 'Run build', status: 'pending' },
+      ],
+    });
+    expect(event.type).toBe('plan_update');
+    expect((event as any).steps).toHaveLength(3);
+    expect((event as any).steps[1].status).toBe('running');
+  });
+
+  it('accepts the full plan-step status set', () => {
+    for (const status of ['pending', 'running', 'done', 'failed', 'skipped'] as const) {
+      const event = RuntimeEventSchema.parse({
+        type: 'plan_update',
+        steps: [{ id: 's', title: 't', status }],
+      });
+      expect((event as any).steps[0].status).toBe(status);
+    }
+  });
+
+  it('rejects plan_update steps with an invalid status', () => {
+    expect(() =>
+      RuntimeEventSchema.parse({
+        type: 'plan_update',
+        steps: [{ id: 's', title: 't', status: 'bogus' }],
+      }),
+    ).toThrow();
+  });
+
+  it('parses tool_use event', () => {
+    const event = RuntimeEventSchema.parse({
+      type: 'tool_use',
+      name: 'Bash',
+      summary: 'Running: pnpm test',
+      status: 'running',
+    });
+    expect(event.type).toBe('tool_use');
+    expect((event as any).name).toBe('Bash');
+  });
+
+  it('rejects tool_use with skipped status (not in the tool-use status set)', () => {
+    expect(() =>
+      RuntimeEventSchema.parse({
+        type: 'tool_use',
+        name: 'Bash',
+        summary: 'x',
+        status: 'skipped',
+      }),
+    ).toThrow();
+  });
+
   it('rejects unknown event type', () => {
     expect(() => RuntimeEventSchema.parse({ type: 'unknown' })).toThrow();
   });

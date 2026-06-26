@@ -292,6 +292,18 @@ export const TaskResultSchema = z.object({
   }),
 });
 
+// ── Plan / Checklist primitives ──
+// `plan_update` carries the structured "named-stage checklist" (e.g. the
+// runtime's TodoWrite list). `tool_use` carries structured per-tool activity.
+export const PlanStepStatusSchema = z.enum(['pending', 'running', 'done', 'failed', 'skipped']);
+export const ToolUseStatusSchema = z.enum(['pending', 'running', 'done', 'failed']);
+
+export const PlanStepSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  status: PlanStepStatusSchema,
+});
+
 // ── RuntimeEvent ──
 export const RuntimeEventSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('status'), message: z.string() }),
@@ -308,6 +320,13 @@ export const RuntimeEventSchema = z.discriminatedUnion('type', [
     reason: z.enum(['cancelled']).optional(),
   }),
   z.object({ type: z.literal('session_created'), sdkSessionId: z.string() }),
+  z.object({ type: z.literal('plan_update'), steps: z.array(PlanStepSchema) }),
+  z.object({
+    type: z.literal('tool_use'),
+    name: z.string(),
+    summary: z.string(),
+    status: ToolUseStatusSchema,
+  }),
 ]);
 
 // ── MemoryItem ──
