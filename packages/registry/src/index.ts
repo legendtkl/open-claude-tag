@@ -56,3 +56,4 @@ export {
   type InjectedCredentialEnv,
   type SecretProvider,
 } from './access-injection.js';
+export { loadIdentityAccessGrants } from './access-grants-store.js';

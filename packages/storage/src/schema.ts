@@ -1198,3 +1198,33 @@ export const identityUsage = pgTable(
     ),
   ],
 );
+
+// ── 23. identity_access_grants ──
+// Per-identity access-bundle installations: one row per (identity, bundle) an
+// identity has installed (jira/datadog-style plugins). The persistence backing
+// the registry `IdentityAccessGrant` source — `loadIdentityAccessGrants` reads
+// these into `resolveIdentityAccess`, which the worker injects into the runtime
+// process env at execution time (see @open-tag/registry access-bundles /
+// access-injection).
+//
+// `identity_id` is a free-form varchar (NOT a uuid FK to `agents`), mirroring
+// `identity_usage`: an Identity id defaults to the composed `agent.id` but may be
+// the agent handle, so this purposely does not constrain it to one agents-row
+// shape. `bundle_id` is the open marketplace key (e.g. 'jira'); the registry
+// resolver fail-fasts on a granted id it does not recognize. The unique
+// (identity_id, bundle_id) index makes installing the same bundle idempotent.
+export const identityAccessGrants = pgTable(
+  'identity_access_grants',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    identityId: varchar('identity_id', { length: 256 }).notNull(),
+    bundleId: varchar('bundle_id', { length: 128 }).notNull(),
+    installedAt: timestamp('installed_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('idx_identity_access_grants_identity_bundle').on(
+      table.identityId,
+      table.bundleId,
+    ),
+  ],
+);

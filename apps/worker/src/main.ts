@@ -71,6 +71,7 @@ import {
 } from '@open-tag/memory';
 import { recordTurnGistBestEffort } from './shared-context-writeback.js';
 import { recordTaskUsage } from './usage-recording.js';
+import { resolveTaskCredentialEnv } from './task-credential-injection.js';
 import {
   BUDGET_ADMISSION_BLOCKED_AUDIT_ACTION,
   BudgetExceededError,
@@ -1830,7 +1831,25 @@ async function processTask(job: { id: string; data: TaskJobData }): Promise<void
     // MUST use the same cwd as the original execution to find the session data.
     const workspaceRunId = `session-${workspaceKey}`;
     const workspace = await createWorkspace(workspaceRunId);
-    const runtimeEnv = agentExecutionConfig?.runtimeEnv ?? {};
+    // Per-agent runtime env (BASE_URL / API_KEY) plus any access-bundle credentials
+    // the running identity has installed. Copied so the per-task injection never
+    // mutates the loaded agent config. Access-bundle credentials are injected ONLY
+    // on the server-local path (this workspace.runtimeEnv feeds the LOCAL adapter);
+    // resolveTaskCredentialEnv fail-fasts a machine-bound task that has granted
+    // bundles rather than running it remotely without its creds (the registered
+    // remote adapter has not dispatched yet and is unregistered in the finally).
+    const runtimeEnv = { ...(agentExecutionConfig?.runtimeEnv ?? {}) };
+    if (taskAgentId) {
+      const credentialIdentitySource = await loadIdentityAgentSource(taskAgentId);
+      if (credentialIdentitySource) {
+        const credentialEnv = await resolveTaskCredentialEnv(
+          db,
+          { agent: credentialIdentitySource, remoteDispatch: remoteMachine !== null },
+          { logger },
+        );
+        Object.assign(runtimeEnv, credentialEnv);
+      }
+    }
     if (Object.keys(runtimeEnv).length > 0) {
       workspace.runtimeEnv = runtimeEnv;
     }
