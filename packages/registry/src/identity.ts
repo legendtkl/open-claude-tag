@@ -1,5 +1,3 @@
-import type { AgentRecord } from '@open-tag/storage';
-
 /**
  * The persisted Claude Code runtime backend key. Reused verbatim from
  * `agents.defaultRuntime`; never renamed (`sessions.runtimeBackend` compares it).
@@ -98,7 +96,7 @@ export interface Identity {
 
 /**
  * The structural subset of an `agents` row that an Identity is composed from. The
- * drizzle {@link AgentRecord} is assignable to this, so {@link resolveIdentity} reads
+ * drizzle `AgentRecord` is assignable to this, so {@link resolveIdentity} reads
  * a real agent row — Identity is a read model OVER the `agents` table, never a fork.
  */
 export interface IdentityAgentSource {

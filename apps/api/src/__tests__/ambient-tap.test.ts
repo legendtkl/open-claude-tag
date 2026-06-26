@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import type { NormalizedEvent } from '@open-tag/core-types';
 import type { Identity } from '@open-tag/registry';
 import type { Database } from '@open-tag/storage';

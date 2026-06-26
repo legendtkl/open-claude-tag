@@ -23,7 +23,6 @@ import type {
   LocalFile,
   OutboundMessage,
   RemoteAttachmentRef,
-  RunStatus,
   SendOptions,
 } from '@open-tag/channel-core';
 import {
