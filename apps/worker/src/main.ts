@@ -152,10 +152,12 @@ import {
   type WorkerFeishuClientRegistry,
 } from './feishu-client-registry.js';
 import {
+  buildTaskConversationRef,
   createLarkChannelSender,
   updateRunningFeedbackCard,
   type ChannelSender,
 } from './channel-sender.js';
+import { ChecklistFeedback } from './checklist-feedback.js';
 import { runAdmissionReschedulerOnce as runAdmissionRescheduler } from './admission-rescheduler.js';
 import { runDelegationBarrierReconcilerOnce as runDelegationBarrierReconciler } from './delegation-barrier-reconciler.js';
 import { runWaitingContractReconcilerOnce } from './waiting-contract-reconciler.js';
@@ -1086,6 +1088,9 @@ async function processTask(job: { id: string; data: TaskJobData }): Promise<void
   let feedback: ThreePhaseFeedback | null = null;
   let taskFeishuClient: FeishuClient | null = null;
   let taskChannelSender: ChannelSender | null = null;
+  // Additional "show your work" surface: a live named-stage checklist driven by
+  // the runtime's plan/tool events. Created lazily on the first plan step.
+  let checklist: ChecklistFeedback | null = null;
   let taskAgentId: string | undefined;
   let taskFeishuAppId: string | undefined;
   let admissionHandle: AdmissionHandle | null = null;
@@ -1230,6 +1235,19 @@ async function processTask(job: { id: string; data: TaskJobData }): Promise<void
     // Wrap the exact client ThreePhaseFeedback uses for done/failed so the
     // running card cannot drift to a different/rotated client instance.
     taskChannelSender = taskFeishuClient ? createLarkChannelSender(taskFeishuClient) : null;
+    // The live checklist posts a separate card into the same chat; only wire it
+    // when we have both a sender and a destination chat.
+    if (taskChannelSender && chatId) {
+      const checklistTitle = (goal.split('\n').find((line) => line.trim()) ?? 'Working on the task')
+        .trim()
+        .slice(0, 120);
+      checklist = new ChecklistFeedback({
+        sender: taskChannelSender,
+        conversation: buildTaskConversationRef(chatId, replyToMessageId),
+        title: checklistTitle,
+        logger,
+      });
+    }
 
     // Setup feedback (will update the ACK card if chatId is available).
     // replyToMessageId: thread-aware (only set in topic threads) so completion cards
@@ -2116,6 +2134,10 @@ async function processTask(job: { id: string; data: TaskJobData }): Promise<void
 
           await persistRuntimeEvent(event);
 
+          // Drive the live named-stage checklist (additive — a separate card
+          // from the running-feedback path below). No-op for unrelated events.
+          await checklist?.onEvent(event);
+
           const runningCardUpdate = toRunningCardUpdate(event, runningProgress);
           if (runningCardUpdate) {
             if (event.type === 'progress') {
@@ -2141,10 +2163,12 @@ async function processTask(job: { id: string; data: TaskJobData }): Promise<void
           switch (event.type) {
             case 'completed':
               result = event.result;
+              await checklist?.finalize('done');
               break;
             case 'failed':
               error = event.error;
               cancelled = event.reason === 'cancelled';
+              await checklist?.finalize('failed');
               break;
             case 'artifact':
               logger.info({ taskId, artifact: event.ref.name }, 'Artifact produced');
@@ -2854,6 +2878,10 @@ async function processTask(job: { id: string; data: TaskJobData }): Promise<void
     rethrowDiscussionTerminalCommitError(err, logger, taskId);
     const errMsg = err instanceof Error ? err.message : 'Unknown error';
     logger.error({ taskId, err }, 'Task processing failed');
+
+    // Resolve the live checklist to a failed state on the abnormal (thrown)
+    // path too; no-op when no checklist was ever created. Swallows internally.
+    await checklist?.finalize('failed');
 
     await persistRuntimeEvent({ type: 'failed', error: errMsg });
     if (taskRunRecord) {

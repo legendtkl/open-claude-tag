@@ -27,7 +27,27 @@ export type OutboundMessage = Parameters<LarkChannel['send']>[1];
 export type DeliveryRef = Awaited<ReturnType<LarkChannel['send']>>;
 type UpdateOptions = Parameters<LarkChannel['update']>[2];
 
+/** The neutral conversation handle a fresh send targets. */
+export type { ConversationRef };
+
 const LARK_KIND = 'lark' as const;
+
+/**
+ * Build the conversation a task's auxiliary cards (e.g. the live checklist) are
+ * posted into: the task's chat, threaded under the same reply target the
+ * feedback cards use. `replyToMessageId` is only set inside topic threads, so a
+ * non-threaded task posts a fresh top-level message.
+ */
+export function buildTaskConversationRef(
+  chatId: string,
+  replyToMessageId?: string,
+): ConversationRef {
+  return {
+    kind: LARK_KIND,
+    scopeId: chatId,
+    ...(replyToMessageId ? { reply: { parentId: replyToMessageId } } : {}),
+  };
+}
 
 /** The thin surface the worker uses to deliver/edit outbound messages. */
 export interface ChannelSender {
