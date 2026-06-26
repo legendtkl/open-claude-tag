@@ -1584,12 +1584,12 @@ async function processTask(job: { id: string; data: TaskJobData }): Promise<void
         });
         const remoteEffectiveWorkDir =
           remoteReviewContextWorkDir ?? (taskConstraints.confirmedWorkDir as string | undefined);
-        // Remote runtime follows the user/session preference; buildRemoteAdapter
-        // validates it against the machine's advertised capabilities.
-        const remoteRuntime =
-          preferredRuntime === 'codex' || preferredRuntime === 'coco'
-            ? preferredRuntime
-            : 'claude_code';
+        // Remote runtime follows the user/session preference verbatim;
+        // buildRemoteAdapter validates it against the machine's advertised
+        // capabilities (and fails fast otherwise). Passing the resolved runtime
+        // through — instead of a name-string allowlist — keeps remote dispatch
+        // data-driven: a runtime added to the registry needs no change here.
+        const remoteRuntime = preferredRuntime;
         const remoteBuild = await buildRemoteAdapter({
           gateway: daemonGateway,
           machine,

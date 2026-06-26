@@ -95,6 +95,11 @@ describe('persisted name() vs open descriptor().id are deliberately distinct', (
     // The open id is NOT a valid lookup key — only the persisted name resolves.
     expect(getRuntimeDescriptor('claude-code')).toBeUndefined();
     expect(getRuntimeDescriptor('unknown')).toBeUndefined();
+    // Inherited Object.prototype members must NOT be treated as known runtimes
+    // (callers use this for membership/validation, not just lookup).
+    expect(getRuntimeDescriptor('toString')).toBeUndefined();
+    expect(getRuntimeDescriptor('constructor')).toBeUndefined();
+    expect(getRuntimeDescriptor('hasOwnProperty')).toBeUndefined();
     expect(Object.keys(RUNTIME_DESCRIPTORS_BY_NAME)).toEqual(['claude_code', 'codex', 'coco']);
   });
 });

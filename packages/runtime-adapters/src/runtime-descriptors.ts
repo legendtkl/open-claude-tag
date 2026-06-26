@@ -16,7 +16,14 @@ export const RUNTIME_DESCRIPTORS_BY_NAME: Readonly<Record<string, RuntimeDescrip
   coco: COCO_DESCRIPTOR,
 };
 
-/** Resolve a descriptor by persisted `name()`. Returns undefined for unknown runtimes. */
+/**
+ * Resolve a descriptor by persisted `name()`. Returns undefined for unknown
+ * runtimes. Uses an own-key check so inherited `Object.prototype` members
+ * (`toString`, `constructor`, …) are never mistaken for a registered runtime —
+ * callers rely on this for membership/validation, not just lookup.
+ */
 export function getRuntimeDescriptor(name: string): RuntimeDescriptor | undefined {
-  return RUNTIME_DESCRIPTORS_BY_NAME[name];
+  return Object.hasOwn(RUNTIME_DESCRIPTORS_BY_NAME, name)
+    ? RUNTIME_DESCRIPTORS_BY_NAME[name]
+    : undefined;
 }

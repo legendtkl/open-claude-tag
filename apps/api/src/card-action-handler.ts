@@ -18,6 +18,7 @@ import {
 } from '@open-tag/feishu-adapter';
 import type { TaskQueue } from '@open-tag/queue';
 import { transitionTask } from '@open-tag/orchestrator';
+import { getRuntimeDescriptor } from '@open-tag/runtime-adapters';
 import { buildQueuedTaskInput } from './task-dispatch.js';
 
 interface TaskCardActionEvent {
@@ -342,6 +343,16 @@ function cloneTaskConstraints(value: unknown, originalTaskId: string, sourceActi
   };
 }
 
+// A known persisted runtime is one present in the data-driven registry (its
+// `name()` keys). Behavior-equivalent to the prior `claude_code|codex|coco`
+// literal set, but a runtime added to the registry is recognized with no change
+// here.
+function isKnownRuntime(
+  value: string | null | undefined,
+): value is 'claude_code' | 'codex' | 'coco' {
+  return value != null && getRuntimeDescriptor(value) !== undefined;
+}
+
 function resolveRetryRuntime(
   actionValue: TaskCardActionValue,
   latestRuntime: string | null | undefined,
@@ -351,19 +362,11 @@ function resolveRetryRuntime(
     return actionValue.runtime ?? 'codex';
   }
 
-  if (
-    latestRuntime === 'claude_code' ||
-    latestRuntime === 'codex' ||
-    latestRuntime === 'coco'
-  ) {
+  if (isKnownRuntime(latestRuntime)) {
     return latestRuntime;
   }
 
-  if (
-    originalRuntimeHint === 'claude_code' ||
-    originalRuntimeHint === 'codex' ||
-    originalRuntimeHint === 'coco'
-  ) {
+  if (isKnownRuntime(originalRuntimeHint)) {
     return originalRuntimeHint;
   }
 
