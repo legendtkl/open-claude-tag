@@ -40,8 +40,9 @@ import {
   commitChatMemoryUpdate,
 } from '@open-tag/storage';
 import type { Database, DueChatMemoryConfig } from '@open-tag/storage';
+import { auditEvents } from '@open-tag/storage';
 import type { IdentityAgentSource } from '@open-tag/registry';
-import { TaskStatus } from '@open-tag/core-types';
+import { AuditSeverity, TaskStatus } from '@open-tag/core-types';
 import type { RuntimeEvent, TaskResult, TaskSpec } from '@open-tag/core-types';
 import { TaskQueue } from '@open-tag/queue';
 import type { TaskJobData } from '@open-tag/queue';
@@ -70,6 +71,11 @@ import {
 } from '@open-tag/memory';
 import { recordTurnGistBestEffort } from './shared-context-writeback.js';
 import { recordTaskUsage } from './usage-recording.js';
+import {
+  BUDGET_ADMISSION_BLOCKED_AUDIT_ACTION,
+  BudgetExceededError,
+  enforceTaskAdmissionBudget,
+} from './budget-admission.js';
 import { join as joinPath } from 'path';
 import { randomUUID } from 'node:crypto';
 import { buildContextualExecutionContext, buildContextualGoal } from './context-builders.js';
@@ -1365,6 +1371,45 @@ async function processTask(job: { id: string; data: TaskJobData }): Promise<void
       logger.info({ taskId, sessionId }, 'Skipped runtime execution for debug test task');
       return;
     }
+
+    // ── Per-identity budget gate (task-admission boundary) ──
+    // Block an already-over-budget identity BEFORE claiming an admission slot,
+    // before the (token-spending) metadata-extraction LLM call, and before the
+    // runtime. Reuses the SAME resolveIdentity path recordTaskUsage records
+    // under, so the checking-id == recording-id. Fail-OPEN on resolution/DB
+    // error (a DB blip must not block legitimate work); fail-CLOSED only on a
+    // confirmed cap exhaustion, surfaced as BudgetExceededError and finalized by
+    // the shared terminal-failure catch below (mirrors the RemoteDispatchError
+    // fail-fast precedent). Uncapped identities (the default) short-circuit with
+    // zero usage-table cost.
+    await enforceTaskAdmissionBudget(
+      db,
+      { taskId, agentId: taskAgentId, occurredAt: new Date().toISOString() },
+      {
+        loadAgent: (agentId) => loadIdentityAgentSource(agentId),
+        deleteLease: (blockedTaskId) => deleteAdmissionLease(db, blockedTaskId),
+        recordBlockAudit: async ({ taskId: auditTaskId, agentId, decision }) => {
+          await db.insert(auditEvents).values({
+            actorId: null,
+            action: BUDGET_ADMISSION_BLOCKED_AUDIT_ACTION,
+            targetType: 'task',
+            targetId: auditTaskId,
+            severity: AuditSeverity.WARN,
+            detail: {
+              agentId,
+              identityId: decision.identityId,
+              window: decision.window ?? null,
+              windowKey: decision.windowKey ?? null,
+              remaining: decision.remaining ?? null,
+              chatId: chatId ?? null,
+              tenantKey: tenantKey ?? null,
+              reason: 'budget_exhausted',
+            },
+          });
+        },
+        logger,
+      },
+    );
 
     const admissionAgentKey = buildAdmissionAgentKey(taskAgentId);
     const admission = admissionScheduler.admit({
@@ -2931,7 +2976,14 @@ async function processTask(job: { id: string; data: TaskJobData }): Promise<void
     }
     rethrowDiscussionTerminalCommitError(err, logger, taskId);
     const errMsg = err instanceof Error ? err.message : 'Unknown error';
-    logger.error({ taskId, err }, 'Task processing failed');
+    if (err instanceof BudgetExceededError) {
+      // Deliberate fail-closed admission block (already audited + logged with
+      // full context by the gate). Finalize through the shared failure path, but
+      // at warn — this is policy enforcement, not a fault.
+      logger.warn({ taskId }, 'Task blocked at admission by identity budget; finalizing as failed');
+    } else {
+      logger.error({ taskId, err }, 'Task processing failed');
+    }
 
     // Resolve the live checklist to a failed state on the abnormal (thrown)
     // path too; no-op when no checklist was ever created. Swallows internally.
