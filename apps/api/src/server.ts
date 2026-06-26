@@ -88,6 +88,8 @@ import type { MentionRoutingDecision, TaskCreatedEvent } from '@open-tag/orchest
 import { TaskQueue, type TaskJobData } from '@open-tag/queue';
 import { AuditService, getUserRole } from '@open-tag/approval';
 import { MemoryHandler } from '@open-tag/memory';
+import { parseAmbientFlag } from '@open-tag/ambient';
+import type { AmbientConfig, AmbientDecision, AmbientJudge } from '@open-tag/ambient';
 import {
   IntentType,
   TaskStatus,
@@ -114,6 +116,7 @@ import { getReplyToMessageId, upgradeRootProvisionalSession } from './reply-thre
 import { applyDebugFeishuOverrides, createLoopbackFeishuClient } from './debug-feishu-client.js';
 import { applyBufferGate } from './buffer-gate.js';
 import { tapChannelObservation } from './channel-observation-tap.js';
+import { tapAmbient, type AmbientTapDeps } from './ambient-tap.js';
 import { WorkerHealthMonitor } from './worker-health-monitor.js';
 import {
   WorktreeRetentionCleanupService,
@@ -1940,6 +1943,242 @@ async function handleDocumentCommentEvent(
   }
 }
 
+// ── Ambient proactive-post wiring (Stage 5) ──
+//
+// DEFAULT-OFF is airtight per-channel. A channel posts a proactive reply only
+// when BOTH the global `OPEN_TAG_AMBIENT` switch is on AND the channel's chatId
+// is in the explicit `OPEN_TAG_AMBIENT_CHANNELS` allowlist. An unconfigured
+// channel — absent from the allowlist — NEVER posts, even with the global flag
+// on. The env allowlist is the interim per-channel opt-in until the toggle moves
+// into `chatConfigs` (Stage 5 follow-up).
+const AMBIENT_GLOBAL_ENABLED = parseAmbientFlag(process.env.OPEN_TAG_AMBIENT);
+const AMBIENT_CHANNEL_ALLOWLIST = parseAmbientChannelAllowlist(
+  process.env.OPEN_TAG_AMBIENT_CHANNELS,
+);
+// Built once: a cheap judge LLM for the post gate. Null when no LLM is
+// configured — the gate then relies on its cheap heuristic alone (documented).
+const ambientJudge = buildAmbientJudge(createLlmClientFromEnv());
+
+function parseAmbientChannelAllowlist(raw?: string | null): Set<string> {
+  if (!raw) return new Set();
+  return new Set(
+    raw
+      .split(',')
+      .map((value) => value.trim())
+      .filter(Boolean),
+  );
+}
+
+/**
+ * Resolve the per-channel ambient config. Synchronous (env-only today) so the
+ * tap's default-off check runs before any side effect. `channelEnabled` is an
+ * explicit boolean — `global ∧ allowlisted` — so `isAmbientEnabled` yields the
+ * airtight AND: a non-allowlisted channel is hard-off regardless of the global
+ * flag (never inherits a global "on").
+ */
+function resolveAmbientConfig(event: NormalizedEvent): AmbientConfig {
+  const channelEnabled = AMBIENT_GLOBAL_ENABLED && AMBIENT_CHANNEL_ALLOWLIST.has(event.chatId);
+  return { globalEnabled: AMBIENT_GLOBAL_ENABLED, channelEnabled };
+}
+
+/** Extract the first JSON object from a model reply (tolerates code fences/prose). */
+function extractFirstJsonObject(raw: string): string | null {
+  const start = raw.indexOf('{');
+  const end = raw.lastIndexOf('}');
+  if (start === -1 || end === -1 || end <= start) return null;
+  return raw.slice(start, end + 1);
+}
+
+/**
+ * Adapt an `LlmClient` into the gate's injected judge. Fail-closed: an
+ * unparseable/odd response declines (the gate also treats a throw as no-post).
+ * Returns undefined when no LLM is configured.
+ */
+function buildAmbientJudge(client: LlmClient | null): AmbientJudge | undefined {
+  if (!client) return undefined;
+  return async ({ message, context, heuristic }) => {
+    const system = [
+      'You decide whether an AI assistant should PROACTIVELY reply to an',
+      'un-addressed group-chat message (the user did NOT @-mention the bot).',
+      'Only say yes when a reply is clearly helpful, on-topic, and adds value;',
+      'default to NOT posting. Respond with strict JSON:',
+      '{"post": boolean, "rationale": string}.',
+    ].join(' ');
+    const user = [
+      `Heuristic signal: ${heuristic}`,
+      `Channel context:\n${context || '(none)'}`,
+      `Message:\n${message.content.text ?? ''}`,
+    ].join('\n\n');
+    const reply = await client.chat(
+      [
+        { role: 'system', content: system },
+        { role: 'user', content: user },
+      ],
+      { maxTokens: 128, temperature: 0 },
+    );
+    const json = extractFirstJsonObject(reply);
+    if (!json) return { post: false, rationale: 'judge response had no JSON object' };
+    try {
+      const parsed = JSON.parse(json) as { post?: unknown; rationale?: unknown };
+      return {
+        post: parsed.post === true,
+        rationale: typeof parsed.rationale === 'string' ? parsed.rationale : '',
+      };
+    } catch {
+      return { post: false, rationale: 'unparseable judge response' };
+    }
+  };
+}
+
+/**
+ * Build the per-event ambient tap deps. The dispatch seam closes over the
+ * resolved Feishu app context so the proactive reply lands through the right
+ * client. Everything else (db/audit/judge/config) is constant.
+ */
+function buildAmbientTapDeps(
+  appContext: FeishuAppRuntimeContext,
+  feishuAppId: string | undefined,
+): AmbientTapDeps {
+  return {
+    db,
+    audit: auditService,
+    resolveConfig: resolveAmbientConfig,
+    judge: ambientJudge,
+    dispatch: ({ event, decision }) =>
+      dispatchAmbientReply(event, decision, appContext, feishuAppId),
+  };
+}
+
+/**
+ * Enqueue an AMBIENT-flagged task through the existing dispatch path so the
+ * worker generates a reply and the channel posts it to the thread. Reuses the
+ * same machinery as an addressed message (agent route → session → task row →
+ * queued task) with three differences: it is marked `source: 'ambient'`, it adds
+ * NO "OK" reaction on the user message, and it skips Feishu task-list tracking.
+ *
+ * It DOES seed a minimal feedback card. The worker's completion delivery PATCHes
+ * that card (`ThreePhaseFeedback.updateDone` returns early without an
+ * `ackMessageId`), so the seed is what makes the proactive reply actually land.
+ * This is the documented minimal-ACK deviation; an ack-less proactive completion
+ * path in the worker is the cleaner follow-up.
+ *
+ * Only ever reached for an explicitly-enabled channel (the tap's default-off
+ * gate runs first), so this path is inert for every unconfigured channel.
+ */
+async function dispatchAmbientReply(
+  sourceEvent: NormalizedEvent,
+  decision: AmbientDecision,
+  appContext: FeishuAppRuntimeContext,
+  feishuAppId: string | undefined,
+): Promise<void> {
+  // Resolve the responding agent exactly like the addressed path. A private
+  // agent the sender can't reach ⇒ no proactive post (fail closed).
+  let agentId: string | undefined;
+  try {
+    const senderAccess = await resolveAgentAccessContext(sourceEvent, feishuAppId);
+    const agentRoute = await resolveEventAgentRoute(sourceEvent, feishuAppId, senderAccess);
+    agentId = agentRoute.agent.id;
+  } catch (err) {
+    if (err instanceof AgentAccessDeniedError) {
+      logger.info(
+        { eventId: sourceEvent.eventId, chatId: sourceEvent.chatId },
+        'Ambient post skipped: responding agent not accessible',
+      );
+      return;
+    }
+    throw err;
+  }
+
+  const { sessionId } = await resolveSession(db, sourceEvent);
+  // Idempotency: the un-addressed branch skips the task-dedup table, so derive a
+  // DETERMINISTIC task id from the source message. A Feishu redelivery of the
+  // same event resolves to the SAME id → handleEvent's onConflictDoNothing
+  // returns `task_duplicate` → this returns below WITHOUT a second enqueue. The
+  // constraints stay stable (only `source: 'ambient'`; the volatile decision
+  // reason lives in the audit row, not here) so duplicate-matching never trips.
+  const ambientTaskId = stableUuidFromKey(`ambient:${feishuAppId ?? 'none'}:${sourceEvent.messageId}`);
+  const result = await handleEvent(db, sourceEvent, sessionId, {
+    agentId,
+    feishuAppId,
+    taskId: ambientTaskId,
+    extraTaskConstraints: { source: 'ambient' },
+  });
+  // Ambient only ever dispatches a freshly created task; ops direct-replies and
+  // duplicates (redeliveries) are not proactive posts.
+  if (result.type !== 'task_created' || !result.taskId) {
+    return;
+  }
+  const taskId = result.taskId;
+
+  // The task row now exists under a deterministic id, so a redelivery resolves
+  // to task_duplicate and will NOT retry. If anything between here and enqueue
+  // fails we must therefore not strand it PENDING: compensate by failing it (a
+  // failed proactive post is best-effort and intentionally not retried — better
+  // than a stuck task or a double post). Mirrors the addressed path's "never
+  // strand a created task" boundary.
+  try {
+    const replyToMessageId = getReplyToMessageId(sourceEvent);
+    const feedback = new ThreePhaseFeedback(
+      createFeishuChannelSender(appContext.client),
+      sourceEvent.chatId,
+      replyToMessageId,
+    );
+    let ackMessageId: string | null = null;
+    try {
+      await feedback.sendAck(result.intent);
+      ackMessageId = feedback.getAckMessageId();
+      if (ackMessageId) {
+        await db
+          .update(tasks)
+          .set({
+            feedbackMessageId: ackMessageId,
+            feedbackCardType: 'task_status',
+            feedbackState: 'queued',
+            feedbackUpdatedAt: new Date(),
+            updatedAt: new Date(),
+          })
+          .where(eq(tasks.id, taskId));
+      }
+    } catch (err) {
+      logger.warn({ err, taskId }, 'Ambient seed card failed; continuing without a card');
+    }
+
+    await taskLifecycle.transitionTask(taskId, TaskStatus.QUEUED);
+
+    const { job } = buildQueuedTaskInput({
+      event: sourceEvent,
+      sessionId,
+      agentId,
+      feishuAppId,
+      result: {
+        taskId,
+        intent: result.intent,
+        runtime: result.runtime,
+        goal: result.goal,
+        imageAttachment: result.imageAttachment,
+        fileAttachment: result.fileAttachment,
+      },
+      replyToMessageId,
+      ackMessageId,
+      extraConstraints: { source: 'ambient' },
+    });
+    await queue.enqueue(job);
+    logger.info(
+      { taskId, chatId: sourceEvent.chatId, reason: decision.reason },
+      'Ambient proactive task enqueued',
+    );
+  } catch (err) {
+    logger.warn({ err, taskId }, 'Ambient dispatch failed after task creation; failing the task');
+    await taskLifecycle
+      .transitionTask(taskId, TaskStatus.FAILED, {
+        errorMessage: err instanceof Error ? err.message : String(err),
+      })
+      .catch((compErr) => {
+        logger.warn({ err: compErr, taskId }, 'Ambient failed-state compensation failed');
+      });
+  }
+}
+
 // ── Event processing pipeline ──
 async function processEvent(raw: unknown, appContext?: FeishuAppRuntimeContext): Promise<boolean> {
   const adapted = isObjectRecord(raw) ? adaptSdkEvent(raw) : raw;
@@ -2023,6 +2262,14 @@ async function processEventInner(
     const observationEvent = normalizeEventForObservation(adapted as any, config);
     if (observationEvent) {
       tapChannelObservation(db, observationEvent);
+      // Ambient proactive-post tap (Stage 5): same un-addressed message, fired
+      // right after the observation tap. Both observe; ambient additionally MAY
+      // post a gated/budgeted/audited proactive reply. Default-OFF and airtight
+      // per-channel — an unconfigured channel does nothing here (the tap's
+      // synchronous enable check returns before any side effect). Non-blocking +
+      // error-isolated by construction (see ambient-tap.ts), so it can never
+      // delay or break this skip branch, which still returns immediately below.
+      tapAmbient(buildAmbientTapDeps(currentAppContext, feishuAppId), observationEvent);
     }
     logger.info(
       { rawKeys: isObjectRecord(raw) ? Object.keys(raw) : [] },

@@ -49,7 +49,7 @@ Incremental, each stage compiles + passes tests + ships. See [`DESIGN.md`](./DES
 **Goal**: Opt-in channels get gated, budgeted, audited proactive updates; sandboxes persist across a conversation's turns.
 **Success Criteria**: `ambient` package — per-channel toggle; per-message post gate; brokered cross-channel flag (audited, `isPrivate`-excluded); stale-thread scanner. Conversation-scoped workspace keyed to `(channelScope, threadId)`, persists across turns, idle teardown via the reconciler.
 **Tests**: ambient channel posts a gated/budgeted/audited update; a flag surfaces cross-channel through the broker; turn-2 lands in turn-1's workspace.
-**Status**: In Progress — opt-in proactive-post gate landed (`ambient` package; default-OFF two-layer; fail-closed; injected judge/budget). Pending: posting wire + pre-addressing tap, brokered cross-channel flag, stale-thread scanner, budget enforcement, conversation-scoped sandbox.
+**Status**: In Progress — opt-in proactive-post gate landed (`ambient` package; default-OFF two-layer; fail-closed; injected judge/budget) AND wired into the inbound path (`apps/api/ambient-tap.ts` `tapAmbient`): the un-addressed branch now evaluates the gate, audits every decision, and on approval enqueues an AMBIENT-flagged task through the existing dispatch path (idempotent deterministic id, seed-card delivery, bot-sender loop prevention). Airtight per-channel default-OFF (global flag ∧ explicit channel allowlist). Pending: brokered cross-channel flag, stale-thread scanner, per-identity budget enforcement, richer proactive-framing judge, per-channel toggle moved into `chatConfigs`/UI, conversation-scoped sandbox.
 
 ## Stage 6 (optional): channel-slack
 **Goal**: Prove the Channel abstraction with a second provider.

@@ -15,6 +15,7 @@
     "test:e2e": "vitest run --config vitest.e2e.config.ts --reporter=verbose"
   },
   "dependencies": {
+    "@open-tag/ambient": "workspace:*",
     "@open-tag/approval": "workspace:*",
     "@open-tag/core-types": "workspace:*",
     "@open-tag/feishu-adapter": "workspace:*",

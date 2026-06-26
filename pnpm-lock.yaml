@@ -32,6 +32,9 @@ importers:
       '@larksuiteoapi/node-sdk':
         specifier: ^1.66.1
         version: 1.66.1
+      '@open-tag/ambient':
+        specifier: workspace:*
+        version: link:../../packages/ambient
       '@open-tag/approval':
         specifier: workspace:*
         version: link:../../packages/approval
