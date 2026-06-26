@@ -284,7 +284,22 @@ export function processCocoEvent(
         (typeof event.error === 'string' && event.error) ||
         (typeof event.result === 'string' && event.result) ||
         `Coco run failed (${String(event.subtype ?? 'unknown')})`;
-      out.push({ type: 'failed', error: reason });
+      // Surface any usage accumulated before the error so a token-spending run
+      // that then fails is still charged against its identity budget. Omitted
+      // when no usage was seen, so a no-spend failure stays a clean no-op.
+      out.push(
+        state.usage
+          ? {
+              type: 'failed',
+              error: reason,
+              metrics: {
+                tokenIn: state.usage.input_tokens ?? 0,
+                tokenOut: state.usage.output_tokens ?? 0,
+                estimatedCostUsd: 0,
+              },
+            }
+          : { type: 'failed', error: reason },
+      );
       return out;
     }
     const usage = asRecord(event.usage);

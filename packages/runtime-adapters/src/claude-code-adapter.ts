@@ -353,11 +353,14 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
           if (message.subtype === 'success') {
             resultText = message.result;
           } else {
-            // Error result
+            // Error result. The usage on this `result` message was already read
+            // above, so surface it on the failure event — a task that spent
+            // tokens then errored is still charged against its identity budget.
             const errors = (message as any).errors ?? [];
             yield {
               type: 'failed',
               error: errors.join('; ') || `Claude Code error: ${message.subtype}`,
+              metrics: { tokenIn, tokenOut, estimatedCostUsd: totalCostUsd },
             };
             return;
           }

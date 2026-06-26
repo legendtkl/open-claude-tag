@@ -318,6 +318,18 @@ export const RuntimeEventSchema = z.discriminatedUnion('type', [
     type: z.literal('failed'),
     error: z.string(),
     reason: z.enum(['cancelled']).optional(),
+    // Partial token/spend usage already known at the moment of failure (e.g. an
+    // adapter that read the SDK result usage before emitting a non-success
+    // result). Optional and additive: emitters with no usage at failure omit it,
+    // and the worker no-ops on absent/zero usage. Lets the budget ledger charge a
+    // task that consumed tokens and then failed.
+    metrics: z
+      .object({
+        tokenIn: z.number(),
+        tokenOut: z.number(),
+        estimatedCostUsd: z.number(),
+      })
+      .optional(),
   }),
   z.object({ type: z.literal('session_created'), sdkSessionId: z.string() }),
   z.object({ type: z.literal('plan_update'), steps: z.array(PlanStepSchema) }),

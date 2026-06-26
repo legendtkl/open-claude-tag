@@ -70,7 +70,7 @@ import {
   sweepAgentMemoryRuns,
 } from '@open-tag/memory';
 import { recordTurnGistBestEffort } from './shared-context-writeback.js';
-import { recordTaskUsage } from './usage-recording.js';
+import { recordTaskUsageBestEffort, type TaskUsageMetrics } from './usage-recording.js';
 import { resolveTaskCredentialEnv } from './task-credential-injection.js';
 import {
   BUDGET_ADMISSION_BLOCKED_AUDIT_ACTION,
@@ -2259,6 +2259,19 @@ async function processTask(job: { id: string; data: TaskJobData }): Promise<void
             case 'failed':
               error = event.error;
               cancelled = event.reason === 'cancelled';
+              // Accumulate any partial usage the runtime knew at failure. The
+              // `failed` event carries no `result`, so this is the only spend
+              // signal on a failure terminal. Summed (not overwritten) so a
+              // failed resume plus a failed fresh fallback both count.
+              if (event.metrics) {
+                runtimeFailureMetrics = {
+                  tokenIn: (runtimeFailureMetrics?.tokenIn ?? 0) + event.metrics.tokenIn,
+                  tokenOut: (runtimeFailureMetrics?.tokenOut ?? 0) + event.metrics.tokenOut,
+                  estimatedCostUsd:
+                    (runtimeFailureMetrics?.estimatedCostUsd ?? 0) +
+                    event.metrics.estimatedCostUsd,
+                };
+              }
               await checklist?.finalize('failed');
               break;
             case 'artifact':
@@ -2318,6 +2331,13 @@ async function processTask(job: { id: string; data: TaskJobData }): Promise<void
     let errorMessage: string | null = null;
     let newSdkSessionId: string | null = null;
     let taskCancelled = false;
+    // Partial token/spend a runtime knew at the moment it emitted `failed`. The
+    // `failed` event carries no `result`, so this is the ONLY usage signal on a
+    // failure terminal. Accumulated across BOTH consumeEvents calls (a failed
+    // resume followed by a failed fresh fallback) so a finally-failed task is
+    // charged the sum of every attempt's spend. Stays null when the runtime
+    // never ran or exposed no usage at failure → recording no-ops.
+    let runtimeFailureMetrics: TaskUsageMetrics | null = null;
 
     if (canResume && resumeSdkSessionId) {
       throwIfRuntimeWatchdogSettled(taskId);
@@ -2464,6 +2484,32 @@ async function processTask(job: { id: string; data: TaskJobData }): Promise<void
     }
 
     throwIfRuntimeWatchdogSettled(taskId);
+
+    // ── Per-identity usage accounting (single seam, runs ONCE) ──
+    // Charge this turn's settled token/spend against the running identity's
+    // budget window as soon as the runtime outcome is known, BEFORE any of the
+    // fallible post-processing below (memory sync, session refresh, state
+    // persist, artifact collection/insert, the terminal transition). Recording
+    // here — not inside the terminal success/failure branches — guarantees a
+    // failed-but-token-spending task is still charged even if a later step
+    // throws into the catch, and makes success vs failure a single mutually
+    // exclusive choice so a task is never double-charged. On success the source
+    // is `taskResult.metrics`; on failure it is the partial usage the runtime
+    // exposed on its `failed` event (`runtimeFailureMetrics`). A thrown failure
+    // that never reaches here (e.g. a BudgetExceededError admission reject) ran
+    // no runtime and records nothing. Error-isolated and a clean no-op when no
+    // usage is known or the identity is uncapped. `occurredAt` is a single
+    // boundary clock read.
+    await recordTaskUsageBestEffort(
+      db,
+      {
+        taskId,
+        agentId: taskAgentId,
+        metrics: errorMessage ? runtimeFailureMetrics : (taskResult?.metrics ?? null),
+        occurredAt: new Date().toISOString(),
+      },
+      { loadAgent: loadIdentityAgentSource, logger },
+    );
 
     // Sync the agent memory checkout back into the agent home. Runs on
     // success and on clean failure alike (failure lessons are memory too);
@@ -2732,33 +2778,10 @@ async function processTask(job: { id: string; data: TaskJobData }): Promise<void
       }
       logger.error({ taskId, error: errorMessage }, 'Task failed');
     } else {
-      // Record this turn's token/spend against the running identity's budget
-      // window. Placed before the handoff early-return below so a turn that
-      // consumed tokens then handed off is still charged. Error-isolated: the
-      // runtime already completed, so a usage-record failure must never fail the
-      // task. Idempotent at the task level via the QUEUED guard at the top of
-      // processTask — a duplicate/retry job for the same task is skipped before it
-      // re-runs the runtime, so this never double-counts. `occurredAt` is a single
-      // boundary clock read isolated here (the helper itself reads no wall-clock).
-      if (taskAgentId && taskResult?.metrics) {
-        const usageMetrics = taskResult.metrics;
-        try {
-          const identityAgent = await loadIdentityAgentSource(taskAgentId);
-          if (identityAgent) {
-            await recordTaskUsage(db, {
-              agent: identityAgent,
-              metrics: usageMetrics,
-              occurredAt: new Date().toISOString(),
-            });
-          }
-        } catch (usageErr) {
-          logger.warn(
-            { taskId, agentId: taskAgentId, usageErr },
-            'Failed to record per-identity task usage (non-fatal)',
-          );
-        }
-      }
-
+      // Per-identity usage for this completed turn was already charged at the
+      // single accounting seam above (right after the runtime outcome settled),
+      // so there is no recording here — keeping success vs failure a single
+      // mutually exclusive charge.
       const outputText = taskResult?.output?.text ?? '';
       const finalReply = extractRuntimeFinalReply(outputText);
       const completionOutputText = finalReply.outputText;

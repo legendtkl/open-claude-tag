@@ -107,8 +107,8 @@ describe('ClaudeCodeAdapter', () => {
             subtype: 'error',
             session_id: 'sdk-session-err',
             duration_ms: 500,
-            total_cost_usd: 0,
-            usage: { input_tokens: 10, output_tokens: 0 },
+            total_cost_usd: 0.002,
+            usage: { input_tokens: 10, output_tokens: 5 },
             errors: ['Rate limit exceeded', 'Try again later'],
           },
         ]),
@@ -125,6 +125,13 @@ describe('ClaudeCodeAdapter', () => {
       const failedEvent = events.find((e) => e.type === 'failed');
       expect(failedEvent).toBeDefined();
       expect((failedEvent as any).error).toContain('Rate limit exceeded');
+      // The usage read from the error `result` message rides on the failure
+      // event so the worker can charge the spent tokens against the budget.
+      expect((failedEvent as any).metrics).toEqual({
+        tokenIn: 10,
+        tokenOut: 5,
+        estimatedCostUsd: 0.002,
+      });
     } finally {
       await cleanupWorkspace(runId).catch(() => {});
     }

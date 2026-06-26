@@ -136,6 +136,30 @@ describe('processCocoEvent mapping', () => {
     expect(events.some((e) => e.type === 'completed')).toBe(false);
   });
 
+  it('surfaces accumulated usage on the failed event when an error follows token spend', () => {
+    const events = replay([
+      { type: 'system', subtype: 'init', session_id: 's' },
+      {
+        type: 'assistant',
+        message: {
+          role: 'assistant',
+          content: 'partial',
+          response_meta: { usage: { prompt_tokens: 40, completion_tokens: 12 } },
+        },
+      },
+      { type: 'result', subtype: 'error', is_error: true, result: 'boom' },
+    ]);
+    const failed = events.find((e) => e.type === 'failed');
+    // The usage seen before the error rides on the failure event so the worker
+    // can charge the spent tokens against the identity budget.
+    expect(failed).toEqual({
+      type: 'failed',
+      error: 'boom',
+      metrics: { tokenIn: 40, tokenOut: 12, estimatedCostUsd: 0 },
+    });
+    expect(events.some((e) => e.type === 'completed')).toBe(false);
+  });
+
   it('tolerates unknown event shapes without throwing', () => {
     const state = createCocoStreamState({ taskId: 't', executionId: 'e', startTime: Date.now() });
     expect(() => processCocoEvent({ type: 'mystery', foo: 1 }, state)).not.toThrow();
