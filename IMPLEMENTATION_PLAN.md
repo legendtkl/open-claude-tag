@@ -25,19 +25,19 @@ Incremental, each stage compiles + passes tests + ships. See [`DESIGN.md`](./DES
 - `RuntimeEvent` gains `plan_update`/`tool_use`; the worker owns a `ChecklistAccumulator` that drives the live checklist.
 - An always-on observation tap in the gateway writes channel-scoped memory for addressed *and* un-addressed messages (default-on, sensitive-filtered, per-channel off, audited).
 **Tests**: golden e2e fixtures (raw Lark event → outbound card JSON → DB rows) pin behavior before each reshape; new tests: a Lark `@mention` produces a named-stage checklist; an un-tagged message admits a channel-scoped observation. Sub-PRs: **1a** inbound seam (parallel-run a compat adapter) · **1b** outbound `ChannelSender` + `feishuApps→channel_apps` · **1c** extract `LarkChannel`, `apps/api→apps/gateway`.
-**Status**: Not Started
+**Status**: Core landed (channel-core, InboundMessage, LarkChannel, ChannelSender seam, plan_update/live checklist, channel observation write+tap); purity refactors pending (full 1a orchestrator reshape, channel-lark extraction)
 
 ## Stage 2: Runtime registry + Codex via descriptors
 **Goal**: Adding/selecting a runtime is data-driven; Codex is selectable per identity with no name-string branching.
 **Success Criteria**: `RuntimeDescriptor` + `buildRuntimeManager`; closed runtime union → open registry id (zero data migration — varchar); workflow prompt *refs* in descriptors; one factory shared by worker + daemon; split `runtime-claude-code` / `runtime-codex`. `name()` stays `claude_code`; open id is display-only (fixture-tested).
 **Tests**: adding a runtime touches one package; Codex task runs through the registry; resume still hits the same adapter for persisted `claude_code`.
-**Status**: Not Started
+**Status**: Descriptor + data-driven registry landed; union→open-id + package split pending
 
 ## Stage 3: Channel-scoped multiplayer memory
 **Goal**: One shared memory per channel; any member picks up where another left off.
 **Success Criteria**: `MemoryScopeType.channel` threaded through every read/write/hydrate site; rollup rule (thread sessions read+write the channel store); append-only + async compaction with optimistic versioning; dual ingestion (evidence verifier vs non-containment observation + dedup/decay).
 **Tests**: two threads in one channel see each other's admitted facts; two channels do not; user A starts a task, user B continues in-thread, the agent resumes with A's context and zero re-explanation.
-**Status**: Not Started
+**Status**: In Progress — channel-scoped memory read + multiplayer invariant landed
 
 ## Stage 4: Identity + plugins + per-channel access/budget
 **Goal**: A channel installs plugins (e.g. jira/datadog-style) with runtime-injected credentials; memory + access isolated per identity; all work budgeted.

@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { Database } from '@open-tag/storage';
 import {
+  channelObservations,
   chatConfigs,
   chatMemoryEntries,
   memoryEntries,
@@ -114,6 +115,51 @@ describe('buildContextualGoal shared context hydration', () => {
     expect(prompt).not.toContain('<chat_memory>');
     expect(prompt).toContain('<session_memory>');
     expect(prompt).toContain('Session summary only.');
+  });
+
+  it('injects channel-scoped multiplayer memory ahead of chat and session memory', async () => {
+    const db = makeStubDb(
+      new Map<unknown, unknown[]>([
+        [
+          channelObservations,
+          [
+            { gist: 'member A: the staging deploy goes out on Fridays' },
+            { gist: 'member B: the on-call handoff is at 10am' },
+          ],
+        ],
+        [chatConfigs, [{ memoryEnabled: true }]],
+        [
+          chatMemoryEntries,
+          [
+            {
+              id: 'chat-index',
+              entryType: 'index',
+              title: 'index',
+              content: 'This group prefers isolated verification.',
+              keywords: [],
+              importanceScore: 1,
+              updatedAt: new Date('2026-06-24T00:00:00Z'),
+            },
+          ],
+        ],
+        [sessions, [{ summary: 'Session-specific summary.' }]],
+        [memoryEntries, []],
+        [sharedContextEntries, []],
+        [messages, []],
+      ]),
+    );
+
+    const prompt = await buildContextualGoal(db, logger, 'session-1', 'continue', 'task-1', '', {
+      includeSessionHistory: true,
+      chatMemory: { tenantKey: 'default', chatId: 'oc_chat' },
+    });
+
+    expect(prompt).toContain('<channel_memory>');
+    expect(prompt).toContain('member A: the staging deploy goes out on Fridays');
+    expect(prompt).toContain('member B: the on-call handoff is at 10am');
+    // Broad → specific: channel memory precedes chat memory precedes session memory.
+    expect(prompt.indexOf('<channel_memory>')).toBeLessThan(prompt.indexOf('<chat_memory>'));
+    expect(prompt.indexOf('<chat_memory>')).toBeLessThan(prompt.indexOf('<session_memory>'));
   });
 
   it('injects same-session messages from other agents for cross-agent review', async () => {

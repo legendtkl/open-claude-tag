@@ -4,8 +4,22 @@ import {
   type ContextImageAttachment,
   type SharedContextGist,
 } from '@open-tag/session';
-import { SharedContextStore } from '@open-tag/memory';
+import { SharedContextStore, hydrateChannelMemory } from '@open-tag/memory';
 import { loadChatMemoryPromptSection, type Database } from '@open-tag/storage';
+
+/**
+ * Channel-scoped multiplayer memory toggle (Stage 3). Mirrors the inbound write
+ * tap's `OPEN_TAG_CHANNEL_MEMORY` flag (apps/api): default **ON**, only
+ * `OPEN_TAG_CHANNEL_MEMORY=disabled` turns hydration off. Read and write must
+ * agree on the same env so a channel that stops writing also stops hydrating.
+ */
+const CHANNEL_MEMORY_ENABLED = process.env.OPEN_TAG_CHANNEL_MEMORY !== 'disabled';
+/**
+ * The channel vendor for the worker's hydration path. The worker's `chatMemory`
+ * context is Lark-only today, and the inbound write tap keys observations under
+ * `lark`; reading with the same kind keeps write and read on one isolation key.
+ */
+const WORKER_CHANNEL_KIND = 'lark';
 
 /**
  * Fetch the session's verified shared context (DeLM C) as compact gists. This is
@@ -70,6 +84,29 @@ async function loadChatMemorySection(
   }
 }
 
+/**
+ * Hydrate the channel's shared, multiplayer observation memory (Stage 3). Keyed
+ * by channel scope only, so a member picks up another member's channel activity.
+ * The scope id is the chat id the chat-memory context already carries. Gated by
+ * `OPEN_TAG_CHANNEL_MEMORY`; degrades to '' on error so it can never fail a task.
+ */
+async function loadChannelMemorySection(
+  database: Database,
+  logger: Logger,
+  chatMemory: { tenantKey: string; chatId: string } | undefined,
+): Promise<string> {
+  if (!CHANNEL_MEMORY_ENABLED || !chatMemory) return '';
+  try {
+    return await hydrateChannelMemory(database, {
+      kind: WORKER_CHANNEL_KIND,
+      scopeId: chatMemory.chatId,
+    });
+  } catch (err) {
+    logger.warn({ err, chatId: chatMemory.chatId }, 'Failed to load channel observation memory');
+    return '';
+  }
+}
+
 /** Build a contextualized goal and portable attachments when SDK resume is unavailable. */
 export async function buildContextualExecutionContext(
   database: Database,
@@ -81,7 +118,7 @@ export async function buildContextualExecutionContext(
   contextOptions: ContextualGoalOptions = {},
 ): Promise<ContextualExecutionContext> {
   try {
-    const [sharedContextEntries, chatMemorySection] = await Promise.all([
+    const [sharedContextEntries, chatMemorySection, channelMemorySection] = await Promise.all([
       loadSharedContextGists(database, logger, sessionId),
       loadChatMemorySection(
         database,
@@ -93,6 +130,7 @@ export async function buildContextualExecutionContext(
             }
           : undefined,
       ),
+      loadChannelMemorySection(database, logger, contextOptions.chatMemory),
     ]);
     const builtContext = await buildContext(database, sessionId, systemPromptHint, {
       agentId: contextOptions.agentId,
@@ -101,6 +139,7 @@ export async function buildContextualExecutionContext(
       sharedContextEntries,
     });
     const hasChatMemory = Boolean(chatMemorySection);
+    const hasChannelMemory = Boolean(channelMemorySection);
     const hasMemory = Boolean(builtContext.memorySection);
 
     // Filter out the current user message by stable Feishu id to avoid
@@ -130,11 +169,16 @@ export async function buildContextualExecutionContext(
     const imageAttachments = imageFilterResult.attachments;
     const hasImages = imageAttachments.length > 0;
 
-    if (!hasChatMemory && !hasMemory && !hasTurns && !hasImages) {
+    if (!hasChannelMemory && !hasChatMemory && !hasMemory && !hasTurns && !hasImages) {
       return { goal, imageAttachments: [] };
     }
 
     let prefix = '';
+    // Broad → specific: the channel's shared multiplayer memory, then this chat's
+    // curated memory, then session-specific memory, then the live conversation.
+    if (hasChannelMemory) {
+      prefix += `<channel_memory>\n${channelMemorySection}\n</channel_memory>\n\n`;
+    }
     if (hasChatMemory) {
       prefix += `<chat_memory>\n${chatMemorySection}\n</chat_memory>\n\n`;
     }
