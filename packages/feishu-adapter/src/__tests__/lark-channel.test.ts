@@ -116,6 +116,19 @@ describe('LarkChannel', () => {
     expect(ref.logicalMessageId).toBe('msg_out_1');
   });
 
+  it('threads opts.idempotencyKey into the client uuid option', async () => {
+    await channel.send(TO, { kind: 'text', markdown: 'hello' }, { idempotencyKey: 'render-key-1' });
+
+    expect(stub.sendMessage).toHaveBeenCalledTimes(1);
+    expect(stub.sendMessage.mock.calls[0][4]).toEqual({ uuid: 'render-key-1' });
+  });
+
+  it('passes no uuid option when no idempotencyKey is provided (client mints its own)', async () => {
+    await channel.send(TO, { kind: 'text', markdown: 'hello' });
+
+    expect(stub.sendMessage.mock.calls[0][4]).toBeUndefined();
+  });
+
   it('sends a result as an interactive card', async () => {
     const ref = await channel.send(TO, { kind: 'result', markdown: '# Answer\nAll done' });
 

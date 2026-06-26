@@ -36,8 +36,26 @@ describe('LarkChannelSender', () => {
     );
 
     expect(fake.sendMessage).toHaveBeenCalledTimes(1);
-    expect(fake.sendMessage).toHaveBeenCalledWith('chat_id', 'chat-1', payload, 'parent-1');
+    // No idempotencyKey, so the options arg is undefined and the client mints
+    // its own uuid — verbatim to a direct sendMessage with no options.
+    expect(fake.sendMessage).toHaveBeenCalledWith('chat_id', 'chat-1', payload, 'parent-1', undefined);
     expect(ref.physicalIds).toEqual(['sent-1']);
+  });
+
+  it('threads a send idempotencyKey into the client uuid option', async () => {
+    const fake = makeFakeClient();
+    const sender = createLarkChannelSender(asClient(fake));
+    const payload = { msg_type: 'text', content: { text: 'hi' } };
+
+    await sender.send(
+      { kind: 'lark', scopeId: 'chat-1', reply: { parentId: 'parent-1' } },
+      { kind: 'native', payload },
+      { idempotencyKey: 'render-key-1' },
+    );
+
+    expect(fake.sendMessage).toHaveBeenCalledWith('chat_id', 'chat-1', payload, 'parent-1', {
+      uuid: 'render-key-1',
+    });
   });
 
   it('delegates a native update to FeishuClient.updateMessage verbatim', async () => {

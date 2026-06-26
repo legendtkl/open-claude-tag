@@ -175,6 +175,17 @@ export interface DeliveryRef {
   native?: unknown;
 }
 
+/**
+ * Optional controls for an outbound {@link Channel.send}. `idempotencyKey` is a
+ * caller-supplied, exactly-once token: the adapter threads it into the provider's
+ * dedupe slot (Lark's message `uuid`) so a retry/crash re-send of the same logical
+ * message does not post a duplicate. Omit it and the adapter mints a fresh token,
+ * i.e. behavior is unchanged from a send with no opts.
+ */
+export interface SendOptions {
+  idempotencyKey?: string;
+}
+
 export interface HealthStatus {
   healthy: boolean;
   detail?: string;
@@ -194,7 +205,7 @@ export interface Channel {
   normalize(raw: unknown): InboundMessage | null;
   /** Emit neutral addressing tokens over the message; roster matching happens in the core. */
   extractAddressingSignals(msg: InboundMessage): AddressingSignal[];
-  send(to: ConversationRef, msg: OutboundMessage): Promise<DeliveryRef>;
+  send(to: ConversationRef, msg: OutboundMessage, opts?: SendOptions): Promise<DeliveryRef>;
   update(ref: DeliveryRef, msg: OutboundMessage, opts?: { revision?: number }): Promise<DeliveryRef>;
   react?(ref: DeliveryRef, emoji: string): Promise<void>;
   uploadArtifact(file: LocalFile): Promise<RemoteAttachmentRef>;

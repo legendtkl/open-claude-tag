@@ -681,14 +681,14 @@ async function renderCommittedDiscussionTurns(input: {
       loadDiscussion: (discussionId) => findDiscussionById(db, discussionId),
       listParticipants: (discussionId) => listDiscussionParticipants(db, discussionId),
       loadTranscript: (discussionId) => loadDiscussionTranscript(db, discussionId),
-      getClient: async (feishuAppId) =>
-        (
-          await resolveTaskFeishuClient({
-            feishuAppId,
-            resolver: feishuClientRegistry,
-            defaultClient: feishuClient,
-          })
-        ).client,
+      getChannelSender: async (feishuAppId) => {
+        const { client } = await resolveTaskFeishuClient({
+          feishuAppId,
+          resolver: feishuClientRegistry,
+          defaultClient: feishuClient,
+        });
+        return client ? createLarkChannelSender(client) : null;
+      },
       markRendered: (renderInput) => markDiscussionTurnFeishuRendered(db, renderInput),
       logger,
     },

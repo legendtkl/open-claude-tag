@@ -6,7 +6,7 @@ import type {
   DiscussionTranscriptTurn,
   DiscussionTurnFeishuRenderKind,
 } from '@open-tag/storage';
-import type { FeishuClient } from '@open-tag/feishu-adapter';
+import type { ChannelSender, ConversationRef } from './channel-sender.js';
 
 interface DiscussionTurnRenderLogger {
   info(meta: Record<string, unknown>, message: string): void;
@@ -30,7 +30,7 @@ export interface DiscussionTurnRenderDeps {
   loadDiscussion(discussionId: string): Promise<DiscussionRecord | null>;
   listParticipants(discussionId: string): Promise<DiscussionParticipantRecord[]>;
   loadTranscript(discussionId: string): Promise<DiscussionTranscriptTurn[]>;
-  getClient(feishuAppId?: string | null): Promise<FeishuClient | null>;
+  getChannelSender(feishuAppId?: string | null): Promise<ChannelSender | null>;
   markRendered(input: {
     turnId: string;
     kind: DiscussionTurnFeishuRenderKind;
@@ -113,18 +113,23 @@ async function sendRenderMessage(input: {
   renderKey: string;
 }): Promise<string> {
   const feishuAppId = input.participant?.feishuAppId ?? input.discussion.feishuAppId;
-  const client = await input.deps.getClient(feishuAppId);
-  if (!client) {
+  const sender = await input.deps.getChannelSender(feishuAppId);
+  if (!sender) {
     throw new Error(`Feishu client not found for discussion render app ${feishuAppId ?? 'default'}`);
   }
-  const result = await client.sendMessage(
-    'chat_id',
-    input.discussion.chatId,
-    { msg_type: 'text', content: { text: input.text } },
-    input.discussion.rootThreadId,
-    { uuid: input.renderKey },
+  // Posts a text message into the discussion's root thread, keyed by `renderKey`
+  // so a retry/crash re-send is deduped by Lark's message uuid (exactly-once).
+  const to: ConversationRef = {
+    kind: 'lark',
+    scopeId: input.discussion.chatId,
+    reply: { parentId: input.discussion.rootThreadId },
+  };
+  const ref = await sender.send(
+    to,
+    { kind: 'discussion', markdown: input.text },
+    { idempotencyKey: input.renderKey },
   );
-  return result.messageId;
+  return ref.logicalMessageId;
 }
 
 export async function renderDiscussionTurnsThrough(

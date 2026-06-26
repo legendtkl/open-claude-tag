@@ -25,6 +25,8 @@ import { resolveTaskFeishuClient, type TaskFeishuClientResolver } from './agent-
 export type OutboundMessage = Parameters<LarkChannel['send']>[1];
 /** A handle over the physical message(s) a logical send produced. */
 export type DeliveryRef = Awaited<ReturnType<LarkChannel['send']>>;
+/** Optional send controls; carries the exactly-once `idempotencyKey`. */
+export type SendOptions = Parameters<LarkChannel['send']>[2];
 type UpdateOptions = Parameters<LarkChannel['update']>[2];
 
 /** The neutral conversation handle a fresh send targets. */
@@ -51,7 +53,7 @@ export function buildTaskConversationRef(
 
 /** The thin surface the worker uses to deliver/edit outbound messages. */
 export interface ChannelSender {
-  send(to: ConversationRef, msg: OutboundMessage): Promise<DeliveryRef>;
+  send(to: ConversationRef, msg: OutboundMessage, opts?: SendOptions): Promise<DeliveryRef>;
   update(ref: DeliveryRef, msg: OutboundMessage, opts?: UpdateOptions): Promise<DeliveryRef>;
 }
 
@@ -59,8 +61,8 @@ export interface ChannelSender {
 export class LarkChannelSender implements ChannelSender {
   constructor(private readonly channel: LarkChannel) {}
 
-  send(to: ConversationRef, msg: OutboundMessage): Promise<DeliveryRef> {
-    return this.channel.send(to, msg);
+  send(to: ConversationRef, msg: OutboundMessage, opts?: SendOptions): Promise<DeliveryRef> {
+    return this.channel.send(to, msg, opts);
   }
 
   update(ref: DeliveryRef, msg: OutboundMessage, opts?: UpdateOptions): Promise<DeliveryRef> {

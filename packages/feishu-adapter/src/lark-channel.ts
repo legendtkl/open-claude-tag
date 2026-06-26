@@ -24,6 +24,7 @@ import type {
   OutboundMessage,
   RemoteAttachmentRef,
   RunStatus,
+  SendOptions,
 } from '@open-tag/channel-core';
 import {
   buildApprovalCard,
@@ -48,6 +49,8 @@ type CommentMessage = Extract<OutboundMessage, { kind: 'comment' }>;
 
 /** The Feishu send-message content union; reused for the `native` escape hatch. */
 type SendMessageContent = Parameters<FeishuClient['sendMessage']>[2];
+/** The Feishu send-message options (carries the dedupe `uuid`). */
+type FeishuSendOptions = Parameters<FeishuClient['sendMessage']>[4];
 
 const STEP_ICONS: Record<ChecklistStep['status'], string> = {
   pending: '⬜',
@@ -202,31 +205,33 @@ export class LarkChannel implements Channel {
     }));
   }
 
-  async send(to: ConversationRef, msg: OutboundMessage): Promise<DeliveryRef> {
+  async send(to: ConversationRef, msg: OutboundMessage, opts?: SendOptions): Promise<DeliveryRef> {
     switch (msg.kind) {
       case 'text':
-        return this.deliverText(to, msg.markdown);
+        return this.deliverText(to, msg.markdown, opts);
       case 'error':
-        return this.deliverText(to, msg.message);
+        return this.deliverText(to, msg.message, opts);
       case 'checklist':
-        return this.deliverCard(to, buildChecklistCard(msg));
+        return this.deliverCard(to, buildChecklistCard(msg), opts);
       case 'result':
-        return this.deliverCard(to, buildResultCard(msg));
+        return this.deliverCard(to, buildResultCard(msg), opts);
       case 'approval':
-        return this.deliverCard(to, buildApprovalFromPrompt(msg.prompt));
+        return this.deliverCard(to, buildApprovalFromPrompt(msg.prompt), opts);
       case 'native':
-        return this.deliverNative(to, msg.payload);
+        return this.deliverNative(to, msg.payload, opts);
       case 'comment':
+        // A document comment has no provider-side dedupe slot, so `idempotencyKey`
+        // does not apply here.
         return this.deliverComment(msg);
       case 'form':
         // TODO(stage-1): render an interactive form card; summarize as text for now.
-        return this.deliverText(to, renderFormAsText(msg));
+        return this.deliverText(to, renderFormAsText(msg), opts);
       case 'discussion':
         // TODO(stage-1): dedicated discussion surface; reuse a text message for now.
-        return this.deliverText(to, msg.markdown);
+        return this.deliverText(to, msg.markdown, opts);
       case 'handoff':
         // TODO(stage-1): structured agent handoff; announce via text for now.
-        return this.deliverText(to, renderHandoffAsText(msg));
+        return this.deliverText(to, renderHandoffAsText(msg), opts);
       default: {
         const _exhaustive: never = msg;
         throw new Error(`Unsupported outbound message kind: ${JSON.stringify(_exhaustive)}`);
@@ -295,22 +300,51 @@ export class LarkChannel implements Channel {
     return { healthy: true };
   }
 
-  private async deliverText(to: ConversationRef, text: string): Promise<DeliveryRef> {
+  /**
+   * Map a neutral {@link SendOptions} onto the Feishu client's send options.
+   * Only an explicit `idempotencyKey` produces a `uuid`; when absent we return
+   * `undefined` so the client mints its own — preserving today's behavior for
+   * callers that don't ask for exactly-once delivery.
+   */
+  private sendOptions(opts?: SendOptions): FeishuSendOptions {
+    return opts?.idempotencyKey ? { uuid: opts.idempotencyKey } : undefined;
+  }
+
+  private async deliverText(
+    to: ConversationRef,
+    text: string,
+    opts?: SendOptions,
+  ): Promise<DeliveryRef> {
     const result = await this.client.sendMessage(
       'chat_id',
       to.scopeId,
       { msg_type: 'text', content: { text } },
       this.replyTarget(to),
+      this.sendOptions(opts),
     );
     return this.toDeliveryRef(result.messageId, result);
   }
 
-  private async deliverCard(to: ConversationRef, card: InteractiveCard): Promise<DeliveryRef> {
-    const result = await this.client.sendMessage('chat_id', to.scopeId, card, this.replyTarget(to));
+  private async deliverCard(
+    to: ConversationRef,
+    card: InteractiveCard,
+    opts?: SendOptions,
+  ): Promise<DeliveryRef> {
+    const result = await this.client.sendMessage(
+      'chat_id',
+      to.scopeId,
+      card,
+      this.replyTarget(to),
+      this.sendOptions(opts),
+    );
     return this.toDeliveryRef(result.messageId, result);
   }
 
-  private async deliverNative(to: ConversationRef, payload: unknown): Promise<DeliveryRef> {
+  private async deliverNative(
+    to: ConversationRef,
+    payload: unknown,
+    opts?: SendOptions,
+  ): Promise<DeliveryRef> {
     // The native escape hatch: the payload is already a Feishu send-message
     // content (text/post/interactive); pass it through verbatim.
     const result = await this.client.sendMessage(
@@ -318,6 +352,7 @@ export class LarkChannel implements Channel {
       to.scopeId,
       payload as SendMessageContent,
       this.replyTarget(to),
+      this.sendOptions(opts),
     );
     return this.toDeliveryRef(result.messageId, result);
   }

@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { renderDiscussionTurnsThrough } from '../discussion-turn-renderer.js';
+import { createLarkChannelSender } from '../channel-sender.js';
 import type {
   DiscussionParticipantRecord,
   DiscussionRecord,
@@ -104,7 +105,7 @@ function makeDeps(overrides: {
         }),
       ],
     ),
-    getClient: vi.fn().mockResolvedValue(client),
+    getChannelSender: vi.fn().mockResolvedValue(createLarkChannelSender(client)),
     markRendered: vi.fn().mockResolvedValue({}),
     logger: {
       info: vi.fn(),
