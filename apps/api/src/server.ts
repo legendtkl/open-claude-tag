@@ -88,6 +88,7 @@ import type { MentionRoutingDecision, TaskCreatedEvent } from '@open-tag/orchest
 import { TaskQueue, type TaskJobData } from '@open-tag/queue';
 import { AuditService, getUserRole } from '@open-tag/approval';
 import { MemoryHandler } from '@open-tag/memory';
+import { resolveIdentity, type Identity } from '@open-tag/registry';
 import { parseAmbientFlag } from '@open-tag/ambient';
 import type { AmbientConfig, AmbientDecision, AmbientJudge } from '@open-tag/ambient';
 import {
@@ -2031,6 +2032,41 @@ function buildAmbientJudge(client: LlmClient | null): AmbientJudge | undefined {
 }
 
 /**
+ * Resolve the {@link Identity} the ambient task would run as, for per-identity
+ * budget enforcement in the ambient gate. Routes to the SAME responding agent as
+ * {@link dispatchAmbientReply} (sender access → agent route), then composes it
+ * into an Identity via the registry read model.
+ *
+ * Budget source: the composed Identity currently carries NO declared budget
+ * (`budget` undefined ⇒ the gate treats it as UNLIMITED). Persisting a per-agent
+ * / per-identity budget cap and threading it in here is the follow-up that makes
+ * enforcement bite; the mechanism (table + checkBudget + this wire) is already
+ * live, so once a budget source exists it flows through unchanged.
+ *
+ * Returns `undefined` when the responding agent is not accessible to the sender —
+ * the budget gate then treats the channel as unlimited (fail-open; never block
+ * ambient on a resolution outcome). Unexpected errors propagate to the tap's
+ * fail-open budget catch. Resolution runs lazily, only for substantive
+ * un-addressed messages on an enabled channel, bounded by the tap's in-flight cap.
+ */
+async function resolveAmbientIdentity(
+  event: NormalizedEvent,
+  feishuAppId: string | undefined,
+): Promise<Identity | undefined> {
+  try {
+    const senderAccess = await resolveAgentAccessContext(event, feishuAppId);
+    const agentRoute = await resolveEventAgentRoute(event, feishuAppId, senderAccess);
+    // No budget source yet (see doc above) — Identity composes with budget undefined.
+    return resolveIdentity(agentRoute.agent);
+  } catch (err) {
+    if (err instanceof AgentAccessDeniedError) {
+      return undefined;
+    }
+    throw err;
+  }
+}
+
+/**
  * Build the per-event ambient tap deps. The dispatch seam closes over the
  * resolved Feishu app context so the proactive reply lands through the right
  * client. Everything else (db/audit/judge/config) is constant.
@@ -2044,6 +2080,7 @@ function buildAmbientTapDeps(
     audit: auditService,
     resolveConfig: resolveAmbientConfig,
     judge: ambientJudge,
+    resolveIdentity: (event) => resolveAmbientIdentity(event, feishuAppId),
     dispatch: ({ event, decision }) =>
       dispatchAmbientReply(event, decision, appContext, feishuAppId),
   };

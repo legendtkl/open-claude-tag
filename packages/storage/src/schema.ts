@@ -5,6 +5,7 @@ import {
   text,
   integer,
   bigint,
+  numeric,
   real,
   boolean,
   timestamp,
@@ -1144,5 +1145,40 @@ export const channelObservations = pgTable(
     ),
     index('idx_channel_observations_scope').on(table.channelKind, table.scopeId),
     index('idx_channel_observations_occurred').on(table.occurredAt),
+  ],
+);
+
+// ── 22. identity_usage ──
+// Per-identity budget accounting: one aggregate row per (identity_id, period,
+// window_key) holding the running tokens/spend consumed inside that window. The
+// enforcement counterpart to the declared `Identity.budget` cap (see
+// @open-tag/registry `checkBudget`/`recordUsage`).
+//
+// `identity_id` is a free-form varchar (NOT a uuid FK to `agents`): an Identity
+// id defaults to the composed `agent.id` but may be the agent handle, so this
+// purposely does not constrain it to a single agents-row shape. `window_key` is
+// the caller-derived bucket label (e.g. '2026-06-27' for a day, '2026-06' for a
+// month) — derived from the inbound event timestamp, never wall-clock here.
+// Increments are atomic via an upsert that adds to the existing counters.
+export const identityUsage = pgTable(
+  'identity_usage',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    identityId: varchar('identity_id', { length: 256 }).notNull(),
+    // 'day' | 'month' — mirrors IdentityBudgetWindow.
+    period: varchar('period', { length: 8 }).notNull(),
+    windowKey: varchar('window_key', { length: 16 }).notNull(),
+    // bigint: a month of token accounting can exceed the 32-bit int range.
+    tokensUsed: bigint('tokens_used', { mode: 'number' }).notNull().default(0),
+    // numeric for exact monetary accumulation (drizzle reads it back as a string).
+    spendUsed: numeric('spend_used').notNull().default('0'),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('idx_identity_usage_window').on(
+      table.identityId,
+      table.period,
+      table.windowKey,
+    ),
   ],
 );

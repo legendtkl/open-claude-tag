@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { NormalizedEvent } from '@open-tag/core-types';
+import type { Identity } from '@open-tag/registry';
 import type { Database } from '@open-tag/storage';
 import {
   tapAmbient,
@@ -9,6 +10,18 @@ import {
   type AmbientAuditSink,
   type AmbientDispatch,
 } from '../ambient-tap.js';
+
+/** A minimal composed Identity for budget-gate tests (zero-access, optional cap). */
+function makeIdentity(budget?: Identity['budget']): Identity {
+  return {
+    id: 'agent-uuid-amb',
+    persona: { profileId: 'profile-amb' },
+    runtimeBackend: 'claude_code',
+    boundChannels: [],
+    active: true,
+    budget,
+  };
+}
 
 // hydrateContext is always injected below, so the real DB handle is never used.
 const fakeDb = {} as unknown as Database;
@@ -182,6 +195,54 @@ describe('tapAmbient', () => {
     });
   });
 
+  it('budget exhausted: an over-cap budget gate declines budget_exhausted before the judge (no dispatch)', async () => {
+    const judge = vi.fn(async () => ({ post: true, rationale: 'x' }));
+    const { deps, spies } = makeDeps({
+      judge,
+      // Over budget ⇒ the gate declines at the spend step, ahead of any judge spend.
+      checkBudget: () => ({ withinBudget: false }),
+    });
+
+    tapAmbient(deps, makeEvent());
+    await settle();
+
+    expect(judge).not.toHaveBeenCalled();
+    expect(spies.dispatch).not.toHaveBeenCalled();
+    expect(spies.record).toHaveBeenCalledTimes(1);
+    expect(spies.record.mock.calls[0][4]).toMatchObject({
+      outcome: 'declined',
+      reason: 'budget_exhausted',
+    });
+  });
+
+  it('resolved identity with no declared budget → unlimited (posts without a DB budget query)', async () => {
+    const resolveIdentity = vi.fn(async () => makeIdentity(undefined));
+    const { deps, spies } = makeDeps({ resolveIdentity });
+
+    tapAmbient(deps, makeEvent());
+    await settle();
+
+    // fakeDb would throw if queried; an uncapped identity short-circuits before any
+    // checkBudget query, so the gate proceeds to the (approving) judge and posts.
+    expect(resolveIdentity).toHaveBeenCalledTimes(1);
+    expect(spies.dispatch).toHaveBeenCalledTimes(1);
+    expect(spies.record.mock.calls[0][4]).toMatchObject({ outcome: 'posted' });
+  });
+
+  it('identity resolution failure fails OPEN: budget treated as unlimited, still posts', async () => {
+    const resolveIdentity = vi.fn(async () => {
+      throw new Error('agent route backend down');
+    });
+    const { deps, spies } = makeDeps({ resolveIdentity });
+
+    expect(() => tapAmbient(deps, makeEvent())).not.toThrow();
+    await settle();
+
+    // A resolution failure must never block the always-on proactive path.
+    expect(spies.dispatch).toHaveBeenCalledTimes(1);
+    expect(spies.record.mock.calls[0][4]).toMatchObject({ outcome: 'posted' });
+  });
+
   it('error isolation: a thrown judge fails closed (no dispatch, audited) and never escapes', async () => {
     const { deps, spies } = makeDeps({
       judge: async () => {
@@ -299,5 +360,11 @@ describe('ambient tap wiring in server.ts', () => {
     expect(serverSrc).toContain(
       'AMBIENT_GLOBAL_ENABLED && AMBIENT_CHANNEL_ALLOWLIST.has(event.chatId)',
     );
+  });
+
+  it('wires per-identity budget enforcement into the ambient tap deps', () => {
+    // The tap resolves the responding agent's Identity so the budget gate can
+    // enforce its declared cap before any judge spend.
+    expect(serverSrc).toContain('resolveIdentity: (event) => resolveAmbientIdentity(event, feishuAppId)');
   });
 });

@@ -34,3 +34,11 @@ export {
   type ResolveIdentityOptions,
   type SoulRef,
 } from './identity.js';
+export {
+  checkBudget,
+  recordUsage,
+  windowKeyFor,
+  type BudgetCheckResult,
+  type CheckBudgetInput,
+  type RecordUsageInput,
+} from './budget.js';

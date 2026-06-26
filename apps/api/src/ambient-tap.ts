@@ -11,6 +11,7 @@ import type { NormalizedEvent } from '@open-tag/core-types';
 import { adaptNormalizedEvent, type InboundMessage } from '@open-tag/feishu-adapter';
 import { hydrateChannelMemory } from '@open-tag/memory';
 import { createLogger } from '@open-tag/observability';
+import { checkBudget, windowKeyFor, type Identity } from '@open-tag/registry';
 import type { Database } from '@open-tag/storage';
 
 const logger = createLogger('ambient-tap');
@@ -79,13 +80,69 @@ export interface AmbientTapDeps {
   /** Optional injected judge (the only token-spending gate). Absent ⇒ heuristic-only. */
   judge?: AmbientJudge;
   /**
-   * Optional spend gate. Absent ⇒ treated as within budget.
-   * TODO(stage-5): wire to per-identity budget — real spend enforcement is a
-   * separate milestone.
+   * Resolve the {@link Identity} the ambient task would run as — the same agent
+   * the dispatch path later routes to — so its declared budget can be enforced
+   * before any (token-spending) judge call. Resolved lazily inside the budget
+   * gate, only for substantive un-addressed messages on an enabled channel.
+   *
+   * Returns `undefined` when no identity is resolvable; an Identity with no
+   * `budget` is likewise treated as UNLIMITED. FAIL-OPEN by design: a resolution
+   * failure (or absent resolver) never blocks the always-on proactive path — the
+   * budget gate simply reports within-budget. An over-cap identity, by contrast,
+   * is declined by the gate (`budget_exhausted`). Injectable for tests.
+   */
+  resolveIdentity?: (event: NormalizedEvent) => Promise<Identity | undefined>;
+  /**
+   * Optional explicit spend gate override. Absent ⇒ a real per-identity budget
+   * check is built from {@link AmbientTapDeps.resolveIdentity} (see
+   * {@link makeIdentityBudgetCheck}). Primarily a test seam.
    */
   checkBudget?: BudgetCheck;
   /** Context hydration seam (default {@link hydrateChannelMemory}); injectable for tests. */
   hydrateContext?: (db: Database, scope: { kind: string; scopeId: string }) => Promise<string>;
+}
+
+/**
+ * Build the per-identity budget gate for an event. Used when no explicit
+ * `deps.checkBudget` override is supplied.
+ *
+ * FAIL-OPEN on resolution: if no resolver is wired, the identity can't be
+ * resolved, or the resolved identity declares no budget, the channel is treated
+ * as UNLIMITED (`withinBudget: true`). Ambient is a best-effort, always-on
+ * courtesy; a failure to resolve who would answer (or whether they have a cap)
+ * must never silently suppress proactive replies — the right failure mode here is
+ * to allow, not block. Enforcement only ever DECLINES when a real, resolvable cap
+ * is genuinely exhausted (delegated to registry `checkBudget`).
+ *
+ * Note an actual DB error inside `checkBudget` is NOT swallowed here: it
+ * propagates to the gate, which fails CLOSED (`budget_check_failed`) — the
+ * existing ambient contract for "can't confirm headroom, don't spend". Only the
+ * resolution step (who/whether there's a cap) fails open.
+ *
+ * The bucket window is derived from the inbound event timestamp, never
+ * wall-clock, keeping enforcement aligned with when the message actually arrived.
+ */
+function makeIdentityBudgetCheck(deps: AmbientTapDeps, event: NormalizedEvent): BudgetCheck {
+  return async () => {
+    if (!deps.resolveIdentity) {
+      return { withinBudget: true };
+    }
+    let identity: Identity | undefined;
+    try {
+      identity = await deps.resolveIdentity(event);
+    } catch (err) {
+      logger.warn(
+        { err, eventId: event.eventId },
+        'Ambient identity resolution failed (budget treated as unlimited, fail-open)',
+      );
+      return { withinBudget: true };
+    }
+    if (!identity?.budget) {
+      return { withinBudget: true };
+    }
+    const windowKey = windowKeyFor(identity.budget.window, new Date(event.timestamp).toISOString());
+    return checkBudget(deps.db, { identity, windowKey });
+  };
 }
 
 /**
@@ -196,9 +253,11 @@ async function evaluateAndAct(
     );
   }
 
-  // TODO(stage-5): wire to per-identity budget. Until real spend enforcement
-  // lands, ambient is treated as within budget so the gate proceeds to the judge.
-  const budget: BudgetCheck = deps.checkBudget ?? (() => ({ withinBudget: true }));
+  // Per-identity budget gate (before any judge spend). An explicit override wins
+  // (test seam); otherwise enforce the resolved identity's declared cap for the
+  // window the inbound event falls in. Fail-open on resolution — see
+  // makeIdentityBudgetCheck.
+  const budget: BudgetCheck = deps.checkBudget ?? makeIdentityBudgetCheck(deps, event);
 
   const decision = await evaluateAmbientPost({
     // InboundMessage is structurally assignable to the gate's AmbientInbound.
