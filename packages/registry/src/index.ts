@@ -42,3 +42,17 @@ export {
   type CheckBudgetInput,
   type RecordUsageInput,
 } from './budget.js';
+export {
+  ACCESS_BUNDLES_BY_ID,
+  getAccessBundle,
+  resolveIdentityAccess,
+  type AccessBundle,
+  type IdentityAccessGrant,
+} from './access-bundles.js';
+export {
+  buildInjectedCredentialEnv,
+  createEnvSecretProvider,
+  isCredentialEnvName,
+  type InjectedCredentialEnv,
+  type SecretProvider,
+} from './access-injection.js';
