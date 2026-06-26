@@ -85,9 +85,10 @@ import { createLlmClientFromEnv } from '@open-tag/llm-client';
 import type { LlmClient } from '@open-tag/llm-client';
 import {
   RuntimeManager,
+  buildRuntimeManager,
+  claudeRuntimeRegistration,
   CodexAdapter,
   CocoAdapter,
-  registerClaudeRuntimeAdapter,
   createWorkspace,
   openClaudeTagHome,
   ensureAgentHomeDir,
@@ -3065,37 +3066,43 @@ async function main(): Promise<void> {
     'Feishu Task tracking lifecycle observer configured',
   );
 
-  // 4. Runtime adapters
-  runtimeManager = new RuntimeManager();
-
-  // Claude registers unconditionally; per-agent BASE_URL / API_KEY (runtimeEnv)
-  // can supply custom credentials at execution time. Without those, Claude Code
-  // can use the local login state on the execution host, with global
-  // ANTHROPIC_* env as an optional fallback default.
-  registerClaudeRuntimeAdapter(runtimeManager, {
-    imageDownloader: feishuClient ?? undefined,
-  });
+  // 4. Runtime adapters — built from a single data-driven registration list
+  // (the same `buildRuntimeManager` factory the daemon uses). Adding a runtime
+  // is one more list entry, not another bespoke registration block.
+  const codexBinaryPath = resolveCodexBinaryPath();
+  const cocoBinaryPath = resolveCocoBinaryPath();
+  runtimeManager = buildRuntimeManager([
+    // Claude registers unconditionally; per-agent BASE_URL / API_KEY (runtimeEnv)
+    // can supply custom credentials at execution time. Without those, Claude Code
+    // can use the local login state on the execution host, with global
+    // ANTHROPIC_* env as an optional fallback default.
+    claudeRuntimeRegistration({ imageDownloader: feishuClient ?? undefined }),
+    {
+      // Codex registers unconditionally; an unresolved binary falls back to the
+      // SDK-default codex.
+      isAvailable: () => true,
+      create: () =>
+        new CodexAdapter({
+          binaryPath: codexBinaryPath,
+          imageDownloader: feishuClient ?? undefined,
+        }),
+    },
+    {
+      // Coco resolves from the user's installed CLI; skip when none is found.
+      isAvailable: () => Boolean(cocoBinaryPath),
+      create: () =>
+        new CocoAdapter({
+          binaryPath: cocoBinaryPath,
+          imageDownloader: feishuClient ?? undefined,
+        }),
+    },
+  ]);
   logger.info(
     { globalFallback: Boolean(process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_AUTH_TOKEN) },
     'Registered ClaudeCodeAdapter',
   );
-
-  const codexBinaryPath = resolveCodexBinaryPath();
-  const codexAdapter = new CodexAdapter({
-    binaryPath: codexBinaryPath,
-    imageDownloader: feishuClient ?? undefined,
-  });
-  runtimeManager.register(codexAdapter);
   logger.info({ binaryPath: codexBinaryPath ?? 'sdk-default' }, 'Registered CodexAdapter');
-
-  const cocoBinaryPath = resolveCocoBinaryPath();
   if (cocoBinaryPath) {
-    runtimeManager.register(
-      new CocoAdapter({
-        binaryPath: cocoBinaryPath,
-        imageDownloader: feishuClient ?? undefined,
-      }),
-    );
     logger.info({ binaryPath: cocoBinaryPath }, 'Registered CocoAdapter');
   } else {
     logger.warn('Coco runtime not registered: no coco binary resolvable');

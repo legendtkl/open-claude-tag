@@ -1,5 +1,6 @@
 import type {
   RuntimeAdapter,
+  RuntimeDescriptor,
   RuntimeHandle,
   WorkspaceContext,
   HealthStatus,
@@ -30,6 +31,22 @@ export class StubAdapter implements RuntimeAdapter {
 
   name(): string {
     return this.opts.adapterName ?? 'claude_code';
+  }
+
+  descriptor(): RuntimeDescriptor {
+    return {
+      id: this.name().replace(/_/g, '-'),
+      displayName: this.name(),
+      capabilities: {
+        resume: this.supportsResume(),
+        enforcesReadOnly: false,
+        interactivePermission: false,
+        sandboxModes: ['danger-full-access'],
+        imageInput: 'none',
+        modelSelection: false,
+      },
+      credentialEnv: [],
+    };
   }
 
   async prepare(spec: TaskSpec, workspace: WorkspaceContext): Promise<RuntimeHandle> {

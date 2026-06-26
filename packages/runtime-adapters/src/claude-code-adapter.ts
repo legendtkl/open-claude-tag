@@ -12,6 +12,7 @@ import type { TaskSpec, TaskResult, RuntimeEvent, ArtifactRef } from '@open-tag/
 import { errorMessage } from '@open-tag/core-types';
 import type {
   RuntimeAdapter,
+  RuntimeDescriptor,
   RuntimeHandle,
   WorkspaceContext,
   HealthStatus,
@@ -29,6 +30,35 @@ import {
 
 const logger = createLogger('claude-code-adapter');
 const MAX_THINKING_SUMMARY_LENGTH = 500;
+
+/**
+ * Open capability descriptor for the Claude Code runtime. `id` is the open,
+ * hyphenated display id; the persisted key stays `name() === 'claude_code'`.
+ */
+export const CLAUDE_CODE_DESCRIPTOR: RuntimeDescriptor = {
+  id: 'claude-code',
+  displayName: 'Claude Code',
+  capabilities: {
+    resume: true,
+    // Read-only turns hard-deny the file-mutating tools (Edit/Write/MultiEdit/
+    // NotebookEdit) via the SDK's disallowedTools — a real tool-level denial,
+    // unlike Codex/Coco which leave read-only purely advisory. Bash itself stays
+    // available for non-mutating inspection (the workflow prompt forbids
+    // mutating shell commands).
+    enforcesReadOnly: true,
+    // Runtime capability: the Agent SDK supports an interactive per-tool
+    // permission decision (canUseTool). Distinct from the runtimes below, which
+    // have no interactive-approval path.
+    interactivePermission: true,
+    sandboxModes: ['readonly', 'workspace-write', 'danger-full-access'],
+    // Prepared images are read and passed as base64 image content blocks.
+    imageInput: 'base64',
+    modelSelection: true,
+  },
+  // ANTHROPIC_* vars resolved by claude-config.ts (base URL + either auth env).
+  credentialEnv: ['ANTHROPIC_BASE_URL', 'ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN'],
+  workflowPrompts: { selfDev: 'self-dev-claude', readonly: 'readonly', default: 'general-task' },
+};
 type ClaudeImageMediaType = 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp';
 
 export interface ClaudeCodeConfig {
@@ -58,6 +88,10 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
 
   name(): string {
     return 'claude_code';
+  }
+
+  descriptor(): RuntimeDescriptor {
+    return CLAUDE_CODE_DESCRIPTOR;
   }
 
   async prepare(spec: TaskSpec, workspace: WorkspaceContext): Promise<RuntimeHandle> {

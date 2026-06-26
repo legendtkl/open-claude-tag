@@ -12,12 +12,14 @@ import {
 import type { Logger } from '@open-tag/observability';
 import type {
   RuntimeAdapter,
+  RuntimeDescriptor,
   RuntimeHandle,
   WorkspaceContext,
   RuntimeCancelOptions,
   RuntimeCancelOutcome,
   HealthStatus,
 } from '@open-tag/runtime-adapters';
+import { RUNTIME_DESCRIPTORS_BY_NAME } from '@open-tag/runtime-adapters';
 
 /**
  * Local mirror of `RuntimeResumeOptions` (not exported from runtime-adapters'
@@ -133,6 +135,16 @@ export class RemoteRuntimeAdapter implements RuntimeAdapter {
 
   name(): string {
     return this.runtime;
+  }
+
+  /**
+   * Proxy the underlying runtime's open descriptor: a remote dispatch runs the
+   * same runtime (claude_code/codex/coco) on another host, so its capabilities
+   * are identical. Resolved by persisted name; `this.runtime` is always one of
+   * the three known keys.
+   */
+  descriptor(): RuntimeDescriptor {
+    return RUNTIME_DESCRIPTORS_BY_NAME[this.runtime];
   }
 
   supportsResume(): boolean {

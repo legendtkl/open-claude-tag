@@ -1,5 +1,8 @@
 export type {
   RuntimeAdapter,
+  RuntimeDescriptor,
+  RuntimeSandboxMode,
+  RuntimeRegistration,
   RuntimeHandle,
   WorkspaceContext,
   HealthStatus,
@@ -15,23 +18,31 @@ export {
   ensureAgentHomeDir,
   workspacesRoot,
 } from './workspace.js';
-export { ClaudeCodeAdapter } from './claude-code-adapter.js';
+export { ClaudeCodeAdapter, CLAUDE_CODE_DESCRIPTOR } from './claude-code-adapter.js';
 export type { ClaudeCodeConfig } from './claude-code-adapter.js';
 export { ChecklistAccumulator } from './checklist-accumulator.js';
 export type { ChecklistStep, ChecklistStatus, ChecklistSnapshot } from './checklist-accumulator.js';
 export { resolveClaudeAuthToken, resolveClaudeStartupConfig } from './claude-config.js';
 export type { ClaudeAuthEnv, ClaudeStartupEnv } from './claude-config.js';
-export { registerClaudeRuntimeAdapter } from './claude-runtime-registration.js';
-export { CodexAdapter } from './codex-adapter.js';
+export {
+  registerClaudeRuntimeAdapter,
+  claudeRuntimeRegistration,
+} from './claude-runtime-registration.js';
+export { CodexAdapter, CODEX_DESCRIPTOR } from './codex-adapter.js';
 export type { CodexConfig } from './codex-adapter.js';
 export {
   CocoAdapter,
+  COCO_DESCRIPTOR,
   buildCocoArgs,
   createCocoStreamState,
   processCocoEvent,
 } from './coco-adapter.js';
 export type { CocoConfig, CocoStreamState } from './coco-adapter.js';
-export { RuntimeManager } from './runtime-manager.js';
+export {
+  RUNTIME_DESCRIPTORS_BY_NAME,
+  getRuntimeDescriptor,
+} from './runtime-descriptors.js';
+export { RuntimeManager, buildRuntimeManager } from './runtime-manager.js';
 export { collectTaskImageAttachments } from './image-attachment.js';
 export type { ImageDownloader } from './image-attachment.js';
 export {

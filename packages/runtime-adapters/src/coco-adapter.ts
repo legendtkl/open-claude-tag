@@ -7,6 +7,7 @@ import type { TaskSpec, TaskResult, RuntimeEvent, ArtifactRef } from '@open-tag/
 import { errorMessage } from '@open-tag/core-types';
 import type {
   RuntimeAdapter,
+  RuntimeDescriptor,
   RuntimeHandle,
   WorkspaceContext,
   HealthStatus,
@@ -23,6 +24,31 @@ import {
 } from './image-attachment.js';
 
 const logger = createLogger('coco-adapter');
+
+/**
+ * Open capability descriptor for the Coco (TRAE CLI) runtime. Coco always runs
+ * `--yolo` (full access, no prompts) and authenticates from local git
+ * credentials, so it carries no credential env vars.
+ */
+export const COCO_DESCRIPTOR: RuntimeDescriptor = {
+  id: 'coco',
+  displayName: 'Coco',
+  capabilities: {
+    // `coco --resume <session>` resumes a prior session.
+    resume: true,
+    // `--yolo` runs unrestricted; there is no read-only enforcement.
+    enforcesReadOnly: false,
+    // `--yolo` is headless with no interactive approval.
+    interactivePermission: false,
+    sandboxModes: ['danger-full-access'],
+    // Coco recognises an image from its path embedded in the prompt text.
+    imageInput: 'local-path',
+    modelSelection: true,
+  },
+  // Coco authenticates via the host's local git credentials; no credential env.
+  credentialEnv: [],
+  workflowPrompts: { selfDev: 'self-dev-coco', readonly: 'readonly', default: 'general-task' },
+};
 
 /**
  * Coco (TRAE CLI / Codebase Copilot) runtime adapter.
@@ -324,6 +350,10 @@ export class CocoAdapter implements RuntimeAdapter {
 
   name(): string {
     return 'coco';
+  }
+
+  descriptor(): RuntimeDescriptor {
+    return COCO_DESCRIPTOR;
   }
 
   async prepare(spec: TaskSpec, workspace: WorkspaceContext): Promise<RuntimeHandle> {

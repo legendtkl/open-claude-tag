@@ -8,6 +8,7 @@ import type { TaskSpec, TaskResult, RuntimeEvent, ArtifactRef } from '@open-tag/
 import { errorMessage } from '@open-tag/core-types';
 import type {
   RuntimeAdapter,
+  RuntimeDescriptor,
   RuntimeHandle,
   WorkspaceContext,
   HealthStatus,
@@ -24,6 +25,35 @@ import {
 } from './image-attachment.js';
 
 const logger = createLogger('codex-adapter');
+
+/**
+ * Open capability descriptor for the Codex runtime. Codex is deliberately
+ * "weaker" than Claude Code here, faithful to this adapter's real behavior:
+ * read-only is advisory (the adapter always runs `danger-full-access`) and there
+ * is no interactive per-tool permission (headless `codex exec`).
+ */
+export const CODEX_DESCRIPTOR: RuntimeDescriptor = {
+  id: 'codex',
+  displayName: 'Codex',
+  capabilities: {
+    // resumeThread()/`codex exec resume <id>` — the SDK supports resuming.
+    resume: true,
+    // Read-only turns are advisory only: the adapter pins danger-full-access and
+    // merely keeps the non-mutating workflow prompt — it does not deny tools.
+    enforcesReadOnly: false,
+    // `codex exec` runs headless; no canUseTool / interactive approval is wired.
+    interactivePermission: false,
+    // The adapter hard-codes danger-full-access for every turn.
+    sandboxModes: ['danger-full-access'],
+    // Images are passed by local filesystem path (`local_image`).
+    imageInput: 'local-path',
+    modelSelection: true,
+  },
+  // The adapter injects CODEX_API_KEY; OPENAI_API_KEY is Codex's upstream default.
+  // Base URL is supplied via the `openai_base_url` config arg, not an env var.
+  credentialEnv: ['CODEX_API_KEY', 'OPENAI_API_KEY'],
+  workflowPrompts: { selfDev: 'self-dev-codex', readonly: 'readonly', default: 'general-task' },
+};
 
 /**
  * Upper bound on waiting for stream cleanup (child kill) before settling. In
@@ -79,6 +109,10 @@ export class CodexAdapter implements RuntimeAdapter {
 
   name(): string {
     return 'codex';
+  }
+
+  descriptor(): RuntimeDescriptor {
+    return CODEX_DESCRIPTOR;
   }
 
   async prepare(spec: TaskSpec, workspace: WorkspaceContext): Promise<RuntimeHandle> {

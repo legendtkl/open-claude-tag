@@ -1,6 +1,7 @@
 import { createLogger } from '@open-tag/observability';
 import type {
   RuntimeAdapter,
+  RuntimeRegistration,
   HealthStatus,
   RuntimeCancelOptions,
   RuntimeCancelOutcome,
@@ -121,4 +122,21 @@ export class RuntimeManager {
   listAdapters(): string[] {
     return Array.from(this.adapters.keys());
   }
+}
+
+/**
+ * Single, data-driven place that builds a {@link RuntimeManager}: every app
+ * (worker, daemon) describes its runtimes as a {@link RuntimeRegistration} list
+ * and hands it here. Only available runtimes are constructed and registered.
+ * Adding a runtime is a new list entry — no per-app registration block to keep
+ * in sync.
+ */
+export function buildRuntimeManager(registrations: RuntimeRegistration[]): RuntimeManager {
+  const manager = new RuntimeManager();
+  for (const registration of registrations) {
+    if (registration.isAvailable()) {
+      manager.register(registration.create());
+    }
+  }
+  return manager;
 }

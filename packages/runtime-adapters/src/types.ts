@@ -75,8 +75,46 @@ export interface RuntimeCancelOptions {
   force?: boolean;
 }
 
+export type RuntimeSandboxMode = 'readonly' | 'workspace-write' | 'danger-full-access';
+
+/**
+ * Open, data-driven description of a runtime backend. Lets the platform select,
+ * gate, and render a runtime from data instead of branching on name strings.
+ *
+ * `id` is the OPEN display/registry id (`claude-code` | `codex` | `coco`, hyphen
+ * form). It is deliberately distinct from {@link RuntimeAdapter.name}, which is
+ * the PERSISTED key written to `sessions.runtimeBackend` (`claude_code`
+ * underscore, `codex`, `coco`) and must never change. `workflowPrompts` carries
+ * workflow *refs* (basenames loadable via `loadWorkflow`), never inline prompts.
+ */
+export interface RuntimeDescriptor {
+  /** Open display/registry id (`claude-code` | `codex` | `coco`). NOT the persisted `name()`. */
+  id: string;
+  displayName: string;
+  capabilities: {
+    /** Can resume a previous SDK/CLI session for a follow-up turn. */
+    resume: boolean;
+    /** Hard-enforces read-only mode (denies file-mutating tools), not merely advisory. */
+    enforcesReadOnly: boolean;
+    /** Supports an interactive per-tool permission decision (e.g. canUseTool). */
+    interactivePermission: boolean;
+    /** Sandbox modes the adapter actually drives. */
+    sandboxModes: ReadonlyArray<RuntimeSandboxMode>;
+    /** How prepared images are handed to the runtime. */
+    imageInput: 'base64' | 'local-path' | 'none';
+    /** Accepts a per-task model override. */
+    modelSelection: boolean;
+  };
+  /** Credential env-var NAMES the runtime reads (values are never carried here). */
+  credentialEnv: string[];
+  /** Workflow prompt refs (basenames for `loadWorkflow`), not inline prompt bodies. */
+  workflowPrompts?: { selfDev?: string; readonly?: string; default?: string };
+}
+
 export interface RuntimeAdapter {
   name(): string;
+  /** Open, data-driven capability descriptor (distinct from the persisted `name()`). */
+  descriptor(): RuntimeDescriptor;
   prepare(spec: TaskSpec, workspace: WorkspaceContext): Promise<RuntimeHandle>;
   execute(
     handle: RuntimeHandle,
@@ -98,4 +136,15 @@ export interface RuntimeAdapter {
     systemPromptAppend?: string,
     options?: RuntimeResumeOptions,
   ): AsyncGenerator<RuntimeEvent>;
+}
+
+/**
+ * One runtime's contribution to a {@link RuntimeAdapter} registry. `isAvailable()`
+ * gates registration (e.g. a CLI binary is resolvable); `create()` builds the
+ * adapter lazily so an unavailable runtime never constructs. Consumed by
+ * `buildRuntimeManager`.
+ */
+export interface RuntimeRegistration {
+  isAvailable(): boolean;
+  create(): RuntimeAdapter;
 }
