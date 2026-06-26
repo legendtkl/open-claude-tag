@@ -112,6 +112,7 @@ import { registerManagedService, unregisterManagedService } from './service-proc
 import { getReplyToMessageId, upgradeRootProvisionalSession } from './reply-threading.js';
 import { applyDebugFeishuOverrides, createLoopbackFeishuClient } from './debug-feishu-client.js';
 import { applyBufferGate } from './buffer-gate.js';
+import { tapChannelObservation } from './channel-observation-tap.js';
 import { WorkerHealthMonitor } from './worker-health-monitor.js';
 import {
   WorktreeRetentionCleanupService,
@@ -2025,6 +2026,16 @@ async function processEventInner(
       logger.debug({ eventId: event.eventId }, 'Duplicate event, skipping');
       return true;
     }
+
+    // Always-on channel observation tap (Stage 1, "following the channel"):
+    // fold every non-duplicate inbound human message into per-channel memory —
+    // addressed (@mention) *and* un-addressed alike. Placed before routing /
+    // intake / buffering so un-@-mentioned messages are followed too. The tap is
+    // non-blocking + error-isolated (see channel-observation-tap.ts): a slow or
+    // failing observation write can never delay or break ACK, routing, or task
+    // dispatch. All filtering (bots/commands/sensitive/empty/dedup) lives in
+    // ingestObservation, so it is safe to call for every normalized message.
+    tapChannelObservation(db, event);
 
     event = await enrichEventWithCurrentMessageThread(event, currentAppContext.client, logger);
     event = await enrichEventWithReferencedMessage(event, currentAppContext.client, logger, {

@@ -60,6 +60,7 @@ Incremental, each stage compiles + passes tests + ships. See [`DESIGN.md`](./DES
 ---
 
 ## Cross-cutting follow-ups (track as issues)
+- **Channel observation write isolation:** the inbound observation tap fires detached writes on the shared API DB pool, bounded by an in-flight cap (load-shed under backlog). A dedicated pool / async write-queue (and per-channel toggle via `chatConfigs`, cheaper LLM gist + decay) is the durable refinement — folds naturally into Stage 3's "append-only + async compaction".
 - **Security (pre-existing, before public/prod):** fix the XFF-spoofing loopback-escalation — edge proxy must overwrite (not append) inbound `X-Forwarded-For`, or the loopback check must read the last hop. `dev-auth` is off by default, trusted-hosts only.
 - Codex runtime capability flags (weaker resume/readonly than Claude Code).
 - Per-stage gate: run a design review on the stage plan and a diff review before merge.
