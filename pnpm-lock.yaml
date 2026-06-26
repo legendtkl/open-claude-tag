@@ -330,6 +330,9 @@ importers:
 
   packages/feishu-adapter:
     dependencies:
+      '@open-tag/channel-core':
+        specifier: workspace:*
+        version: link:../channel-core
       '@open-tag/core-types':
         specifier: workspace:*
         version: link:../core-types

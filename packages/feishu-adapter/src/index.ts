@@ -1,3 +1,12 @@
+export { adaptNormalizedEvent } from './inbound-message.js';
+export type {
+  InboundMessage,
+  AttachmentRef,
+  Mention,
+  ReferencedMessage,
+  ConversationRef,
+  ChannelScope,
+} from '@open-tag/channel-core';
 export { normalizeDocumentCommentEvent, normalizeEvent } from './normalizer.js';
 export type {
   NormalizedDocumentCommentEvent,
