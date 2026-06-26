@@ -1,0 +1,35 @@
+{
+  "name": "@open-tag/queue",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "typecheck": "tsc --noEmit",
+    "clean": "rm -rf dist *.tsbuildinfo",
+    "test": "vitest run",
+    "test:unit": "vitest run",
+    "test:integration": "OPEN_TAG_QUEUE_PG_INTEGRATION=1 vitest run src/__tests__/task-queue.integration.test.ts"
+  },
+  "dependencies": {
+    "@open-tag/core-types": "workspace:*",
+    "@open-tag/observability": "workspace:^",
+    "pg-boss": "^10.1.0",
+    "pino": "^9.6.0",
+    "postgres": "^3.4.5"
+  },
+  "devDependencies": {
+    "@types/node": "^25.5.0",
+    "typescript": "^5.7.0",
+    "vitest": "^3.0.0"
+  }
+}
