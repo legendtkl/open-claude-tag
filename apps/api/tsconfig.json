@@ -1,0 +1,20 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "dist",
+    "rootDir": "src"
+  },
+  "include": ["src"],
+  "references": [
+    { "path": "../../packages/approval" },
+    { "path": "../../packages/core-types" },
+    { "path": "../../packages/feishu-adapter" },
+    { "path": "../../packages/memory" },
+    { "path": "../../packages/observability" },
+    { "path": "../../packages/orchestrator" },
+    { "path": "../../packages/queue" },
+    { "path": "../../packages/registry" },
+    { "path": "../../packages/session" },
+    { "path": "../../packages/storage" }
+  ]
+}
