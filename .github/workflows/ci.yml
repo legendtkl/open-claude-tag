@@ -2,9 +2,10 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, master]
   pull_request:
-    branches: [main]
+    branches: [main, master]
+  workflow_dispatch:
 
 # Cancel superseded runs on the same ref to save CI minutes.
 concurrency:
@@ -12,6 +13,57 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Corepack must be enabled BEFORE setup-node: `cache: pnpm` resolves the
+      # pnpm store path during the setup-node step, so pnpm has to be on PATH
+      # already. Reordering breaks the cache step ("pnpm: command not found").
+      - name: Enable Corepack (pnpm)
+        run: corepack enable
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # eslint exits 0 on warnings. The repo has ~370 no-explicit-any warnings
+      # but zero errors, so CI fails only when a real lint error is introduced.
+      - name: Lint
+        run: pnpm lint
+
+  typecheck:
+    name: Typecheck
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Enable Corepack (pnpm)
+        run: corepack enable
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        run: pnpm typecheck
+
   build-and-test:
     name: Build & Unit Test
     runs-on: ubuntu-latest
@@ -37,3 +89,178 @@ jobs:
 
       - name: Unit tests
         run: pnpm -r run test:unit
+
+  integration:
+    name: Postgres Integration
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: open-claude-tag
+          POSTGRES_PASSWORD: open-claude-tag
+          POSTGRES_DB: open-claude-tag
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U open-claude-tag"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgresql://open-claude-tag:open-claude-tag@localhost:5432/open-claude-tag
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Enable Corepack (pnpm)
+        run: corepack enable
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build
+        run: pnpm build
+
+      # drizzle-kit and the integration tests read DATABASE_URL from process
+      # env (set at job level above), so no .env file is required here.
+      - name: Run migrations
+        run: pnpm db:migrate
+
+      - name: Integration tests (Postgres)
+        env:
+          OPEN_TAG_API_PG_INTEGRATION: '1'
+          OPEN_TAG_STORAGE_PG_INTEGRATION: '1'
+          OPEN_TAG_ORCHESTRATOR_PG_INTEGRATION: '1'
+          OPEN_TAG_QUEUE_PG_INTEGRATION: '1'
+          OPEN_TAG_MEMORY_PG_INTEGRATION: '1'
+          OPEN_TAG_FEISHU_PG_INTEGRATION: '1'
+        run: pnpm -r run test:integration
+
+  e2e:
+    name: API E2E (isolated)
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: open-claude-tag
+          POSTGRES_PASSWORD: open-claude-tag
+          POSTGRES_DB: open-claude-tag
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U open-claude-tag"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+
+    env:
+      # Base DATABASE_URL. The isolated tooling derives a per-instance database
+      # (open_claude_tag_open_claude_tag) from this value.
+      DATABASE_URL: postgresql://open-claude-tag:open-claude-tag@localhost:5432/open-claude-tag
+      # Keep RBAC enforced. .env.example defaults OPEN_ACCESS=true, which fails
+      # two worktree-RBAC e2e cases. This job env wins because Node `--env-file`
+      # does NOT override an already-set process env var, so the copied .env's
+      # value is ignored.
+      OPEN_ACCESS: 'false'
+      # The checkout directory basename is the primary-repo name, so the
+      # isolated cleanup scripts would otherwise derive role=primary and miss
+      # the isolated pid files. Forcing the isolated role makes stop/reap/purge
+      # target the right pids and drop the isolated DB. The dev:*:isolated
+      # wrappers already force isolated mode internally, so this is also safe
+      # for setup and startup.
+      OPEN_TAG_INSTANCE_ROLE: isolated
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Enable Corepack (pnpm)
+        run: corepack enable
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # db:setup:isolated shells out to psql/createdb/dropdb via
+      # tools/instance/run.mjs; install the client explicitly rather than rely
+      # on whatever the runner image happens to ship.
+      - name: Install PostgreSQL client
+        run: sudo apt-get update && sudo apt-get install -y postgresql-client
+
+      - name: Build
+        run: pnpm build
+
+      # dev:*:isolated run `tsx --env-file=../../.env`; Node errors if .env is
+      # missing. Isolated mode forces Feishu disabled, so no real secrets are
+      # needed. OPEN_ACCESS from this file is overridden by the job env above.
+      - name: Prepare .env
+        run: cp .env.example .env
+
+      - name: Set up isolated database
+        run: pnpm db:setup:isolated
+
+      - name: Start isolated API and Worker
+        run: |
+          set -euo pipefail
+          nohup pnpm dev:api:isolated > "$RUNNER_TEMP/api.log" 2>&1 &
+          nohup pnpm dev:worker:isolated > "$RUNNER_TEMP/worker.log" 2>&1 &
+          API_URL="$(node -e "import('./tools/instance/config.mjs').then(m => process.stdout.write(m.buildIsolatedEnv({ cwd: process.cwd() }).API_URL))")"
+          echo "Derived API_URL=$API_URL"
+          ready=0
+          for i in $(seq 1 60); do
+            if curl -fsS -m 2 "$API_URL/health" >/dev/null 2>&1; then
+              echo "API healthy after ${i} attempt(s)"
+              ready=1
+              break
+            fi
+            sleep 2
+          done
+          if [ "$ready" != 1 ]; then
+            echo "::error::Isolated API did not become healthy at $API_URL/health"
+            echo "----- api.log -----"; cat "$RUNNER_TEMP/api.log" || true
+            echo "----- worker.log -----"; cat "$RUNNER_TEMP/worker.log" || true
+            exit 1
+          fi
+
+      - name: API E2E tests (isolated)
+        run: pnpm test:e2e:isolated
+
+      - name: Dump server logs
+        if: always()
+        run: |
+          echo "----- api.log (tail) -----"; tail -n 200 "$RUNNER_TEMP/api.log" || true
+          echo "----- worker.log (tail) -----"; tail -n 200 "$RUNNER_TEMP/worker.log" || true
+
+      - name: Upload server logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-server-logs
+          path: |
+            ${{ runner.temp }}/api.log
+            ${{ runner.temp }}/worker.log
+          if-no-files-found: ignore
+
+      - name: Stop isolated instance
+        if: always()
+        run: |
+          pnpm isolated:stop || true
+          pnpm isolated:reap || true
+          pnpm isolated:purge || true
