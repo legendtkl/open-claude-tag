@@ -47,6 +47,9 @@ importers:
       '@open-tag/core-types':
         specifier: workspace:*
         version: link:../../packages/core-types
+      '@open-tag/cross-channel':
+        specifier: workspace:*
+        version: link:../../packages/cross-channel
       '@open-tag/feishu-adapter':
         specifier: workspace:*
         version: link:../../packages/feishu-adapter
@@ -338,6 +341,15 @@ importers:
       zod:
         specifier: ^3.23.8
         version: 3.25.76
+    devDependencies:
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
+      vitest:
+        specifier: ^3.0.0
+        version: 3.2.4(@types/debug@4.1.13)(@types/node@25.5.0)(jiti@2.7.0)(jsdom@25.0.1)(tsx@4.21.0)
+
+  packages/cross-channel:
     devDependencies:
       typescript:
         specifier: ^5.7.0

@@ -64,3 +64,5 @@ history of decisions stays auditable.
 | [0002](0002-document-comment-session-resume.md) | Document Comment Session Resume | Accepted |
 | [0003](0003-chat-memory-index-detail-store.md) | Chat Memory Index And Detail Store | Accepted |
 | [0004](0004-inbound-message-pipeline-contract.md) | InboundMessage as the inbound pipeline contract | Accepted |
+| [0005](0005-neutral-non-lark-task-dispatch.md) | A minimal separate neutral dispatch path for non-lark inbound | Accepted |
+| [0006](0006-cross-channel-flag-broker.md) | Brokered, audited, isPrivate-safe cross-channel flagging | Accepted |

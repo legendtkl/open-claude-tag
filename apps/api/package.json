@@ -20,6 +20,7 @@
     "@open-tag/channel-core": "workspace:*",
     "@open-tag/channel-slack": "workspace:*",
     "@open-tag/core-types": "workspace:*",
+    "@open-tag/cross-channel": "workspace:*",
     "@open-tag/feishu-adapter": "workspace:*",
     "@open-tag/llm-client": "workspace:*",
     "@open-tag/memory": "workspace:*",
