@@ -4,8 +4,12 @@ import { and, desc, eq, gt } from 'drizzle-orm';
 
 /** Default page size for {@link getChannelObservations} — a recent window, not all history. */
 const DEFAULT_OBSERVATION_LIMIT = 50;
-/** Absolute ceiling so a caller-supplied limit can never request an unbounded scan. */
-const MAX_OBSERVATION_LIMIT = 200;
+/**
+ * Absolute ceiling so a caller-supplied limit can never request an unbounded scan.
+ * Exported so retention can pin its keep-floor to the read cap (no constant drift):
+ * the prune must never delete a row a read could still surface.
+ */
+export const MAX_OBSERVATION_LIMIT = 200;
 /** How many of the most-recent observations {@link hydrateChannelMemory} folds into a block. */
 const HYDRATE_OBSERVATION_LIMIT = 20;
 /** Per-observation render cap inside the hydrated block (the stored gist may be up to 4000). */

@@ -1161,6 +1161,16 @@ export const channelObservations = pgTable(
     ),
     index('idx_channel_observations_scope').on(table.channelKind, table.scopeId),
     index('idx_channel_observations_occurred').on(table.occurredAt),
+    // Recency index per scope: serves both the read order and the retention prune
+    // (newest-first protect + oldest-first delete) — full read-order columns so a
+    // forward/backward index scan covers both directions without a sort.
+    index('idx_channel_observations_scope_recency').on(
+      table.channelKind,
+      table.scopeId,
+      table.occurredAt,
+      table.createdAt,
+      table.id,
+    ),
   ],
 );
 

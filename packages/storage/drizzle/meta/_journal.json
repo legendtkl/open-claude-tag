@@ -274,6 +274,13 @@
       "when": 1783123200000,
       "tag": "0038_identity_access_grants",
       "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "7",
+      "when": 1783209600000,
+      "tag": "0039_channel_observation_retention",
+      "breakpoints": true
     }
   ]
 }

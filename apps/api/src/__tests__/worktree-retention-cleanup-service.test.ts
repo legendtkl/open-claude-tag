@@ -258,4 +258,64 @@ describe('worktree-retention-cleanup-service', () => {
     await vi.advanceTimersByTimeAsync(1000);
     expect(staleThreadScan).toHaveBeenCalledTimes(2);
   });
+
+  it('runs the injected channel-memory retention scan on each tick alongside the other steps', async () => {
+    const channelMemoryRetentionScan = vi.fn(async () => undefined);
+    const service = new WorktreeRetentionCleanupService({} as Database, '/repo', {
+      intervalMs: 1000,
+      retentionMs: 2000,
+      conversationIdleMs: 5000,
+      channelMemoryRetentionScan,
+    });
+
+    service.start();
+    await vi.advanceTimersByTimeAsync(1000);
+
+    expect(mockCleanStaleWorktrees).toHaveBeenCalledTimes(1);
+    expect(mockReapIdle).toHaveBeenCalledTimes(1);
+    expect(channelMemoryRetentionScan).toHaveBeenCalledTimes(1);
+  });
+
+  it('skips the channel-memory retention step cleanly when no scan is injected', async () => {
+    const service = new WorktreeRetentionCleanupService({} as Database, '/repo', {
+      intervalMs: 1000,
+      retentionMs: 2000,
+      conversationIdleMs: 5000,
+    });
+
+    service.start();
+    await vi.advanceTimersByTimeAsync(1000);
+
+    expect(mockReapIdle).toHaveBeenCalledTimes(1);
+    expect(loggerMock.error).not.toHaveBeenCalledWith(
+      expect.anything(),
+      'Channel memory retention scan tick failed',
+    );
+  });
+
+  it('isolates a channel-memory retention failure: the other steps still ran and the tick survives', async () => {
+    const channelMemoryRetentionScan = vi.fn(async () => {
+      throw new Error('prune boom');
+    });
+    const service = new WorktreeRetentionCleanupService({} as Database, '/repo', {
+      intervalMs: 1000,
+      retentionMs: 2000,
+      conversationIdleMs: 5000,
+      channelMemoryRetentionScan,
+    });
+
+    service.start();
+    await vi.advanceTimersByTimeAsync(1000);
+
+    expect(mockCleanStaleWorktrees).toHaveBeenCalledTimes(1);
+    expect(mockReapIdle).toHaveBeenCalledTimes(1);
+    expect(loggerMock.error).toHaveBeenCalledWith(
+      expect.objectContaining({ err: expect.any(Error) }),
+      'Channel memory retention scan tick failed',
+    );
+
+    // Still alive: the next tick runs the scan again.
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(channelMemoryRetentionScan).toHaveBeenCalledTimes(2);
+  });
 });

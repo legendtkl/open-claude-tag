@@ -91,7 +91,13 @@ import {
 import type { MentionRoutingDecision, TaskCreatedEvent } from '@open-tag/orchestrator';
 import { TaskQueue, type TaskJobData } from '@open-tag/queue';
 import { AuditService, getUserRole } from '@open-tag/approval';
-import { MemoryHandler } from '@open-tag/memory';
+import {
+  MemoryHandler,
+  pruneChannelObservations,
+  DEFAULT_CHANNEL_MEMORY_MAX_PER_SCOPE,
+  DEFAULT_CHANNEL_MEMORY_MAX_SCOPES_PER_TICK,
+  DEFAULT_CHANNEL_MEMORY_MAX_DELETES_PER_SCOPE,
+} from '@open-tag/memory';
 import { resolveIdentity, type Identity } from '@open-tag/registry';
 import { parseAmbientFlag } from '@open-tag/ambient';
 import type { AmbientConfig, AmbientDecision, AmbientJudge } from '@open-tag/ambient';
@@ -2110,6 +2116,75 @@ function buildStaleThreadScan(): () => Promise<void> {
       audit: auditService,
       deliver,
     });
+}
+
+/**
+ * Parse a positive-integer env override, falling back to a default. An explicit
+ * `0` is honored only when `allowZero` is set (used to let an operator disable the
+ * channel-memory count cap via `OPEN_TAG_CHANNEL_MEMORY_MAX_PER_SCOPE=0`); any
+ * other invalid/blank value falls back to the safe default rather than disabling.
+ */
+function parsePositiveIntEnv(
+  raw: string | undefined,
+  fallback: number,
+  allowZero = false,
+): number {
+  if (raw == null || raw.trim() === '') return fallback;
+  const parsed = Number.parseInt(raw, 10);
+  if (!Number.isFinite(parsed)) return fallback;
+  if (parsed === 0 && allowZero) return 0;
+  if (parsed <= 0) return fallback;
+  return parsed;
+}
+
+/**
+ * Build the error-isolated channel-memory retention prune injected into the
+ * reconciler tick (Stage 3). Bounds the append-only `channel_observations` growth:
+ * for each over-cap `(channelKind, scopeId)` it deletes the oldest surplus beyond a
+ * keep-floor, never a row a read could surface (the floor is pinned ≥ the read cap).
+ *
+ * Default-safe: the count cap defaults ON at a conservative
+ * {@link DEFAULT_CHANNEL_MEMORY_MAX_PER_SCOPE} so unbounded growth is stopped out of
+ * the box, while a scope under that floor is a complete no-op. Setting
+ * `OPEN_TAG_CHANNEL_MEMORY_MAX_PER_SCOPE=0` disables the count cap; the optional
+ * `OPEN_TAG_CHANNEL_MEMORY_TTL_MS` (off by default) adds age-based pruning of
+ * already-surplus rows. Per-tick batch caps bound a first-rollout delete.
+ */
+function buildChannelMemoryRetentionScan(): () => Promise<void> {
+  const maxRaw = parsePositiveIntEnv(
+    process.env.OPEN_TAG_CHANNEL_MEMORY_MAX_PER_SCOPE,
+    DEFAULT_CHANNEL_MEMORY_MAX_PER_SCOPE,
+    true,
+  );
+  const maxPerScope = maxRaw === 0 ? null : maxRaw;
+  const ttlRaw = parsePositiveIntEnv(process.env.OPEN_TAG_CHANNEL_MEMORY_TTL_MS, 0, true);
+  const ttlMs = ttlRaw === 0 ? null : ttlRaw;
+  const maxScopesPerTick = parsePositiveIntEnv(
+    process.env.OPEN_TAG_CHANNEL_MEMORY_MAX_SCOPES_PER_TICK,
+    DEFAULT_CHANNEL_MEMORY_MAX_SCOPES_PER_TICK,
+  );
+  const maxDeletesPerScope = parsePositiveIntEnv(
+    process.env.OPEN_TAG_CHANNEL_MEMORY_MAX_DELETES_PER_SCOPE,
+    DEFAULT_CHANNEL_MEMORY_MAX_DELETES_PER_SCOPE,
+  );
+
+  return async () => {
+    // Disabled (both knobs off) ⇒ complete no-op, never touches the DB.
+    if (maxPerScope == null && ttlMs == null) return;
+    const result = await pruneChannelObservations(db, {
+      maxPerScope,
+      ttlMs,
+      now: new Date(),
+      maxScopesPerTick,
+      maxDeletesPerScope,
+    });
+    if (result.deleted > 0) {
+      logger.info(
+        { scopesScanned: result.scopesScanned, deleted: result.deleted },
+        'Channel memory retention prune tick completed',
+      );
+    }
+  };
 }
 
 /** Extract the first JSON object from a model reply (tolerates code fences/prose). */
@@ -4417,6 +4492,7 @@ async function start(): Promise<void> {
   if (shouldRunWorktreeRetentionCleanup({ instanceRole: INSTANCE_ROLE, processType: 'api' })) {
     worktreeRetentionCleanupService = new WorktreeRetentionCleanupService(db, OPEN_TAG_REPO_ROOT, {
       staleThreadScan: buildStaleThreadScan(),
+      channelMemoryRetentionScan: buildChannelMemoryRetentionScan(),
     });
   } else {
     logger.info(
