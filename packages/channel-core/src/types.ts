@@ -87,6 +87,14 @@ export interface ReferencedMessage {
   messageId: string;
   text?: string;
   sender?: string;
+  /**
+   * Per-entry author/text of a merged/forwarded reference. The core assembles
+   * task-goal context from these (one `author: text` line per entry). Neutral:
+   * a forwarded bundle of sub-messages maps here on Slack/Discord too. Additive
+   * to the existing `text`/`sender` projection, which stays byte-compatible for
+   * other neutral consumers.
+   */
+  entries?: { author?: string; text: string }[];
 }
 
 export type InboundEventType = 'created' | 'updated' | 'deleted' | 'reaction' | 'interaction';

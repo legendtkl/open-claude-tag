@@ -175,8 +175,36 @@ describe('adaptNormalizedEvent', () => {
     );
 
     expect(inbound.content.referenced).toEqual([
-      { messageId: 'msg_ref_001', text: 'line one\nline two', sender: 'Alice' },
+      {
+        messageId: 'msg_ref_001',
+        text: 'line one\nline two',
+        sender: 'Alice',
+        // Per-entry author/text carried verbatim for core goal assembly (ADR-0004).
+        entries: [{ author: 'Alice', text: 'line one' }, { text: 'line two' }],
+      },
     ]);
+  });
+
+  it('preserves an explicit empty-string entry author in the neutral entries', () => {
+    const inbound = adaptNormalizedEvent(
+      makeNormalizedEvent({
+        content: {
+          type: 'text',
+          text: 'see above',
+          mentions: [],
+          referencedMessages: [
+            {
+              messageId: 'msg_ref_002',
+              contentType: 'text',
+              entries: [{ author: '', text: 'anon line' }],
+            },
+          ],
+          raw: {},
+        },
+      }),
+    );
+
+    expect(inbound.content.referenced?.[0].entries).toEqual([{ author: '', text: 'anon line' }]);
   });
 
   it('falls back to eventId for the dedupe key when messageId is empty', () => {

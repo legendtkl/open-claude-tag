@@ -1,6 +1,6 @@
 import { randomUUID } from 'crypto';
 import { TaskStatus, IntentType, isObjectRecord } from '@open-tag/core-types';
-import type { NormalizedEvent } from '@open-tag/core-types';
+import type { InboundMessage, ReferencedMessage } from '@open-tag/channel-core';
 import type { Database } from '@open-tag/storage';
 import { tasks } from '@open-tag/storage';
 import { and, eq } from 'drizzle-orm';
@@ -15,7 +15,12 @@ export interface OrchestratorResult {
   runtime?: string;
   goal?: string;
   imageAttachment?: { imageKey: string; messageId: string };
-  fileAttachment?: NonNullable<NormalizedEvent['content']['fileAttachment']>;
+  /**
+   * Opaque channel attachment payload forwarded into task constraints (a Feishu
+   * file descriptor today). The core never inspects it, so it stays vendor-neutral
+   * `unknown` here; the vendor-aware caller casts it back when threading it on.
+   */
+  fileAttachment?: unknown;
 }
 
 export interface HandleEventOptions {
@@ -23,6 +28,16 @@ export interface HandleEventOptions {
   feishuAppId?: string;
   extraTaskConstraints?: Record<string, unknown>;
   taskId?: string;
+  /**
+   * Channel attachment payloads + the exact source message id, supplied by the
+   * vendor-aware caller (ADR-0004 1a-ii). The image carries its owning message id
+   * and the file a vendor `resourceType` that the neutral surface does not retain
+   * losslessly, and `message.messageId` is a lossy `messageId || eventId` fallback,
+   * so these are passed explicitly rather than read off the neutral message.
+   */
+  imageAttachment?: { imageKey: string; messageId: string };
+  fileAttachment?: unknown;
+  userMessageId?: string;
 }
 
 function jsonLikeEquals(left: unknown, right: unknown): boolean {
@@ -77,34 +92,15 @@ function assertDuplicateTaskMatches(
   }
 }
 
-function buildCurrentImageAttachment(
-  event: NormalizedEvent,
-): { imageKey: string; messageId: string } | undefined {
-  return event.content.type === 'image' && event.content.imageKey && event.content.imageMessageId
-    ? { imageKey: event.content.imageKey, messageId: event.content.imageMessageId }
-    : undefined;
-}
-
-function buildReferencedImageAttachment(
-  event: NormalizedEvent,
-): { imageKey: string; messageId: string } | undefined {
-  return event.content.referencedMessages?.find((message) => message.imageAttachment)
-    ?.imageAttachment;
-}
-
-function buildCurrentFileAttachment(
-  event: NormalizedEvent,
-): NonNullable<NormalizedEvent['content']['fileAttachment']> | undefined {
-  return event.content.type === 'file' ? event.content.fileAttachment : undefined;
-}
-
-function appendReferencedContext(goal: string, event: NormalizedEvent): string {
-  const sections = (event.content.referencedMessages ?? [])
+function appendReferencedContext(goal: string, referenced: ReferencedMessage[]): string {
+  const sections = referenced
     .map((message) => {
-      const lines = message.entries.map((entry) =>
+      const lines = (message.entries ?? []).map((entry) =>
         entry.author ? `${entry.author}: ${entry.text}` : entry.text,
       );
       if (lines.length === 0) return '';
+      // Pinned legacy prompt wording; kept byte-identical (the worded vendor name
+      // is neutralized in a later slice once goal byte-identity is not required).
       return [`[Referenced Feishu message: ${message.messageId}]`, ...lines].join('\n');
     })
     .filter(Boolean);
@@ -115,17 +111,17 @@ function appendReferencedContext(goal: string, event: NormalizedEvent): string {
 
 export async function handleEvent(
   db: Database,
-  event: NormalizedEvent,
+  message: InboundMessage,
   sessionId: string,
   options: HandleEventOptions = {},
 ): Promise<OrchestratorResult> {
-  const text = event.content.text ?? '';
-  const command = event.content.command;
-  const currentImageAttachment = buildCurrentImageAttachment(event);
-  const referencedImageAttachment = buildReferencedImageAttachment(event);
-  const imageAttachment = currentImageAttachment ?? referencedImageAttachment;
+  const text = message.content.text ?? '';
+  const command = message.content.command;
+  // Attachments + the exact source message id are non-lossless on the neutral
+  // surface, so the vendor-aware caller supplies them (see HandleEventOptions).
+  const imageAttachment = options.imageAttachment;
   const hasImageAttachment = Boolean(imageAttachment);
-  const fileAttachment = buildCurrentFileAttachment(event);
+  const fileAttachment = options.fileAttachment;
   const hasFileAttachment = Boolean(fileAttachment);
 
   // For resource-only messages, use a default goal.
@@ -133,7 +129,7 @@ export async function handleEvent(
     hasImageAttachment && !text ? '请分析这张图片' : hasFileAttachment && !text ? '请分析这个文件' : text;
 
   const intent = classifyIntent(effectiveText, command);
-  const taskGoal = appendReferencedContext(effectiveText, event);
+  const taskGoal = appendReferencedContext(effectiveText, message.content.referenced ?? []);
 
   // Intake: ops_task → handle directly (slash commands are dispatched by server)
   if (intent === IntentType.OPS_TASK) {
@@ -162,13 +158,13 @@ export async function handleEvent(
     constraints: {
       timeoutSec: 1800,
       approvalRequired: intent === IntentType.SELF_IMPROVEMENT,
-      tenantKey: event.tenantKey,
-      chatId: event.chatId,
+      tenantKey: message.scope.installationId,
+      chatId: message.scope.scopeId,
       agentId: options.agentId,
       feishuAppId: options.feishuAppId,
-      userMessageId: event.messageId,
-      requesterOpenId: event.senderOpenId,
-      replyLanguage: event.replyLanguage,
+      userMessageId: options.userMessageId,
+      requesterOpenId: message.sender.id,
+      replyLanguage: message.locale,
       ...(imageAttachment ? { imageAttachment } : {}),
       ...(fileAttachment ? { fileAttachment } : {}),
       ...(options.extraTaskConstraints ?? {}),

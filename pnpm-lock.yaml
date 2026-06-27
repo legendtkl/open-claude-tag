@@ -458,6 +458,9 @@ importers:
 
   packages/orchestrator:
     dependencies:
+      '@open-tag/channel-core':
+        specifier: workspace:*
+        version: link:../channel-core
       '@open-tag/core-types':
         specifier: workspace:*
         version: link:../core-types
@@ -471,6 +474,9 @@ importers:
         specifier: ^0.38.0
         version: 0.38.4(@types/react@19.2.17)(pg@8.20.0)(postgres@3.4.8)(react@19.2.7)
     devDependencies:
+      '@open-tag/feishu-adapter':
+        specifier: workspace:*
+        version: link:../feishu-adapter
       '@types/node':
         specifier: ^25.5.0
         version: 25.5.0

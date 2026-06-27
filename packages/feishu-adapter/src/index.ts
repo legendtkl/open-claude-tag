@@ -1,4 +1,6 @@
 export { adaptNormalizedEvent } from './inbound-message.js';
+export { deriveFeishuTaskAttachments } from './task-attachments.js';
+export type { FeishuTaskAttachments } from './task-attachments.js';
 export { LarkChannel } from './lark-channel.js';
 export type {
   InboundMessage,

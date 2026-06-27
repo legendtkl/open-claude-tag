@@ -20,12 +20,14 @@
     "test:unit": "vitest run"
   },
   "dependencies": {
+    "@open-tag/channel-core": "workspace:*",
     "@open-tag/core-types": "workspace:*",
     "@open-tag/llm-client": "workspace:*",
     "@open-tag/storage": "workspace:*",
     "drizzle-orm": "^0.38.0"
   },
   "devDependencies": {
+    "@open-tag/feishu-adapter": "workspace:*",
     "@types/node": "^25.5.0",
     "postgres": "^3.4.5",
     "typescript": "^5.7.0",

@@ -1,7 +1,27 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { IntentType, TaskStatus } from '@open-tag/core-types';
 import type { NormalizedEvent } from '@open-tag/core-types';
-import { handleEvent } from '../orchestrator.js';
+import { adaptNormalizedEvent, deriveFeishuTaskAttachments } from '@open-tag/feishu-adapter';
+import { handleEvent, type HandleEventOptions } from '../orchestrator.js';
+
+/**
+ * Mirror the production call site (ADR-0004 1a-ii): the vendor-aware caller adapts
+ * the Feishu event to the neutral InboundMessage and supplies the non-lossless
+ * attachment payloads + the exact source message id as options. Tests drive
+ * `handleEvent` through this seam so they exercise the migrated contract.
+ */
+function dispatch(
+  db: unknown,
+  event: NormalizedEvent,
+  sessionId: string,
+  opts: HandleEventOptions = {},
+) {
+  return handleEvent(db as never, adaptNormalizedEvent(event), sessionId, {
+    ...deriveFeishuTaskAttachments(event),
+    userMessageId: event.messageId,
+    ...opts,
+  });
+}
 
 // ── Mock DB ──
 function createMockDb(input: { createdRows?: unknown[]; existingRows?: unknown[] } = {}) {
@@ -57,7 +77,7 @@ describe('handleEvent: runtime selection without per-message override', () => {
     const event = makeEvent({
       content: { type: 'text', text: '写一个排序函数并解释思路设计取舍', raw: {} },
     });
-    const result = await handleEvent(db as any, event, 'session_1');
+    const result = await dispatch(db, event, 'session_1');
 
     expect(result.type).toBe('task_created');
     expect(result.runtime).toBe('auto');
@@ -83,7 +103,7 @@ describe('handleEvent: task creation metadata', () => {
       },
     });
 
-    const result = await handleEvent(db as any, event, 'session_1');
+    const result = await dispatch(db, event, 'session_1');
 
     expect(result.type).toBe('task_created');
     const inserted = db._getInsertedValues();
@@ -107,7 +127,7 @@ describe('handleEvent: task creation metadata', () => {
       },
     });
 
-    const result = await handleEvent(db as any, event, 'session_1', {
+    const result = await dispatch(db, event, 'session_1', {
       agentId: 'agent_123',
       feishuAppId: 'app_123',
     });
@@ -133,7 +153,7 @@ describe('handleEvent: task creation metadata', () => {
       },
     });
 
-    const result = await handleEvent(db as any, event, 'session_1', {
+    const result = await dispatch(db, event, 'session_1', {
       extraTaskConstraints: {
         multiMentionRouting: {
           route: 'relay',
@@ -163,7 +183,7 @@ describe('handleEvent: task creation metadata', () => {
       },
     });
 
-    const result = await handleEvent(db as any, event, 'session_1', {
+    const result = await dispatch(db, event, 'session_1', {
       taskId: 'task_stable_123',
     });
 
@@ -207,7 +227,7 @@ describe('handleEvent: task creation metadata', () => {
       ],
     });
 
-    const result = await handleEvent(db as any, event, 'session_1', {
+    const result = await dispatch(db, event, 'session_1', {
       taskId: 'task_stable_123',
       agentId: 'agent_123',
       feishuAppId: 'app_123',
@@ -267,7 +287,7 @@ describe('handleEvent: task creation metadata', () => {
       ],
     });
 
-    const result = await handleEvent(db as any, event, 'session_1', {
+    const result = await dispatch(db, event, 'session_1', {
       taskId: 'task_stable_456',
       agentId: 'agent_123',
       feishuAppId: 'app_123',
@@ -310,7 +330,7 @@ describe('handleEvent: image message routing', () => {
         raw: {},
       },
     });
-    const result = await handleEvent(db as any, event, 'session_1');
+    const result = await dispatch(db, event, 'session_1');
 
     expect(result.type).toBe('task_created');
     expect(result.runtime).toBe('auto');
@@ -325,7 +345,7 @@ describe('handleEvent: image message routing', () => {
         raw: {},
       },
     });
-    await handleEvent(db as any, event, 'session_1');
+    await dispatch(db, event, 'session_1');
 
     const inserted = db._getInsertedValues();
     expect(inserted.goal).toBe('请分析这张图片');
@@ -340,7 +360,7 @@ describe('handleEvent: image message routing', () => {
         raw: {},
       },
     });
-    const result = await handleEvent(db as any, event, 'session_1');
+    const result = await dispatch(db, event, 'session_1');
 
     expect(result.imageAttachment).toEqual({ imageKey: 'img_v2_abc123', messageId: 'msg_1' });
     expect(db._getInsertedValues().constraints.imageAttachment).toEqual({
@@ -364,7 +384,7 @@ describe('handleEvent: image message routing', () => {
         raw: {},
       },
     });
-    const result = await handleEvent(db as any, event, 'session_1');
+    const result = await dispatch(db, event, 'session_1');
 
     expect(result.fileAttachment).toEqual(fileAttachment);
     expect(result.goal).toBe('请分析这个文件');
@@ -391,7 +411,7 @@ describe('handleEvent: image message routing', () => {
       },
     });
 
-    const result = await handleEvent(db as any, event, 'session_1');
+    const result = await dispatch(db, event, 'session_1');
 
     expect(result.type).toBe('task_created');
     expect(result.runtime).toBe('auto');
@@ -426,7 +446,7 @@ describe('handleEvent: image message routing', () => {
       },
     });
 
-    const result = await handleEvent(db as any, event, 'session_1');
+    const result = await dispatch(db, event, 'session_1');
 
     expect(result.type).toBe('task_created');
     expect(result.goal).toContain('学习一下这些进度，给我下周计划');
@@ -449,7 +469,7 @@ describe('handleEvent: image message routing', () => {
         raw: {},
       },
     });
-    await handleEvent(db as any, event, 'session_1');
+    await dispatch(db, event, 'session_1');
 
     const inserted = db._getInsertedValues();
     expect(inserted.goal).toBe('这个错误是什么意思');
@@ -462,7 +482,7 @@ describe('handleEvent: image message routing', () => {
         raw: {},
       },
     });
-    const result = await handleEvent(db as any, event, 'session_1');
+    const result = await dispatch(db, event, 'session_1');
 
     expect(result.imageAttachment).toBeUndefined();
   });
@@ -479,7 +499,7 @@ describe('handleEvent: default routing', () => {
     const event = makeEvent({
       content: { type: 'text', text: '帮我写一个排序函数', raw: {} },
     });
-    const result = await handleEvent(db as any, event, 'session_1');
+    const result = await dispatch(db, event, 'session_1');
 
     expect(result.type).toBe('task_created');
     expect(result.runtime).toBe('auto'); // no explicit --runtime; preserves session runtime
@@ -490,7 +510,7 @@ describe('handleEvent: default routing', () => {
     const event = makeEvent({
       content: { type: 'text', text: '你好', raw: {} },
     });
-    const result = await handleEvent(db as any, event, 'session_1');
+    const result = await dispatch(db, event, 'session_1');
 
     expect(result.type).toBe('task_created');
     expect(result.runtime).toBe('auto'); // no explicit --runtime; preserves session runtime

@@ -26,7 +26,7 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it, vi } from 'vitest';
 import { IntentType } from '@open-tag/core-types';
 import type { NormalizedEvent } from '@open-tag/core-types';
-import { adaptNormalizedEvent } from '@open-tag/feishu-adapter';
+import { adaptNormalizedEvent, deriveFeishuTaskAttachments } from '@open-tag/feishu-adapter';
 import { handleEvent } from '@open-tag/orchestrator';
 import { buildQueuedTaskInput } from '../task-dispatch.js';
 
@@ -55,6 +55,25 @@ function recover(event: NormalizedEvent): NormalizedEvent {
   const inbound = adaptNormalizedEvent(event);
   expect(inbound.channel.kind).toBe('lark');
   return inbound.channel.native as NormalizedEvent;
+}
+
+/**
+ * Drive the dispatch core exactly as the production caller does after the
+ * ADR-0004 1a-ii migration: adapt the Feishu event to the neutral InboundMessage
+ * and supply the non-lossless attachment payloads + exact source message id as
+ * options. The behavioral assertions below are unchanged; only the entry seam is.
+ */
+function dispatch(
+  db: ReturnType<typeof createMockDb>,
+  event: NormalizedEvent,
+  sessionId: string,
+  opts: Parameters<typeof handleEvent>[3] = {},
+) {
+  return handleEvent(db as never, adaptNormalizedEvent(event), sessionId, {
+    ...deriveFeishuTaskAttachments(event),
+    userMessageId: event.messageId,
+    ...opts,
+  });
 }
 
 function makeEvent(overrides: Partial<NormalizedEvent> = {}): NormalizedEvent {
@@ -188,13 +207,8 @@ describe('inbound dispatch seam — dispatch outcome is identical for original v
       // Pin a fixed taskId so the only non-deterministic field (handleEvent mints
       // a random uuid otherwise) cannot mask a real difference between the two.
       const opts = { taskId: 'task-seam-fixed' };
-      const fromOriginal = await handleEvent(dbOriginal as never, event, 'session-seam', opts);
-      const fromRecovered = await handleEvent(
-        dbRecovered as never,
-        recover(event),
-        'session-seam',
-        opts,
-      );
+      const fromOriginal = await dispatch(dbOriginal, event, 'session-seam', opts);
+      const fromRecovered = await dispatch(dbRecovered, recover(event), 'session-seam', opts);
 
       expect(fromRecovered).toEqual(fromOriginal);
       expect(dbRecovered._getInsertedValues()).toEqual(dbOriginal._getInsertedValues());
@@ -206,7 +220,7 @@ describe('inbound dispatch seam — pinned dispatch shapes (today\'s behavior)',
   it('@mention analysis task: pins task type, auto runtime, and goal', async () => {
     const event = CASES[0].event;
     const db = createMockDb();
-    const result = await handleEvent(db as never, event, 'session-seam', {
+    const result = await dispatch(db, event, 'session-seam', {
       agentId: 'agent_seam',
       feishuAppId: 'app_seam',
     });
@@ -233,7 +247,7 @@ describe('inbound dispatch seam — pinned dispatch shapes (today\'s behavior)',
   it('image task: preserves runtime and carries imageAttachment into constraints', async () => {
     const event = CASES[2].event;
     const db = createMockDb();
-    const result = await handleEvent(db as never, event, 'session-seam');
+    const result = await dispatch(db, event, 'session-seam');
 
     expect(result.type).toBe('task_created');
     expect(result.imageAttachment).toEqual({ imageKey: 'img_seam_key', messageId: 'om_seam_1' });
@@ -245,7 +259,7 @@ describe('inbound dispatch seam — pinned dispatch shapes (today\'s behavior)',
   it('file task: carries fileAttachment into constraints', async () => {
     const event = CASES[3].event;
     const db = createMockDb();
-    const result = await handleEvent(db as never, event, 'session-seam');
+    const result = await dispatch(db, event, 'session-seam');
 
     expect(result.type).toBe('task_created');
     expect(db._getInsertedValues().constraints).toMatchObject({
@@ -262,7 +276,7 @@ describe('inbound dispatch seam — pinned dispatch shapes (today\'s behavior)',
   it('referenced task: folds referenced chat records into the goal', async () => {
     const event = CASES[5].event;
     const db = createMockDb();
-    const result = await handleEvent(db as never, event, 'session-seam');
+    const result = await dispatch(db, event, 'session-seam');
 
     expect(result.type).toBe('task_created');
     expect(result.goal).toContain('学习一下引用记录');

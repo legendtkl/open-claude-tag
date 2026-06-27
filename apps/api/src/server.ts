@@ -54,6 +54,7 @@ import { FeishuWsManager } from './feishu-ws-manager.js';
 import {
   FeishuClient,
   adaptNormalizedEvent,
+  deriveFeishuTaskAttachments,
   normalizeDocumentCommentEvent,
   normalizeEvent,
   normalizeEventForObservation,
@@ -476,10 +477,14 @@ async function handleNormalMessage(
   // input (same object via channel.native), so behavior is unchanged. The one
   // non-lossless scalar (the exact message id) is also read from native.
   const event = recoverFeishuNormalizedEvent(message);
-  const result = await handleEvent(db, event, sessionId, {
+  const result = await handleEvent(db, message, sessionId, {
     ...agentContext,
     extraTaskConstraints,
     taskId: explicitTaskId,
+    // Non-lossless attachment payloads + the exact source message id come from the
+    // recovered native event that backs `message` (ADR-0004 1a-ii).
+    ...deriveFeishuTaskAttachments(event),
+    userMessageId: event.messageId,
   });
 
   if (result.type === 'direct_reply' && result.reply) {
@@ -588,7 +593,11 @@ async function handleNormalMessage(
           runtime: result.runtime,
           goal: result.goal,
           imageAttachment: result.imageAttachment,
-          fileAttachment: result.fileAttachment,
+          // result.fileAttachment is vendor-opaque (`unknown`) at the core boundary;
+          // this Feishu layer threads the known descriptor back through.
+          fileAttachment: result.fileAttachment as
+            | NonNullable<NormalizedEvent['content']['fileAttachment']>
+            | undefined,
         },
         replyToMessageId,
         ackMessageId,
@@ -2160,7 +2169,8 @@ async function dispatchAmbientReply(
     throw err;
   }
 
-  const { sessionId } = await resolveSession(db, adaptNormalizedEvent(sourceEvent));
+  const inbound = adaptNormalizedEvent(sourceEvent);
+  const { sessionId } = await resolveSession(db, inbound);
   // Idempotency: the un-addressed branch skips the task-dedup table, so derive a
   // DETERMINISTIC task id from the source message. A Feishu redelivery of the
   // same event resolves to the SAME id → handleEvent's onConflictDoNothing
@@ -2168,11 +2178,14 @@ async function dispatchAmbientReply(
   // constraints stay stable (only `source: 'ambient'`; the volatile decision
   // reason lives in the audit row, not here) so duplicate-matching never trips.
   const ambientTaskId = stableUuidFromKey(`ambient:${feishuAppId ?? 'none'}:${sourceEvent.messageId}`);
-  const result = await handleEvent(db, sourceEvent, sessionId, {
+  const result = await handleEvent(db, inbound, sessionId, {
     agentId,
     feishuAppId,
     taskId: ambientTaskId,
     extraTaskConstraints: { source: 'ambient' },
+    // Non-lossless attachment payloads + the exact source message id (ADR-0004 1a-ii).
+    ...deriveFeishuTaskAttachments(sourceEvent),
+    userMessageId: sourceEvent.messageId,
   });
   // Ambient only ever dispatches a freshly created task; ops direct-replies and
   // duplicates (redeliveries) are not proactive posts.
@@ -2227,7 +2240,11 @@ async function dispatchAmbientReply(
         runtime: result.runtime,
         goal: result.goal,
         imageAttachment: result.imageAttachment,
-        fileAttachment: result.fileAttachment,
+        // result.fileAttachment is vendor-opaque (`unknown`) at the core boundary;
+        // this Feishu layer threads the known descriptor back through.
+        fileAttachment: result.fileAttachment as
+          | NonNullable<NormalizedEvent['content']['fileAttachment']>
+          | undefined,
       },
       replyToMessageId,
       ackMessageId,

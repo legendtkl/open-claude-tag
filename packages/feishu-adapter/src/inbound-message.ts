@@ -67,6 +67,15 @@ function mapReferenced(referenced: NormalizedReferenced): ReferencedMessage {
     messageId: referenced.messageId,
     ...(text ? { text } : {}),
     ...(sender ? { sender } : {}),
+    // Carry per-entry author/text verbatim so the core can rebuild the
+    // referenced-context goal lines off the neutral surface (ADR-0004 1a-ii).
+    // Keep `author` present iff the source has it (preserve an empty-string author)
+    // so the projection is strictly lossless.
+    entries: referenced.entries.map((entry) =>
+      entry.author === undefined
+        ? { text: entry.text }
+        : { author: entry.author, text: entry.text },
+    ),
   };
 }
 
