@@ -7,6 +7,8 @@
   "include": ["src"],
   "references": [
     { "path": "../../packages/approval" },
+    { "path": "../../packages/channel-core" },
+    { "path": "../../packages/channel-slack" },
     { "path": "../../packages/core-types" },
     { "path": "../../packages/feishu-adapter" },
     { "path": "../../packages/memory" },

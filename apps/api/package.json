@@ -11,12 +11,14 @@
     "clean": "rm -rf dist *.tsbuildinfo",
     "test": "vitest run --passWithNoTests",
     "test:unit": "vitest run --passWithNoTests",
-    "test:integration": "OPEN_TAG_API_PG_INTEGRATION=1 vitest run src/__tests__/admin-api-ownership.test.ts",
+    "test:integration": "OPEN_TAG_API_PG_INTEGRATION=1 vitest run src/__tests__/admin-api-ownership.test.ts src/__tests__/slack-inbound-dispatch.test.ts",
     "test:e2e": "vitest run --config vitest.e2e.config.ts --reporter=verbose"
   },
   "dependencies": {
     "@open-tag/ambient": "workspace:*",
     "@open-tag/approval": "workspace:*",
+    "@open-tag/channel-core": "workspace:*",
+    "@open-tag/channel-slack": "workspace:*",
     "@open-tag/core-types": "workspace:*",
     "@open-tag/feishu-adapter": "workspace:*",
     "@open-tag/llm-client": "workspace:*",

@@ -118,6 +118,12 @@ import { applyDebugFeishuOverrides, createLoopbackFeishuClient } from './debug-f
 import { applyBufferGate } from './buffer-gate.js';
 import { tapChannelObservation } from './channel-observation-tap.js';
 import { tapAmbient, type AmbientTapDeps } from './ambient-tap.js';
+import { SlackChannel } from '@open-tag/channel-slack';
+import {
+  SLACK_EVENTS_PATH,
+  createSlackEventsHandler,
+  createSlackInboundDispatch,
+} from './slack-events.js';
 import { WorkerHealthMonitor } from './worker-health-monitor.js';
 import {
   WorktreeRetentionCleanupService,
@@ -222,6 +228,11 @@ const FEISHU_WEBHOOK_VERIFICATION_TOKEN =
   process.env.FEISHU_CALLBACK_VERIFICATION_TOKEN ?? process.env.FEISHU_VERIFICATION_TOKEN ?? '';
 const FEISHU_ENCRYPT_KEY = process.env.FEISHU_ENCRYPT_KEY ?? '';
 const FEISHU_WEBHOOK_MAX_BODY_BYTES = 1024 * 1024;
+// Slack Events API inbound (channel #2). The route is registered only when a
+// signing secret is configured, so an unconfigured instance exposes no Slack
+// endpoint at all (404). The bot token is optional for inbound-only use.
+const SLACK_SIGNING_SECRET = process.env.SLACK_SIGNING_SECRET?.trim() ?? '';
+const SLACK_BOT_TOKEN = process.env.SLACK_BOT_TOKEN ?? '';
 const FEISHU_WEBHOOK_MAX_TIMESTAMP_SKEW_SECONDS = Number.parseInt(
   process.env.FEISHU_WEBHOOK_MAX_TIMESTAMP_SKEW_SECONDS ?? '600',
   10,
@@ -2710,8 +2721,15 @@ function isFeishuWebhookPath(url: string): boolean {
   return feishuWebhookPaths.has(url.split('?')[0] ?? '');
 }
 
+function isSlackEventsPath(url: string): boolean {
+  return SLACK_SIGNING_SECRET !== '' && (url.split('?')[0] ?? '') === SLACK_EVENTS_PATH;
+}
+
 app.addHook('preParsing', async (request, _reply, payload) => {
-  if (!isFeishuWebhookPath(request.url)) {
+  // Both the Feishu webhook and the Slack Events API need the EXACT raw bytes for
+  // signature verification, so capture them here and re-stream so Fastify still
+  // JSON-parses. This only ADDS the Slack path; Feishu paths are unchanged.
+  if (!isFeishuWebhookPath(request.url) && !isSlackEventsPath(request.url)) {
     return payload;
   }
 
@@ -3075,6 +3093,24 @@ async function handleFeishuWebhookRequest(request: FastifyRequest, reply: Fastif
 
 for (const path of feishuWebhookPaths) {
   app.post(path, { bodyLimit: FEISHU_WEBHOOK_MAX_BODY_BYTES }, handleFeishuWebhookRequest);
+}
+
+// Slack Events API inbound (channel #2). Registered only when a signing secret is
+// present, so an unconfigured instance has no Slack endpoint (404). Verification
+// runs on the raw bytes captured by the preParsing hook BEFORE any JSON is trusted;
+// accepted messages dispatch into channel-neutral observation memory.
+if (SLACK_SIGNING_SECRET) {
+  // `db` is assigned during async startup (below), after this synchronous route
+  // registration, so build the dispatcher per-call to read `db` at request time
+  // — the same deferred-`db` pattern the Feishu webhook handler uses.
+  const slackHandler = createSlackEventsHandler({
+    signingSecret: SLACK_SIGNING_SECRET,
+    channel: new SlackChannel({ token: SLACK_BOT_TOKEN }),
+    dispatch: (message, ctx) => createSlackInboundDispatch({ db, logger })(message, ctx),
+    logger,
+  });
+  app.post(SLACK_EVENTS_PATH, { bodyLimit: FEISHU_WEBHOOK_MAX_BODY_BYTES }, slackHandler);
+  logger.info({ path: SLACK_EVENTS_PATH }, 'Slack Events API inbound route registered');
 }
 
 app.get('/health', async () => {

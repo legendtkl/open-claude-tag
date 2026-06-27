@@ -38,6 +38,12 @@ importers:
       '@open-tag/approval':
         specifier: workspace:*
         version: link:../../packages/approval
+      '@open-tag/channel-core':
+        specifier: workspace:*
+        version: link:../../packages/channel-core
+      '@open-tag/channel-slack':
+        specifier: workspace:*
+        version: link:../../packages/channel-slack
       '@open-tag/core-types':
         specifier: workspace:*
         version: link:../../packages/core-types
