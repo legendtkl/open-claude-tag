@@ -1,10 +1,24 @@
 # OpenClaudeTag
 
-OpenClaudeTag 是一个运行在飞书群聊里的工程助手。`apps/api` 负责接收飞书事件并入队任务，`apps/worker` 通过 Claude Code 或 Codex 执行任务，Postgres 用来保存任务和 session 状态。
+OpenClaudeTag 是一个运行在团队聊天里的 vendor-neutral 工程助手。orchestrator 核心说的是一套 neutral 的消息契约，因此有两个可插拔的轴：聊天所在的 **channel**，以及执行任务的 **runtime**。它接收一条聊天消息，经异步任务流水线分发，通过 runtime adapter（Claude Code 或 Codex）执行，并把进度回传到聊天里。当前 Lark/飞书 是功能完整的 channel；Slack 是一个可用的第二 channel（入站任务分发 + 出站发送），其 OAuth、多 workspace 安装、worker 侧完成态回传、真实端到端回复仍在推进中。
 
 如果你要参与仓库开发，也请阅读 [AGENTS.md](./AGENTS.md)。
 
 要让任务端到端执行，`api` 和 `worker` 必须同时运行。只启动 `api` 只能收消息并返回 ACK 卡片，任务会停在 `Request received`。
+
+## 可插拔架构（两个轴）
+
+channel adapter 把平台事件标准化成 neutral 的 `InboundMessage`（`packages/channel-core` 定义 `Channel` 契约）；runtime adapter 在一个 descriptor 驱动的注册表后执行任务（`packages/runtime-adapters`）。orchestrator 核心既不指名厂商也不指名 runtime（见 [`doc/decisions/0004`](./doc/decisions/0004-inbound-message-pipeline-contract.md)）。
+
+| 轴 | 选项 | 状态 |
+| --- | --- | --- |
+| Channel | Lark / 飞书 | 完整 —— 事件、交互卡片、线程化反馈、表情反馈、审批、飞书任务跟踪（`LarkChannel`）。 |
+| Channel | Slack | 入站分发 + 出站发送（`SlackChannel`）。经签名校验的 `POST /slack/events` 会写入 observation memory；配置 `SLACK_BOT_USER_ID` 且 @ 了 bot 时经 neutral 路径分发任务；当同时设置了 `SLACK_BOT_TOKEN` 时再通过 Slack Web API 回 ACK。OAuth / 多 workspace 安装、Socket Mode、worker 侧完成态回传，以及 Lark 专有扩展（slash 命令树、缓冲、线程/引用富化、agent 路由）尚未实现（见 [`doc/decisions/0005`](./doc/decisions/0005-neutral-non-lark-task-dispatch.md)）。 |
+| Runtime | Claude Code | 完整 —— 默认 runtime。 |
+| Runtime | Codex | 完整。 |
+| Runtime | Coco (TRAE CLI) | 可选 —— 仅当 worker 主机上能解析到 `coco` 二进制时才注册。 |
+
+Slack 路径有单元测试和基于 Postgres 的集成测试覆盖（通过同一个 vendor-clean 核心端到端驱动真实路由，Slack sender 用 stub 注入）；用真实 workspace 凭据的端到端 Slack 验证尚未跑过。
 
 ## 快速开始（TL;DR）
 
