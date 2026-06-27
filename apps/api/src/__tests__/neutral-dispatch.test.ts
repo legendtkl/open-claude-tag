@@ -53,14 +53,15 @@ function makeMessage(overrides: Partial<InboundMessage> = {}): InboundMessage {
 /** A recording FeedbackChannelSender returning a deterministic delivery ref. */
 function makeRecordingSender() {
   const sends: Array<{ to: ConversationRef; msg: OutboundMessage }> = [];
+  const sendMock = vi.fn(async (to: ConversationRef, msg: OutboundMessage): Promise<DeliveryRef> => {
+    sends.push({ to, msg });
+    return { kind: to.kind, logicalMessageId: 'ack_ts', revision: 0, physicalIds: ['ack_ts'] };
+  });
   const sender: FeedbackChannelSender = {
-    send: vi.fn(async (to: ConversationRef, msg: OutboundMessage): Promise<DeliveryRef> => {
-      sends.push({ to, msg });
-      return { kind: to.kind, logicalMessageId: 'ack_ts', revision: 0, physicalIds: ['ack_ts'] };
-    }),
+    send: sendMock,
     update: vi.fn(async (ref: DeliveryRef): Promise<DeliveryRef> => ref),
   };
-  return { sender, sends };
+  return { sender, sends, sendMock };
 }
 
 interface HarnessOptions {
@@ -113,6 +114,7 @@ function makeCtx(opts: HarnessOptions = {}) {
     enqueue,
     resolveSender,
     sends: recording.sends,
+    sendMock: recording.sendMock,
   };
 }
 
@@ -184,11 +186,35 @@ describe('buildNeutralQueuedTask', () => {
     expect(job.runtimeHint).toBe('codex');
     expect(job.goal).toBe('<@Ubot> please do the thing');
   });
+
+  it('omits ackDelivery when no ack handle is given (back-compat)', () => {
+    const job = buildNeutralQueuedTask(makeMessage(), 'sess-1', {
+      taskId: 'task-4',
+      intent: IntentType.CHAT_REPLY,
+      runtime: 'auto',
+      goal: 'g',
+    });
+    expect(job.constraints).not.toHaveProperty('ackDelivery');
+  });
+
+  it('threads the ack handle into constraints.ackDelivery when provided', () => {
+    const job = buildNeutralQueuedTask(
+      makeMessage(),
+      'sess-1',
+      { taskId: 'task-5', intent: IntentType.CHAT_REPLY, runtime: 'auto', goal: 'g' },
+      { kind: 'slack', scopeId: 'C_chat', messageId: '1710000000.000200' },
+    );
+    expect(job.constraints.ackDelivery).toEqual({
+      kind: 'slack',
+      scopeId: 'C_chat',
+      messageId: '1710000000.000200',
+    });
+  });
 });
 
 describe('dispatchNeutralMessage — task_created (happy path, durable ordering)', () => {
-  it('creates with a deterministic id, queues, enqueues, then ACKs after enqueue', async () => {
-    const { ctx, createTask, transitionTask, enqueue, resolveSender, sends } = makeCtx();
+  it('queues, ACKs (capturing the handle), then enqueues with constraints.ackDelivery', async () => {
+    const { ctx, createTask, transitionTask, enqueue, resolveSender, sends, sendMock } = makeCtx();
     const message = makeMessage();
 
     const out = await dispatchNeutralMessage(message, ctx);
@@ -204,17 +230,31 @@ describe('dispatchNeutralMessage — task_created (happy path, durable ordering)
 
     // enqueue carries the same task id; ordering: transition before enqueue.
     expect(enqueue).toHaveBeenCalledTimes(1);
-    const job = enqueue.mock.calls[0][0] as { taskId: string };
+    const job = enqueue.mock.calls[0][0] as {
+      taskId: string;
+      constraints: Record<string, unknown>;
+    };
     expect(job.taskId).toBe(createOpts.taskId);
     expect(transitionTask.mock.invocationCallOrder[0]).toBeLessThan(
       enqueue.mock.invocationCallOrder[0],
     );
 
-    // ACK sent through the kind-resolved sender, AFTER enqueue, as neutral text.
+    // ACK sent through the kind-resolved sender, BEFORE enqueue (so its handle
+    // can be threaded), as neutral text into the message's conversation.
     expect(resolveSender).toHaveBeenCalledWith('slack');
     expect(sends).toHaveLength(1);
     expect(sends[0].msg).toMatchObject({ kind: 'text' });
     expect(sends[0].to).toMatchObject({ kind: 'slack', scopeId: 'C_chat' });
+    expect(sendMock.mock.invocationCallOrder[0]).toBeLessThan(
+      enqueue.mock.invocationCallOrder[0],
+    );
+
+    // The captured ack handle is threaded into the job for in-place updates.
+    expect(job.constraints.ackDelivery).toEqual({
+      kind: 'slack',
+      scopeId: 'C_chat',
+      messageId: 'ack_ts',
+    });
 
     expect(out).toEqual({ type: 'task_created', taskId: createOpts.taskId });
   });
@@ -243,7 +283,7 @@ describe('dispatchNeutralMessage — non-creating and failure paths', () => {
     expect(sends).toHaveLength(0);
   });
 
-  it('re-enqueues a non-terminal task_duplicate (recovery) idempotently', async () => {
+  it('re-enqueues a non-terminal task_duplicate (recovery) without re-ACKing', async () => {
     const { ctx, enqueue, sends, getTaskStatus } = makeCtx({
       taskStatus: 'queued',
       result: {
@@ -258,7 +298,11 @@ describe('dispatchNeutralMessage — non-creating and failure paths', () => {
     expect(out).toEqual({ type: 'task_duplicate', taskId: 'task-dupe' });
     expect(getTaskStatus).toHaveBeenCalledWith('task-dupe');
     expect(enqueue).toHaveBeenCalledTimes(1);
-    expect(sends).toHaveLength(1);
+    // The original task_created dispatch already posted the one ACK; a recovery
+    // redelivery must not post a second, and threads no ack handle.
+    expect(sends).toHaveLength(0);
+    const job = enqueue.mock.calls[0][0] as { constraints: Record<string, unknown> };
+    expect(job.constraints).not.toHaveProperty('ackDelivery');
   });
 
   it('skips re-dispatch for a duplicate of an already-terminal task', async () => {
@@ -284,23 +328,25 @@ describe('dispatchNeutralMessage — non-creating and failure paths', () => {
       type: 'task_duplicate',
     });
     expect(enqueue).toHaveBeenCalledTimes(1);
-    expect(sends).toHaveLength(1);
+    // A duplicate never re-ACKs.
+    expect(sends).toHaveLength(0);
   });
 
-  it('propagates an enqueue failure and never marks the task FAILED or ACKs', async () => {
-    const { ctx, transitionTask, sends } = makeCtx({
+  it('propagates an enqueue failure and never marks the task FAILED', async () => {
+    const { ctx, transitionTask } = makeCtx({
       enqueueImpl: async () => {
         throw new Error('queue down');
       },
     });
     await expect(dispatchNeutralMessage(makeMessage(), ctx)).rejects.toThrow('queue down');
-    // Only the QUEUED transition happened — no terminal FAILED, no ACK.
+    // Only the QUEUED transition happened — never a terminal FAILED. (The ACK is
+    // best-effort and now precedes the enqueue, so it may already be posted; a
+    // recovery redelivery re-enqueues idempotently.)
     expect(transitionTask).toHaveBeenCalledTimes(1);
     expect(transitionTask).toHaveBeenCalledWith(expect.any(String), TaskStatus.QUEUED);
-    expect(sends).toHaveLength(0);
   });
 
-  it('treats an ACK send failure as best-effort (task stays queued, no throw)', async () => {
+  it('treats an ACK send failure as best-effort: enqueues with no ackDelivery, no throw', async () => {
     const failingSender: FeedbackChannelSender = {
       send: vi.fn(async () => {
         throw new Error('slack not configured yet');
@@ -312,5 +358,9 @@ describe('dispatchNeutralMessage — non-creating and failure paths', () => {
       type: 'task_created',
     });
     expect(enqueue).toHaveBeenCalledTimes(1);
+    // A failed ACK yields no handle, so the worker will post a fresh terminal
+    // message (back-compat) rather than updating in place.
+    const job = enqueue.mock.calls[0][0] as { constraints: Record<string, unknown> };
+    expect(job.constraints).not.toHaveProperty('ackDelivery');
   });
 });

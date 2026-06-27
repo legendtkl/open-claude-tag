@@ -206,6 +206,15 @@ describePg('Slack neutral task dispatch (Postgres)', () => {
     expect(acks[0].to).toMatchObject({ kind: 'slack', scopeId });
     expect(acks[0].msg).toMatchObject({ kind: 'text' });
 
+    // The captured ack handle is threaded into the enqueued job (ADR-0008) so the
+    // worker can update that same message in place to the terminal state.
+    const enqueuedJob = enqueued[0] as unknown as { constraints: Record<string, unknown> };
+    expect(enqueuedJob.constraints.ackDelivery).toEqual({
+      kind: 'slack',
+      scopeId,
+      messageId: 'ack_ts',
+    });
+
     // 2) Forged signature on a FRESH (never-processed) event → 401, never
     // dispatches: no new enqueue / ack, and crucially the dedup claim is never
     // even created (so dispatch could not have run before the 401).

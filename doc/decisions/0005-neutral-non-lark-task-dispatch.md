@@ -79,6 +79,13 @@ the deterministic id and never re-enqueues). The accepted ordering instead makes
 The route closes the dedup claim (`markEventProcessed`) only after the dispatch
 returns, i.e. only after a durable enqueue.
 
+> **Amended by [ADR-0008](0008-neutral-ack-in-place-terminal-update.md).** To
+> capture the ack-message handle for in-place terminal updates, the ACK is now
+> sent BEFORE the enqueue, but ONLY on the `task_created` path (a `task_duplicate`
+> recovery no longer re-ACKs). Enqueue stays the durable boundary and the ACK
+> stays best-effort; see ADR-0008 for the ordering, the serialized handle, and the
+> residual orphan-on-enqueue-failure tradeoff.
+
 ## Consequences
 
 - The lark path and the 26-case golden seam tests are untouched and stay green;

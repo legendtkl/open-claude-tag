@@ -1,11 +1,13 @@
 import { describe, expect, it, vi } from 'vitest';
 import { buildRunningCard, type FeishuClient } from '@open-tag/feishu-adapter';
+import { SlackChannel } from '@open-tag/channel-slack';
 import type { Logger } from 'pino';
 import type { TaskFeishuClientResolver } from '../agent-runtime.js';
 import {
   NeutralChannelFeedback,
   createLarkChannelSender,
   createWorkerChannelSenderResolver,
+  reconstructAckDeliveryRef,
   resolveTaskChannelSender,
   updateRunningFeedbackCard,
   type ChannelSender,
@@ -172,14 +174,18 @@ describe('createWorkerChannelSenderResolver', () => {
 /** A recording ChannelSender stub for the kind-resolution + neutral-feedback tests. */
 function makeRecordingSender() {
   const sends: Array<{ to: WorkerConversationRef; msg: OutboundMessage }> = [];
+  const updates: Array<{ ref: DeliveryRef; msg: OutboundMessage }> = [];
   const sender: ChannelSender = {
     send: vi.fn(async (to: WorkerConversationRef, msg: OutboundMessage): Promise<DeliveryRef> => {
       sends.push({ to, msg });
       return { kind: to.kind, logicalMessageId: 'ts-1', revision: 0, physicalIds: ['ts-1'] };
     }),
-    update: vi.fn(async (ref: DeliveryRef): Promise<DeliveryRef> => ref),
+    update: vi.fn(async (ref: DeliveryRef, msg: OutboundMessage): Promise<DeliveryRef> => {
+      updates.push({ ref, msg });
+      return ref;
+    }),
   };
-  return { sender, sends };
+  return { sender, sends, updates };
 }
 
 describe('resolveTaskChannelSender', () => {
@@ -289,5 +295,127 @@ describe('NeutralChannelFeedback', () => {
     await expect(feedback.updateDone('g', 'r')).resolves.toEqual({ sentMessageIds: [] });
     await expect(feedback.updateFailed('g', 'e')).resolves.toBeUndefined();
     expect(warn).toHaveBeenCalledTimes(2);
+  });
+
+  it('UPDATES the threaded ack message in place instead of posting a new one', async () => {
+    const { sender, sends, updates } = makeRecordingSender();
+    const ackRef: DeliveryRef = {
+      kind: 'slack',
+      logicalMessageId: 'ack-ts',
+      revision: 0,
+      physicalIds: ['ack-ts'],
+      native: { channel: 'C_chat' },
+    };
+    const feedback = new NeutralChannelFeedback({ sender, conversation, ackRef });
+
+    await feedback.updateDone('do the thing', 'detailed output', {
+      completionText: 'final reply',
+    });
+    await feedback.updateFailed('do the thing', 'boom');
+
+    // No fresh sends — both terminal states edited the SAME ack message.
+    expect(sends).toHaveLength(0);
+    expect(updates).toHaveLength(2);
+    expect(updates[0].ref).toBe(ackRef);
+    expect(updates[0].msg).toEqual({ kind: 'result', markdown: 'final reply' });
+    expect(updates[1].ref).toBe(ackRef);
+    expect(updates[1].msg).toEqual({ kind: 'error', message: 'Task failed\nTask: do the thing\n\nboom' });
+  });
+
+  it('swallows an update failure without falling back to a fresh send (no duplicate)', async () => {
+    const { updates } = makeRecordingSender();
+    const send = vi.fn(async (): Promise<DeliveryRef> => {
+      throw new Error('should not be called');
+    });
+    const sender: ChannelSender = {
+      send,
+      update: vi.fn(async (): Promise<DeliveryRef> => {
+        throw new Error('chat.update failed');
+      }),
+    };
+    const warn = vi.fn();
+    const ackRef: DeliveryRef = {
+      kind: 'slack',
+      logicalMessageId: 'ack-ts',
+      revision: 0,
+      physicalIds: ['ack-ts'],
+      native: { channel: 'C_chat' },
+    };
+    const feedback = new NeutralChannelFeedback({
+      sender,
+      conversation,
+      ackRef,
+      logger: { warn } as unknown as Logger,
+    });
+
+    await expect(feedback.updateDone('g', 'r')).resolves.toEqual({ sentMessageIds: [] });
+    expect(send).not.toHaveBeenCalled();
+    expect(updates).toHaveLength(0);
+    expect(warn).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('reconstructAckDeliveryRef', () => {
+  it('rebuilds a DeliveryRef SlackChannel.update can consume from the serialized handle', () => {
+    const ref = reconstructAckDeliveryRef({
+      kind: 'slack',
+      scopeId: 'C_chat',
+      messageId: '1710000000.000200',
+    });
+    expect(ref).toEqual({
+      kind: 'slack',
+      logicalMessageId: '1710000000.000200',
+      revision: 0,
+      physicalIds: ['1710000000.000200'],
+      native: { channel: 'C_chat' },
+    });
+  });
+
+  it('returns undefined for a missing or malformed handle (→ send fallback)', () => {
+    expect(reconstructAckDeliveryRef(undefined)).toBeUndefined();
+    expect(reconstructAckDeliveryRef(null)).toBeUndefined();
+    expect(reconstructAckDeliveryRef('nope')).toBeUndefined();
+    expect(reconstructAckDeliveryRef({ kind: 'slack', scopeId: 'C_chat' })).toBeUndefined();
+    expect(reconstructAckDeliveryRef({ kind: 'slack', messageId: 'ts' })).toBeUndefined();
+    expect(reconstructAckDeliveryRef({ scopeId: 'C_chat', messageId: 'ts' })).toBeUndefined();
+    expect(
+      reconstructAckDeliveryRef({ kind: 'slack', scopeId: '', messageId: 'ts' }),
+    ).toBeUndefined();
+  });
+
+  it('drives a real SlackChannel.update at the right channel + ts (no live creds)', async () => {
+    const calls: Array<{ url: string; body: Record<string, unknown> }> = [];
+    const fetchMock = vi.fn(async (url: string, init?: { body?: string }) => {
+      const body = init?.body ? (JSON.parse(init.body) as Record<string, unknown>) : {};
+      calls.push({ url, body });
+      return {
+        ok: true,
+        json: async () => ({ ok: true, ts: body.ts, channel: body.channel }),
+      } as unknown as Response;
+    });
+    const slack = new SlackChannel({ token: 'xoxb-test', fetch: fetchMock as unknown as typeof fetch });
+
+    const ref = reconstructAckDeliveryRef({
+      kind: 'slack',
+      scopeId: 'C_chat',
+      messageId: '1710000000.000200',
+    });
+    expect(ref).toBeDefined();
+
+    const sender: ChannelSender = slack as unknown as ChannelSender;
+    const feedback = new NeutralChannelFeedback({
+      sender,
+      conversation: { kind: 'slack', scopeId: 'C_chat' },
+      ackRef: ref,
+    });
+    await feedback.updateDone('goal', 'the result');
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0].url).toContain('chat.update');
+    expect(calls[0].body).toMatchObject({
+      channel: 'C_chat',
+      ts: '1710000000.000200',
+      text: 'the result',
+    });
   });
 });

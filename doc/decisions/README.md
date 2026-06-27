@@ -67,3 +67,4 @@ history of decisions stays auditable.
 | [0005](0005-neutral-non-lark-task-dispatch.md) | A minimal separate neutral dispatch path for non-lark inbound | Accepted |
 | [0006](0006-cross-channel-flag-broker.md) | Brokered, audited, isPrivate-safe cross-channel flagging | Accepted |
 | [0007](0007-stale-thread-nudge-scanner.md) | Stale-thread nudge scanner: audit-log idempotency + same-channel private nudge | Accepted |
+| [0008](0008-neutral-ack-in-place-terminal-update.md) | Thread the neutral ACK handle so the worker updates it in place | Accepted |

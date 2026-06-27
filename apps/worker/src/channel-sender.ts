@@ -192,7 +192,40 @@ function truncateNeutralBody(text: string): string {
 export interface NeutralChannelFeedbackOptions {
   sender: ChannelSender;
   conversation: ConversationRef;
+  /**
+   * The threaded ack-message handle (ADR-0008). When present, the terminal
+   * outcome UPDATES that same message in place (UX parity with lark's live card)
+   * instead of posting a fresh one. Absent ⇒ a fresh terminal message is sent
+   * (back-compat: older queued jobs / a failed ACK carry no handle).
+   */
+  ackRef?: DeliveryRef;
   logger?: Logger;
+}
+
+/**
+ * Rebuild the channel {@link DeliveryRef} the worker needs to UPDATE a threaded
+ * ack message from its serialized `constraints.ackDelivery` form
+ * (`{ kind, scopeId, messageId }`, see the API's `NeutralAckDelivery`). The
+ * physical id list + a `native.channel` (the conversation scope) are exactly what
+ * `SlackChannel.update` reads. Returns `undefined` for a missing/malformed handle
+ * so the caller falls back to a fresh send.
+ */
+export function reconstructAckDeliveryRef(value: unknown): DeliveryRef | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  const record = value as Record<string, unknown>;
+  const { kind, scopeId, messageId } = record;
+  if (typeof kind !== 'string' || !kind) return undefined;
+  if (typeof scopeId !== 'string' || !scopeId) return undefined;
+  if (typeof messageId !== 'string' || !messageId) return undefined;
+  return {
+    kind,
+    logicalMessageId: messageId,
+    revision: 0,
+    physicalIds: [messageId],
+    // Channels recover the destination from the handle's native escape hatch
+    // (Slack's update reads `native.channel`); the conversation scope is it.
+    native: { channel: scopeId },
+  };
 }
 
 /**
@@ -201,21 +234,26 @@ export interface NeutralChannelFeedbackOptions {
  * (`result` / `error` / `text`) through the kind-resolved {@link ChannelSender},
  * which the channel adapter renders natively (Slack → Block Kit section).
  *
- * Unlike the Lark {@link ThreePhaseFeedback}, it does NOT PATCH a pre-created ack
- * card (a neutral-dispatched task has none): it posts a single terminal message
- * into the task's own conversation. Delivery is best-effort — a send failure is
- * logged and swallowed so it never fails the already-completed task. It reports
- * no `sentMessageIds` on purpose: those ids must not enter the Lark-shaped
- * thread-key aliasing (neutral aliasing is deferred).
+ * Terminal delivery has two shapes (ADR-0008). When an {@link DeliveryRef}
+ * `ackRef` is threaded in, it UPDATES that same ack message in place — like the
+ * Lark {@link ThreePhaseFeedback} PATCHing its ack card — so a neutral task shows
+ * one live-updating message instead of a separate terminal post. With no `ackRef`
+ * (older jobs, or the ACK send failed) it falls back to posting a single terminal
+ * message into the task's own conversation. Delivery is best-effort either way —
+ * a failure is logged and swallowed so it never fails the already-completed task.
+ * It reports no `sentMessageIds` on purpose: those ids must not enter the
+ * Lark-shaped thread-key aliasing (neutral aliasing is deferred).
  */
 export class NeutralChannelFeedback implements TaskFeedback {
   private readonly sender: ChannelSender;
   private readonly conversation: ConversationRef;
+  private readonly ackRef?: DeliveryRef;
   private readonly logger?: Logger;
 
   constructor(options: NeutralChannelFeedbackOptions) {
     this.sender = options.sender;
     this.conversation = options.conversation;
+    this.ackRef = options.ackRef;
     this.logger = options.logger;
   }
 
@@ -248,10 +286,17 @@ export class NeutralChannelFeedback implements TaskFeedback {
     description: string,
   ): Promise<void> {
     try {
-      await this.sender.send(this.conversation, msg);
+      // With a threaded ack handle, update that message in place (single live
+      // message); otherwise post a fresh terminal message. An update failure is
+      // swallowed (not retried as a send) so a partial edit can't double-post.
+      if (this.ackRef) {
+        await this.sender.update(this.ackRef, msg);
+      } else {
+        await this.sender.send(this.conversation, msg);
+      }
     } catch (err) {
       this.logger?.warn(
-        { err, phase, channelKind: this.conversation.kind, description },
+        { err, phase, channelKind: this.conversation.kind, hasAckRef: Boolean(this.ackRef), description },
         'Failed to deliver neutral task feedback',
       );
     }

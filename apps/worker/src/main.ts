@@ -167,6 +167,7 @@ import {
 import {
   buildTaskConversationRef,
   createLarkChannelSender,
+  reconstructAckDeliveryRef,
   resolveTaskChannelSender,
   updateRunningFeedbackCard,
   NeutralChannelFeedback,
@@ -1324,10 +1325,12 @@ async function processTask(job: { id: string; data: TaskJobData }): Promise<void
       // Non-lark (e.g. Slack): deliver the task's terminal outcome to ITS OWN
       // channel through the kind-resolved sender. taskChannelSender stays null so
       // the Lark-only running card + checklist are never wired for this kind (the
-      // neutral feedback owns its sender). No ack-card PATCH (a neutral-dispatched
-      // task has no pre-created card to edit) — a single terminal message is sent.
-      // Running-card live updates + full Block Kit parity are deferred.
+      // neutral feedback owns its sender). When the dispatch threaded an ack
+      // handle (constraints.ackDelivery, ADR-0008), the terminal state UPDATES
+      // that same ack message in place; otherwise a fresh terminal message is
+      // sent. Running-card live updates + full Block Kit parity are deferred.
       const neutralSender = resolveTaskChannelSender(channelKind, { slackSender });
+      const ackDeliveryRef = reconstructAckDeliveryRef(taskConstraints.ackDelivery);
       if (chatId && neutralSender) {
         feedback = new NeutralChannelFeedback({
           sender: neutralSender,
@@ -1336,6 +1339,7 @@ async function processTask(job: { id: string; data: TaskJobData }): Promise<void
             scopeId: chatId,
             ...(channelThreadId ? { threadId: channelThreadId } : {}),
           },
+          ...(ackDeliveryRef ? { ackRef: ackDeliveryRef } : {}),
           logger,
         });
       } else {
