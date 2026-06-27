@@ -68,6 +68,10 @@ export function buildServiceEnv(
     API_PORT: String(config.apiPort),
     API_URL: config.apiUrl,
     OPEN_TAG_FEISHU_ACCESS: config.feishuAccess,
+    // The personal launcher always runs the stack in single-user personal mode so
+    // the localhost console auto-launches its first-run onboarding wizard. Set
+    // last so the launcher's `up` forces it on regardless of the inherited env.
+    OPEN_TAG_PERSONAL_MODE: 'enabled',
   };
 }
 

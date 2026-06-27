@@ -2842,3 +2842,154 @@ textarea:focus {
     justify-content: flex-start;
   }
 }
+
+/* ── Onboarding wizard ──────────────────────────────────────────────────────── */
+.onboarding-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.onboarding-hero {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.onboarding-hero .overview-hero-icon img {
+  width: 52px;
+  height: 52px;
+}
+
+.wizard-progress {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.wizard-progress-step {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1 1 160px;
+  min-width: 140px;
+  padding: 10px 12px;
+  border: 2px solid var(--blue);
+  border-radius: 14px 11px 15px 10px;
+  background: rgba(255, 255, 255, 0.9);
+  box-shadow: 3px 3px 0 var(--ink-shadow);
+  font-weight: 700;
+  color: var(--muted);
+}
+
+.wizard-progress-step.current {
+  border-color: var(--green);
+  color: var(--ink);
+  background: var(--green-soft);
+}
+
+.wizard-progress-step.done {
+  color: var(--ink);
+}
+
+.wizard-progress-dot {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: 2px solid currentColor;
+  font-size: 0.85rem;
+  flex: none;
+}
+
+.wizard-progress-step.done .wizard-progress-dot {
+  background: var(--green);
+  border-color: var(--green);
+  color: #fff;
+}
+
+.wizard-step-body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.wizard-step-body > p {
+  margin: 0;
+  color: var(--muted);
+}
+
+.wizard-runtime-card,
+.wizard-permission-card,
+.wizard-live-card {
+  box-shadow: none;
+}
+
+.wizard-runtime-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.wizard-permission-fail {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.wizard-manual {
+  border: 1px dashed var(--blue);
+  border-radius: 12px;
+  padding: 10px 14px;
+}
+
+.wizard-manual > summary {
+  cursor: pointer;
+  font-weight: 700;
+  color: var(--blue);
+}
+
+.wizard-live-success {
+  margin-top: 8px;
+  padding: 12px;
+  border-radius: 12px;
+  background: var(--green-soft);
+  border: 2px solid var(--green);
+}
+
+.wizard-live-pending {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+}
+
+.onboarding-footer {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.onboarding-footer .wizard-skip {
+  margin-left: auto;
+}
+
+button.ghost {
+  background: transparent;
+  border: none;
+  color: var(--muted);
+  font-weight: 700;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+button.ghost:hover {
+  color: var(--ink);
+}

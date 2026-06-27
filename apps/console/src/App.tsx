@@ -1,11 +1,14 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import {
   Activity,
+  ArrowLeft,
+  ArrowRight,
   BookOpen,
   Bot,
   Boxes,
   Check,
   ChevronDown,
+  Compass,
   Copy,
   Download,
   ExternalLink,
@@ -21,6 +24,7 @@ import {
   Plus,
   QrCode,
   RefreshCcw,
+  Rocket,
   Rows3,
   Save,
   Settings2,
@@ -50,6 +54,7 @@ import {
   getAdminToken,
   getAuthConfig,
   getDesktopConfig,
+  getHealth,
   getMeResult,
   hasBreakGlassToken,
   isDesktopApp,
@@ -78,6 +83,7 @@ import {
   type DesktopConfig,
   type FeishuApp,
   type FeishuAppRegistration,
+  type HealthSummary,
   type FeishuPermissionApplyResult,
   type FeishuPermissionCapabilityResult,
   type FeishuPermissionCheckResult,
@@ -93,6 +99,7 @@ import './styles.css';
 
 type View =
   | 'project'
+  | 'onboarding'
   | 'overview'
   | 'agents'
   | 'bots'
@@ -139,6 +146,7 @@ const navItems = [
 const viewLabels: Record<Locale, Record<View, string>> = {
   en: {
     project: desktopConsoleBuild ? '' : 'Project Guide',
+    onboarding: 'Get Started',
     overview: 'Overview',
     agents: 'Agents',
     bots: 'Bots',
@@ -151,6 +159,7 @@ const viewLabels: Record<Locale, Record<View, string>> = {
   },
   zh: {
     project: desktopConsoleBuild ? '' : '项目手册',
+    onboarding: '快速开始',
     overview: '总览',
     agents: '智能体',
     bots: '机器人',
@@ -891,6 +900,8 @@ export function App() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<{ view: View; message: string } | null>(null);
+  // Personal-mode first-run wizard auto-route runs at most once per page load.
+  const didAutoRouteRef = useRef(false);
   // null = identity not resolved yet (initial loading); when an unauthenticated
   // (401/403) result comes back AND no break-glass token is configured, the
   // login gate renders instead of the console shell.
@@ -981,8 +992,45 @@ export function App() {
   const labels = viewLabels[locale];
   const text = uiText[locale];
   const canUseComputer = me?.computerAccessEnabled === true;
-  const visibleNavItems = navItems;
+  const personalMode = authConfig?.personalMode === true;
+
+  // Empty-state auto-launch (personal mode): on first load, route to the wizard
+  // when setup is not complete and the user has not skipped it. Runs once per
+  // page load (ref-guarded) and only after the initial data + auth config have
+  // resolved (loading=false, authConfig set) so personalMode is never "unknown".
+  // When setup is structurally complete it still confirms the bound app is live on
+  // /health before treating onboarding as done.
+  useEffect(() => {
+    if (didAutoRouteRef.current) return;
+    if (loading || needsLogin || !authConfig) return;
+    didAutoRouteRef.current = true;
+    if (!authConfig.personalMode || readOnboardingDismissed()) return;
+    if (!isOnboardingComplete(data)) {
+      setView('onboarding');
+      return;
+    }
+    // Structurally complete — confirm the bound app is actually live before
+    // treating onboarding as done (else a disabled/unhealthy bot hides the wizard).
+    const bound = activeBoundFeishuApp(data);
+    if (bound) {
+      void getHealth().then((health) => {
+        if (!isFeishuAppLive(health, bound.appId)) setView('onboarding');
+      });
+    }
+  }, [loading, needsLogin, authConfig, data]);
+
+  // The onboarding wizard is reachable from the nav only in personal mode, so the
+  // full multi-tenant console is unchanged when the flag is off.
+  const visibleNavItems = personalMode
+    ? [{ id: 'onboarding' as const, icon: Compass }, ...navItems]
+    : navItems;
   const navStyle = { '--nav-item-count': visibleNavItems.length } as React.CSSProperties;
+
+  function exitOnboardingToConsole() {
+    writeOnboardingDismissed(true);
+    setNotice(null);
+    setView('overview');
+  }
 
   if (needsLogin) {
     return <LoginGate locale={locale} setLocale={setLocale} onAuthenticated={refresh} />;
@@ -1084,6 +1132,16 @@ export function App() {
 
         {!desktopConsoleBuild && !loading && view === 'project' ? (
           <ProjectView locale={locale} />
+        ) : null}
+        {!loading && view === 'onboarding' ? (
+          <OnboardingWizard
+            data={data}
+            locale={locale}
+            personalMode={personalMode}
+            canUseComputer={canUseComputer}
+            refreshConsole={refresh}
+            onExitToConsole={exitOnboardingToConsole}
+          />
         ) : null}
         {!loading && view === 'overview' ? (
           <Overview
@@ -1614,6 +1672,594 @@ function ProjectView({ locale }: { locale: Locale }) {
   );
 }
 
+/** Bounded go-live poll status for the final wizard step. */
+type GoLiveState = 'idle' | 'polling' | 'live' | 'disabled' | 'timeout';
+
+const GO_LIVE_MAX_ATTEMPTS = 30;
+const GO_LIVE_POLL_INTERVAL_MS = 2000;
+
+/**
+ * The linear first-run onboarding wizard (personal mode). It SEQUENCES existing
+ * console capabilities into a guided flow — reusing FeishuBotOnboardingPanel, the
+ * extracted AgentCreateForm, the api client, and the permission-approval helpers —
+ * rather than duplicating their logic. Steps: welcome/runtime-check → connect
+ * Feishu → create an agent → bind + go live.
+ */
+function OnboardingWizard({
+  data,
+  locale,
+  personalMode,
+  canUseComputer,
+  refreshConsole,
+  onExitToConsole,
+}: {
+  data: ConsoleData;
+  locale: Locale;
+  personalMode: boolean;
+  canUseComputer: boolean;
+  refreshConsole: RefreshConsole;
+  /** Dismiss the wizard and show the normal console. */
+  onExitToConsole: () => void;
+}) {
+  const [step, setStep] = useState(0);
+  const [working, setWorking] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [health, setHealth] = useState<HealthSummary | null>(null);
+  const [bindingAgentId, setBindingAgentId] = useState('');
+  const [permission, setPermission] = useState<{
+    loading: boolean;
+    result?: FeishuPermissionCheckResult;
+    applying?: boolean;
+    applied?: FeishuPermissionApplyResult;
+    error?: string;
+  } | null>(null);
+  const [goLive, setGoLive] = useState<GoLiveState>('idle');
+  const [retryNonce, setRetryNonce] = useState(0);
+  const [manualApp, setManualApp] = useState({ appId: '', appSecret: '', botName: '' });
+  const [manualSubmitted, setManualSubmitted] = useState(false);
+
+  const activeAgents = useMemo(
+    () => data.agents.filter((agent) => agent.status === 'active'),
+    [data.agents],
+  );
+  const hasApp = data.apps.length > 0;
+  const boundApp = activeBoundFeishuApp(data);
+  // The app the go-live step binds to: prefer an enabled, still-unbound app.
+  const targetApp =
+    data.apps.find((app) => app.status === 'enabled' && !app.binding) ??
+    data.apps.find((app) => app.status === 'enabled') ??
+    data.apps[0] ??
+    null;
+  // The most relevant app for the permission self-approve control on the Feishu step.
+  const permissionApp = data.apps.find((app) => app.status === 'enabled') ?? data.apps[0] ?? null;
+  const satisfied = [true, hasApp, activeAgents.length > 0, boundApp !== null];
+
+  const copy = {
+    en: {
+      title: `Get started with ${PRODUCT_NAME}`,
+      subtitle: 'Four guided steps connect Feishu, an agent, and your first live bot.',
+      steps: ['Welcome', 'Connect Feishu', 'Create an agent', 'Go live'],
+      back: 'Back',
+      next: 'Next',
+      skip: 'Skip to console',
+      openConsole: 'Open console',
+      welcomeLead:
+        'OpenClaudeTag turns a Feishu group into an AI engineering workspace. This wizard walks you through connecting a Feishu bot, creating an agent, and going live — all on this machine.',
+      runtimeCheck: 'Runtime check',
+      apiReachable: 'Local API reachable',
+      apiUnreachable: 'Local API not reachable yet',
+      feishuAccess: (state: string) => `Feishu access: ${state}`,
+      runtimeNote:
+        'Runtime credentials (e.g. an Anthropic token) are configured per agent in step 3, so nothing else is required here.',
+      feishuLead:
+        'Apply for a Feishu bot app and its agent permissions with one click, then scan to confirm. A solo tenant can self-approve the requested scopes.',
+      manualToggle: 'Enter an existing app manually',
+      manualHint: 'Already have a Feishu app? Register it with its App ID and secret.',
+      register: 'Register app',
+      permissionTitle: 'Permissions',
+      checkPermissions: 'Check & self-approve permissions',
+      permissionPass: 'All required permissions granted',
+      permissionMissing: 'Missing required scopes',
+      requestApproval: 'Request approval',
+      approvalSubmitted: 'Approval request submitted',
+      selfApprove: 'Open self-approve page',
+      feishuDone: (count: number) => `${count} Feishu app${count === 1 ? '' : 's'} connected.`,
+      agentLead:
+        'Create your first agent. It runs server-local on this machine by default; pick a runtime and (for Claude Code) its credentials.',
+      agentExisting: (count: number) =>
+        `${count} active agent${count === 1 ? '' : 's'} ready. Create another or continue.`,
+      createAgent: 'Create agent',
+      goLiveLead: 'Bind an agent to your Feishu bot, then confirm it goes live.',
+      bindAgent: 'Agent',
+      bind: 'Bind and go live',
+      needApp: 'Connect a Feishu app first (step 2).',
+      needAgent: 'Create an active agent first (step 3).',
+      appNotEnabled: 'Waiting for the Feishu app to finish registering (secret pending).',
+      boundTo: (agent: string) => `Bound to ${agent}.`,
+      polling: 'Waiting for the bot to come online…',
+      live: 'Your bot is live!',
+      liveHint: '@mention it in your Feishu group to start a task.',
+      goLiveDisabled:
+        'Feishu access is disabled on this server. Enable OPEN_TAG_FEISHU_ACCESS and restart, then retry.',
+      goLiveTimeout:
+        'The bot has not come online yet. Re-check permissions and the binding, then retry.',
+      retry: 'Retry',
+    },
+    zh: {
+      title: `快速开始使用 ${PRODUCT_NAME}`,
+      subtitle: '四步引导：连接飞书、创建智能体、让第一个机器人上线。',
+      steps: ['欢迎', '连接飞书', '创建智能体', '上线'],
+      back: '上一步',
+      next: '下一步',
+      skip: '跳过，进入控制台',
+      openConsole: '进入控制台',
+      welcomeLead:
+        'OpenClaudeTag 把飞书群变成 AI 工程协作工作台。本向导将带你完成接入飞书机器人、创建智能体并上线——全部在本机完成。',
+      runtimeCheck: '运行环境检测',
+      apiReachable: '本地 API 可达',
+      apiUnreachable: '本地 API 暂不可达',
+      feishuAccess: (state: string) => `飞书接入：${state}`,
+      runtimeNote: '运行时凭证（如 Anthropic token）会在第 3 步按智能体单独配置，这里无需额外设置。',
+      feishuLead:
+        '一键申请飞书机器人应用及智能体常用权限，然后扫码确认。单租户可自助审批所需 scope。',
+      manualToggle: '手动录入已有应用',
+      manualHint: '已经有飞书应用？用 App ID 和密钥注册它。',
+      register: '注册应用',
+      permissionTitle: '权限',
+      checkPermissions: '检测并自助审批权限',
+      permissionPass: '所需权限已全部开通',
+      permissionMissing: '缺少必需 scope',
+      requestApproval: '申请审批',
+      approvalSubmitted: '已提交审批申请',
+      selfApprove: '打开自助审批页',
+      feishuDone: (count: number) => `已连接 ${count} 个飞书应用。`,
+      agentLead:
+        '创建你的第一个智能体。默认在本机以 server-local 方式运行；选择 runtime，并（对 Claude Code）填写凭证。',
+      agentExisting: (count: number) => `已有 ${count} 个启用的智能体。可再创建一个或继续。`,
+      createAgent: '创建智能体',
+      goLiveLead: '把智能体绑定到飞书机器人，然后确认其上线。',
+      bindAgent: '智能体',
+      bind: '绑定并上线',
+      needApp: '请先在第 2 步连接飞书应用。',
+      needAgent: '请先在第 3 步创建一个启用的智能体。',
+      appNotEnabled: '正在等待飞书应用完成注册（密钥处理中）。',
+      boundTo: (agent: string) => `已绑定到 ${agent}。`,
+      polling: '正在等待机器人上线…',
+      live: '机器人已上线！',
+      liveHint: '在飞书群里 @ 它即可发起任务。',
+      goLiveDisabled:
+        '服务端飞书接入已禁用。请设置 OPEN_TAG_FEISHU_ACCESS 并重启后重试。',
+      goLiveTimeout: '机器人尚未上线。请重新检查权限与绑定后重试。',
+      retry: '重试',
+    },
+  }[locale];
+
+  // Welcome step: a best-effort /health snapshot for the runtime check.
+  useEffect(() => {
+    if (step !== 0) return;
+    let cancelled = false;
+    void getHealth().then((snapshot) => {
+      if (!cancelled) setHealth(snapshot);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [step]);
+
+  // Default the bind agent to the first active agent.
+  useEffect(() => {
+    if (step === 3 && !bindingAgentId && activeAgents[0]) {
+      setBindingAgentId(activeAgents[0].id);
+    }
+  }, [step, bindingAgentId, activeAgents]);
+
+  // Go-live step: bounded /health poll until the bound app is live, with explicit
+  // disabled/timeout terminal states so a first run never hangs forever.
+  useEffect(() => {
+    if (step !== 3 || !boundApp) {
+      setGoLive('idle');
+      return;
+    }
+    let cancelled = false;
+    let timer: number | undefined;
+    let attempts = 0;
+    setGoLive('polling');
+    const tick = async () => {
+      if (cancelled) return;
+      const snapshot = await getHealth();
+      if (cancelled) return;
+      if (snapshot) setHealth(snapshot);
+      const entry = snapshot?.feishu.apps.find((app) => app.appId === boundApp.appId);
+      if (entry && entry.wsStatus === 'live' && entry.hasActiveBotBinding) {
+        setGoLive('live');
+        return;
+      }
+      const feishuDisabled =
+        snapshot?.feishu.websocket === 'disabled' && (!entry || entry.wsStatus === 'disabled');
+      if (feishuDisabled) {
+        setGoLive('disabled');
+        return;
+      }
+      attempts += 1;
+      if (attempts >= GO_LIVE_MAX_ATTEMPTS) {
+        setGoLive('timeout');
+        return;
+      }
+      timer = window.setTimeout(() => void tick(), GO_LIVE_POLL_INTERVAL_MS);
+    };
+    timer = window.setTimeout(() => void tick(), 0);
+    return () => {
+      cancelled = true;
+      if (timer) window.clearTimeout(timer);
+    };
+  }, [step, boundApp?.id, boundApp?.appId, retryNonce]);
+
+  async function runManagedAction(action: () => Promise<void>) {
+    setWorking(true);
+    setError(null);
+    try {
+      await action();
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setWorking(false);
+    }
+  }
+
+  const manualErrors = validateFeishuAppForm(manualApp, locale);
+
+  function registerManualApp() {
+    setManualSubmitted(true);
+    if (hasValidationErrors(manualErrors)) return;
+    void runManagedAction(async () => {
+      await createFeishuApp(manualApp);
+      await refreshConsole({ showLoading: false });
+      setManualApp({ appId: '', appSecret: '', botName: '' });
+      setManualSubmitted(false);
+    });
+  }
+
+  function runPermissionCheck(app: FeishuApp) {
+    setPermission({ loading: true });
+    void runManagedAction(async () => {
+      const result = await checkFeishuAppPermissions(app.id);
+      setPermission({ loading: false, result });
+    }).catch(() => setPermission({ loading: false }));
+  }
+
+  function requestApproval(app: FeishuApp) {
+    setPermission((prev) => (prev ? { ...prev, applying: true } : prev));
+    void runManagedAction(async () => {
+      const applied = await applyFeishuAppPermissions(app.id);
+      setPermission((prev) => (prev ? { ...prev, applying: false, applied } : prev));
+    });
+  }
+
+  function bindAndGoLive() {
+    if (!targetApp || !bindingAgentId) return;
+    void runManagedAction(async () => {
+      await bindBot({ agentId: bindingAgentId, feishuAppId: targetApp.id });
+      await refreshConsole({ showLoading: false });
+    });
+  }
+
+  const progress = (
+    <ol className="wizard-progress" aria-label={copy.title}>
+      {copy.steps.map((label, index) => {
+        const state = index === step ? 'current' : satisfied[index] && index < step ? 'done' : index < step ? 'done' : 'upcoming';
+        return (
+          <li className={`wizard-progress-step ${state}`} key={label}>
+            <span className="wizard-progress-dot">
+              {state === 'done' ? <Check size={14} /> : index + 1}
+            </span>
+            <span className="wizard-progress-label">{label}</span>
+          </li>
+        );
+      })}
+    </ol>
+  );
+
+  let body: React.ReactNode;
+  if (step === 0) {
+    const apiReachable = health !== null;
+    body = (
+      <div className="wizard-step-body">
+        <p>{copy.welcomeLead}</p>
+        <div className="panel wizard-runtime-card">
+          <div className="panel-title">
+            <Activity size={18} /> {copy.runtimeCheck}
+          </div>
+          <div className="wizard-runtime-row">
+            <Badge
+              value={apiReachable ? 'pass' : 'warning'}
+              label={apiReachable ? copy.apiReachable : copy.apiUnreachable}
+            />
+            {health ? (
+              <Badge
+                value={health.feishu.websocket === 'live' ? 'pass' : 'default'}
+                label={copy.feishuAccess(health.feishu.websocket)}
+              />
+            ) : null}
+          </div>
+          <p className="form-note">{copy.runtimeNote}</p>
+        </div>
+      </div>
+    );
+  } else if (step === 1) {
+    body = (
+      <div className="wizard-step-body">
+        <p>{copy.feishuLead}</p>
+        <FeishuBotOnboardingPanel compact data={data} locale={locale} refreshConsole={refreshConsole} />
+        {permissionApp ? (
+          <div className="panel wizard-permission-card">
+            <div className="panel-title">
+              <Shield size={18} /> {copy.permissionTitle}
+            </div>
+            <div className="inline-actions">
+              <button
+                className="secondary"
+                disabled={working || permission?.loading}
+                onClick={() => runPermissionCheck(permissionApp)}
+                type="button"
+              >
+                {permission?.loading ? <Loader2 className="spin" size={16} /> : <Shield size={16} />}
+                {copy.checkPermissions}
+              </button>
+            </div>
+            {permission?.result?.status === 'pass' ? (
+              <Badge value="pass" label={copy.permissionPass} />
+            ) : null}
+            {permission?.result?.status === 'fail'
+              ? (() => {
+                  const scopes = missingRequiredScopeNames(permission.result!);
+                  const approvalUrl = buildFeishuPermissionApprovalUrl(permission.result!);
+                  return (
+                    <div className="wizard-permission-fail">
+                      <Badge value="warning" label={copy.permissionMissing} />
+                      {scopes.length > 0 ? (
+                        <div className="permission-scope-list" aria-label={copy.permissionMissing}>
+                          {scopes.map((scope) => (
+                            <code className="permission-scope-chip" key={scope}>
+                              {scope}
+                            </code>
+                          ))}
+                        </div>
+                      ) : null}
+                      <div className="inline-actions">
+                        <a className="secondary tiny" href={approvalUrl} target="_blank" rel="noreferrer">
+                          <ExternalLink size={14} /> {copy.selfApprove}
+                        </a>
+                        <button
+                          className="primary tiny"
+                          disabled={working || permission.applying}
+                          onClick={() => requestApproval(permissionApp)}
+                          type="button"
+                        >
+                          {permission.applying ? (
+                            <Loader2 className="spin" size={14} />
+                          ) : (
+                            <Shield size={14} />
+                          )}
+                          {copy.requestApproval}
+                        </button>
+                      </div>
+                      {permission.applied?.submitted ? (
+                        <small className="permission-guidance">{copy.approvalSubmitted}</small>
+                      ) : null}
+                    </div>
+                  );
+                })()
+              : null}
+          </div>
+        ) : null}
+        <details className="wizard-manual">
+          <summary>{copy.manualToggle}</summary>
+          <p className="form-note">{copy.manualHint}</p>
+          <FormGrid>
+            <Input
+              label="App ID"
+              value={manualApp.appId}
+              onChange={(appId) => setManualApp({ ...manualApp, appId })}
+              required
+              error={visibleError(manualErrors, 'appId', manualSubmitted || Boolean(manualApp.appId))}
+            />
+            <Input
+              label={locale === 'zh' ? 'App 密钥' : 'App Secret'}
+              type="password"
+              value={manualApp.appSecret}
+              onChange={(appSecret) => setManualApp({ ...manualApp, appSecret })}
+              required
+              error={visibleError(manualErrors, 'appSecret', manualSubmitted || Boolean(manualApp.appSecret))}
+            />
+            <Input
+              label={locale === 'zh' ? '机器人名称' : 'Bot Name'}
+              value={manualApp.botName}
+              onChange={(botName) => setManualApp({ ...manualApp, botName })}
+            />
+            <div className="inline-actions">
+              <button
+                className="primary"
+                disabled={working || hasValidationErrors(manualErrors)}
+                onClick={registerManualApp}
+                type="button"
+              >
+                <Plus size={16} /> {copy.register}
+              </button>
+            </div>
+          </FormGrid>
+        </details>
+        {hasApp ? <p className="form-note">{copy.feishuDone(data.apps.length)}</p> : null}
+      </div>
+    );
+  } else if (step === 2) {
+    body = (
+      <div className="wizard-step-body">
+        <p>{copy.agentLead}</p>
+        {activeAgents.length > 0 ? (
+          <p className="form-note">{copy.agentExisting(activeAgents.length)}</p>
+        ) : null}
+        <AgentCreateForm
+          data={data}
+          locale={locale}
+          canUseComputer={canUseComputer}
+          busy={working}
+          hideMachineSelect={personalMode}
+          submitLabel={copy.createAgent}
+          onSubmit={(payload) =>
+            void runManagedAction(async () => {
+              await createAgent(payload);
+              await refreshConsole({ showLoading: false });
+              setStep(3);
+            })
+          }
+        />
+      </div>
+    );
+  } else {
+    const liveBadge =
+      goLive === 'live'
+        ? null
+        : goLive === 'disabled'
+          ? <div className="alert error">{copy.goLiveDisabled}</div>
+          : goLive === 'timeout'
+            ? <div className="alert error">{copy.goLiveTimeout}</div>
+            : boundApp
+              ? (
+                <div className="wizard-live-pending">
+                  <Loader2 className="spin" size={16} /> {copy.polling}
+                </div>
+              )
+              : null;
+    body = (
+      <div className="wizard-step-body">
+        <p>{copy.goLiveLead}</p>
+        {!hasApp ? (
+          <p className="form-note">{copy.needApp}</p>
+        ) : activeAgents.length === 0 ? (
+          <p className="form-note">{copy.needAgent}</p>
+        ) : boundApp ? (
+          <div className="panel wizard-live-card">
+            <div className="panel-title">
+              <Link2 size={18} /> {boundApp.botName ?? boundApp.appId}
+            </div>
+            <p className="form-note">{copy.boundTo(boundApp.binding?.agentDisplayName ?? '')}</p>
+            {goLive === 'live' ? (
+              <div className="wizard-live-success">
+                <div className="panel-title">
+                  <Rocket size={18} /> {copy.live}
+                </div>
+                <p>{copy.liveHint}</p>
+              </div>
+            ) : null}
+            {liveBadge}
+            {goLive === 'timeout' || goLive === 'disabled' ? (
+              <div className="inline-actions">
+                <button
+                  className="secondary"
+                  onClick={() => setRetryNonce((nonce) => nonce + 1)}
+                  type="button"
+                >
+                  <RefreshCcw size={16} /> {copy.retry}
+                </button>
+              </div>
+            ) : null}
+          </div>
+        ) : (
+          <FormGrid>
+            <Input
+              label={locale === 'zh' ? '机器人' : 'Bot'}
+              value={targetApp ? `${targetApp.botName ?? targetApp.appId} (${targetApp.appId})` : ''}
+              disabled
+            />
+            <Select
+              label={copy.bindAgent}
+              value={bindingAgentId}
+              onChange={setBindingAgentId}
+              options={activeAgents.map((agent) => agent.id)}
+              labels={Object.fromEntries(activeAgents.map((agent) => [agent.id, agent.displayName]))}
+              required
+            />
+            {targetApp && targetApp.status !== 'enabled' ? (
+              <p className="form-note">{copy.appNotEnabled}</p>
+            ) : null}
+            <div className="inline-actions">
+              <button
+                className="primary"
+                disabled={
+                  working || !targetApp || targetApp.status !== 'enabled' || !bindingAgentId
+                }
+                onClick={bindAndGoLive}
+                type="button"
+              >
+                <Link2 size={16} /> {copy.bind}
+              </button>
+            </div>
+          </FormGrid>
+        )}
+      </div>
+    );
+  }
+
+  const isLastStep = step === 3;
+  const canAdvance = satisfied[step];
+
+  return (
+    <div className="onboarding-stack">
+      <section className="panel onboarding-hero">
+        <div className="overview-hero-icon">
+          <img aria-hidden="true" src={PRODUCT_ICON_SRC} alt="" />
+        </div>
+        <div>
+          <div className="panel-title">
+            <Compass size={18} /> {copy.title}
+          </div>
+          <p className="panel-subtitle">{copy.subtitle}</p>
+        </div>
+      </section>
+
+      {progress}
+
+      <section className="panel onboarding-panel">
+        {error ? <div className="alert error">{error}</div> : null}
+        {body}
+      </section>
+
+      <div className="onboarding-footer">
+        <button
+          className="secondary"
+          disabled={step === 0}
+          onClick={() => setStep((current) => Math.max(0, current - 1))}
+          type="button"
+        >
+          <ArrowLeft size={16} /> {copy.back}
+        </button>
+        <button className="ghost wizard-skip" onClick={onExitToConsole} type="button">
+          {copy.skip}
+        </button>
+        {isLastStep ? (
+          <button
+            className="primary"
+            disabled={goLive !== 'live'}
+            onClick={onExitToConsole}
+            type="button"
+          >
+            {copy.openConsole} <ArrowRight size={16} />
+          </button>
+        ) : (
+          <button
+            className="primary"
+            disabled={!canAdvance}
+            onClick={() => setStep((current) => Math.min(3, current + 1))}
+            type="button"
+          >
+            {copy.next} <ArrowRight size={16} />
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function Overview({
   data,
   locale,
@@ -2091,6 +2737,305 @@ function ownerLabel(
   return owner.displayName ?? owner.email ?? (locale === 'zh' ? '未知' : 'unknown');
 }
 
+/**
+ * Machine select options for the agent forms (design D-A8), shared by
+ * {@link AgentCreateForm} and the {@link AgentsView} edit path so the
+ * "Server-local + owned machines" list has a single source of truth. Server-local
+ * is the only permission-gated choice (it needs computer access); binding to an
+ * owned machine is open to every user.
+ */
+function buildAgentMachineOptions(
+  machines: Machine[],
+  canUseComputer: boolean,
+  locale: Locale,
+): { options: string[]; labels: Record<string, string>; defaultValue: string } {
+  const serverLocalLabel = locale === 'zh' ? '本机(服务器)' : 'Server-local';
+  const bindable = machines.filter((machine) => machine.status !== 'revoked');
+  const options = [
+    ...(canUseComputer ? [SERVER_LOCAL_MACHINE_VALUE] : []),
+    ...bindable.map((machine) => machine.id),
+  ];
+  const labels: Record<string, string> = {
+    ...(canUseComputer ? { [SERVER_LOCAL_MACHINE_VALUE]: serverLocalLabel } : {}),
+    ...Object.fromEntries(
+      bindable.map((machine) => [machine.id, `${machine.name} · ${statusLabel(machine.status, locale)}`]),
+    ),
+  };
+  const defaultValue = canUseComputer ? SERVER_LOCAL_MACHINE_VALUE : bindable[0]?.id ?? '';
+  return { options, labels, defaultValue };
+}
+
+// ── Onboarding wizard state ────────────────────────────────────────────────────
+// Personal mode auto-launches the first-run wizard. Completion is derived from
+// console data (an enabled Feishu app with an active binding) and confirmed live
+// against /health; a localStorage flag records an explicit "skip to console" so a
+// user who dismissed it is not re-routed on every load.
+const ONBOARDING_DISMISSED_KEY = 'open-claude-tag.console.onboardingDismissed';
+
+function readOnboardingDismissed(): boolean {
+  try {
+    return localStorage.getItem(ONBOARDING_DISMISSED_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+function writeOnboardingDismissed(value: boolean): void {
+  try {
+    if (value) localStorage.setItem(ONBOARDING_DISMISSED_KEY, '1');
+    else localStorage.removeItem(ONBOARDING_DISMISSED_KEY);
+  } catch {
+    // Best-effort persistence; non-fatal when localStorage is unavailable.
+  }
+}
+
+/** The first enabled Feishu app that already carries an active bot binding. */
+function activeBoundFeishuApp(data: ConsoleData): FeishuApp | null {
+  return (
+    data.apps.find((app) => app.status === 'enabled' && app.binding?.status === 'active') ?? null
+  );
+}
+
+/**
+ * Structural onboarding completion: at least one enabled Feishu app with an active
+ * binding exists. Stronger than "any binding" so a disabled/half-bound app does
+ * not count as done. The wizard's go-live step additionally confirms the bound app
+ * is live on /health before declaring success.
+ */
+function isOnboardingComplete(data: ConsoleData): boolean {
+  return activeBoundFeishuApp(data) !== null;
+}
+
+/** True when a specific Feishu app's /health entry is live with an active binding. */
+function isFeishuAppLive(health: HealthSummary | null, appId: string): boolean {
+  if (!health) return false;
+  const entry = health.feishu.apps.find((app) => app.appId === appId);
+  return Boolean(entry && entry.wsStatus === 'live' && entry.hasActiveBotBinding);
+}
+
+/**
+ * The create-agent form body, extracted from {@link AgentsView} so the onboarding
+ * wizard reuses the exact same fields, validation, and Claude-credential
+ * assembly without duplicating that logic. It OWNS its own form state and emits a
+ * ready {@link createAgent} payload through `onSubmit`; the host performs the side
+ * effects (AgentsView wraps it in `runAction` + refresh; the wizard creates then
+ * advances). `hideMachineSelect` forces server-local for the personal wizard.
+ */
+function AgentCreateForm({
+  data,
+  locale,
+  canUseComputer,
+  busy,
+  hideMachineSelect = false,
+  submitLabel,
+  onCancel,
+  onSubmit,
+}: {
+  data: ConsoleData;
+  locale: Locale;
+  canUseComputer: boolean;
+  busy: boolean;
+  hideMachineSelect?: boolean;
+  submitLabel?: string;
+  onCancel?: () => void;
+  onSubmit: (payload: Parameters<typeof createAgent>[0]) => void;
+}) {
+  const t = uiText[locale];
+  const {
+    options: machineOptions,
+    labels: machineLabels,
+    defaultValue: defaultMachineValue,
+  } = buildAgentMachineOptions(data.machines, canUseComputer, locale);
+  const [form, setForm] = useState({
+    displayName: '',
+    description: '',
+    systemPrompt: '',
+    defaultRuntime: '',
+    defaultModel: '',
+    runtimeEnv: '',
+    claudeAuthMode: 'subscription' as ClaudeAuthMode,
+    claudeBaseUrl: '',
+    claudeApiKey: '',
+    machineId: defaultMachineValue,
+  });
+  const [submitted, setSubmitted] = useState(false);
+  const displayNameLabel = locale === 'zh' ? '名称' : 'Name';
+  const machineFieldLabel = locale === 'zh' ? '执行机器' : 'Machine';
+  const effectiveMachineId = hideMachineSelect ? defaultMachineValue : form.machineId;
+  const errors = validateAgentForm(
+    {
+      displayName: form.displayName,
+      defaultRuntime: form.defaultRuntime,
+      machineId: effectiveMachineId,
+    },
+    {
+      locale,
+      machineOptions: hideMachineSelect ? [defaultMachineValue] : machineOptions,
+      displayNameLabel,
+      machineLabel: machineFieldLabel,
+    },
+  );
+  const claudeErrors = claudeCredentialFieldErrors(
+    form.defaultRuntime,
+    form.claudeAuthMode,
+    form.claudeBaseUrl,
+    form.claudeApiKey,
+    'create',
+    locale,
+  );
+  const blocked = hasValidationErrors(errors) || hasFieldErrors(claudeErrors);
+
+  function submit() {
+    setSubmitted(true);
+    if (blocked) return;
+    const defaultRuntime = form.defaultRuntime || null;
+    const displayName = form.displayName.trim();
+    let runtimeEnv = parseRuntimeEnv(form.runtimeEnv);
+    if (defaultRuntime === 'claude_code') {
+      if (form.claudeAuthMode === 'subscription') {
+        runtimeEnv = withoutClaudeCredentialKeys(runtimeEnv);
+      } else {
+        if (form.claudeBaseUrl.trim())
+          runtimeEnv[CLAUDE_BASE_URL_ENV_KEY] = form.claudeBaseUrl.trim();
+        if (form.claudeApiKey.trim())
+          runtimeEnv[CLAUDE_API_KEY_ENV_KEY] = form.claudeApiKey.trim();
+      }
+    }
+    onSubmit({
+      displayName,
+      description: nullableText(form.description),
+      defaultRuntime,
+      runtimeEnv,
+      // null = server-local (design D-A8).
+      machineId: effectiveMachineId || null,
+      profile: {
+        displayName,
+        description: nullableText(form.description),
+        systemPrompt: nullableText(form.systemPrompt),
+        stylePrompt: null,
+        defaultRuntime,
+        defaultModel: nullableText(form.defaultModel),
+      },
+    });
+  }
+
+  return (
+    <FormGrid>
+      <Input
+        label={displayNameLabel}
+        value={form.displayName}
+        onChange={(displayName) => setForm({ ...form, displayName })}
+        required
+        error={visibleError(errors, 'displayName', submitted || Boolean(form.displayName))}
+      />
+      <Input
+        label={locale === 'zh' ? '描述' : 'Description'}
+        value={form.description}
+        onChange={(description) => setForm({ ...form, description })}
+      />
+      <TextArea
+        label={locale === 'zh' ? '系统提示词' : 'System Prompt'}
+        value={form.systemPrompt}
+        placeholder={SYSTEM_PROMPT_PLACEHOLDER}
+        onChange={(systemPrompt) => setForm({ ...form, systemPrompt })}
+      />
+      <Select
+        label="Runtime"
+        value={form.defaultRuntime}
+        onChange={(defaultRuntime) => setForm({ ...form, defaultRuntime })}
+        options={AGENT_RUNTIME_OPTIONS}
+        labels={{ '': t.common.none, ...RUNTIME_DISPLAY_NAMES }}
+        error={visibleError(errors, 'defaultRuntime', submitted)}
+      />
+      <Input
+        label={locale === 'zh' ? '模型' : 'Model'}
+        value={form.defaultModel}
+        onChange={(defaultModel) => setForm({ ...form, defaultModel })}
+        placeholder={
+          locale === 'zh'
+            ? '可选，如 kimi-k2 / gpt-5.2 / gemini-3-pro'
+            : 'optional, e.g. kimi-k2 / gpt-5.2 / gemini-3-pro'
+        }
+      />
+      {form.defaultRuntime === 'claude_code' ? (
+        <>
+          <div className="field">
+            <span>{locale === 'zh' ? 'Claude 登录方式' : 'Claude auth'}</span>
+            <div
+              className="segmented-control claude-auth-toggle"
+              aria-label={locale === 'zh' ? 'Claude 登录方式' : 'Claude auth mode'}
+            >
+              {(['subscription', 'custom'] as ClaudeAuthMode[]).map((mode) => (
+                <button
+                  key={mode}
+                  type="button"
+                  aria-pressed={form.claudeAuthMode === mode}
+                  className={form.claudeAuthMode === mode ? 'active' : ''}
+                  onClick={() =>
+                    setForm({
+                      ...form,
+                      claudeAuthMode: mode,
+                      ...(mode === 'subscription' ? { claudeBaseUrl: '', claudeApiKey: '' } : {}),
+                    })
+                  }
+                >
+                  {claudeAuthModeLabel(mode, locale)}
+                </button>
+              ))}
+            </div>
+          </div>
+          {form.claudeAuthMode === 'custom' ? (
+            <>
+              <Input
+                label={locale === 'zh' ? 'API 接入地址 (Base URL)' : 'API Base URL'}
+                value={form.claudeBaseUrl}
+                onChange={(claudeBaseUrl) => setForm({ ...form, claudeBaseUrl })}
+                placeholder="https://api.anthropic.com"
+                required
+                error={submitted ? claudeErrors.baseUrl : undefined}
+              />
+              <Input
+                label={locale === 'zh' ? 'API 密钥 (API Key)' : 'API Key'}
+                value={form.claudeApiKey}
+                onChange={(claudeApiKey) => setForm({ ...form, claudeApiKey })}
+                type="password"
+                required
+                error={submitted ? claudeErrors.apiKey : undefined}
+              />
+            </>
+          ) : null}
+        </>
+      ) : null}
+      <TextArea
+        label="Env"
+        value={form.runtimeEnv}
+        placeholder="KEY=value"
+        onChange={(runtimeEnv) => setForm({ ...form, runtimeEnv })}
+      />
+      {hideMachineSelect ? null : (
+        <Select
+          label={machineFieldLabel}
+          value={form.machineId}
+          onChange={(machineId) => setForm({ ...form, machineId })}
+          options={machineOptions}
+          labels={machineLabels}
+          error={visibleError(errors, 'machineId', submitted)}
+        />
+      )}
+      <div className="inline-actions">
+        {onCancel ? (
+          <button className="secondary" disabled={busy} onClick={onCancel} type="button">
+            {t.actions.cancel}
+          </button>
+        ) : null}
+        <button className="primary" disabled={busy || blocked} onClick={submit} type="button">
+          <Plus size={16} /> {submitLabel ?? (locale === 'zh' ? '创建智能体' : 'Create Agent')}
+        </button>
+      </div>
+    </FormGrid>
+  );
+}
+
 function AgentsView({
   data,
   busy,
@@ -2107,20 +3052,7 @@ function AgentsView({
   canUseComputer: boolean;
 }) {
   const t = uiText[locale];
-  const [agentForm, setAgentForm] = useState({
-    displayName: '',
-    description: '',
-    systemPrompt: '',
-    defaultRuntime: '',
-    defaultModel: '',
-    runtimeEnv: '',
-    claudeAuthMode: 'subscription' as ClaudeAuthMode,
-    claudeBaseUrl: '',
-    claudeApiKey: '',
-    machineId: SERVER_LOCAL_MACHINE_VALUE,
-  });
   const [isCreatingAgent, setIsCreatingAgent] = useState(false);
-  const [agentCreateSubmitted, setAgentCreateSubmitted] = useState(false);
   const [editingAgentId, setEditingAgentId] = useState<string | null>(null);
   const [deletingAgentId, setDeletingAgentId] = useState<string | null>(null);
   const [agentEdit, setAgentEdit] = useState({
@@ -2157,22 +3089,13 @@ function AgentsView({
   );
   // The server-local option is the only permission-gated choice: binding to an
   // owned machine is open to every user; running on the server requires the
-  // admin-managed computer-access allowlist.
-  const agentMachineOptions = [
-    ...(canUseComputer ? [SERVER_LOCAL_MACHINE_VALUE] : []),
-    ...bindableMachines.map((machine) => machine.id),
-  ];
-  const machineOptionLabel = (machine: Machine): string =>
-    `${machine.name} · ${statusLabel(machine.status, locale)}`;
-  const agentMachineLabels: Record<string, string> = {
-    ...(canUseComputer ? { [SERVER_LOCAL_MACHINE_VALUE]: serverLocalLabel } : {}),
-    ...Object.fromEntries(
-      bindableMachines.map((machine) => [machine.id, machineOptionLabel(machine)]),
-    ),
-  };
-  const defaultMachineValue = canUseComputer
-    ? SERVER_LOCAL_MACHINE_VALUE
-    : bindableMachines[0]?.id ?? '';
+  // admin-managed computer-access allowlist. Shared with the create form via
+  // buildAgentMachineOptions so both surfaces stay in lock-step.
+  const { options: agentMachineOptions, labels: agentMachineLabels } = buildAgentMachineOptions(
+    data.machines,
+    canUseComputer,
+    locale,
+  );
   // When editing an agent bound to a now-revoked machine, keep that value selectable
   // (read-only style) so the operator sees why and can revert it to server-local.
   function machineSelectFor(currentMachineId: string): {
@@ -2274,33 +3197,12 @@ function AgentsView({
     setAgentEditSubmitted(false);
   }
 
-  function resetAgentForm() {
-    setAgentForm({
-      displayName: '',
-      description: '',
-      systemPrompt: '',
-      defaultRuntime: '',
-      defaultModel: '',
-      runtimeEnv: '',
-      claudeAuthMode: 'subscription',
-      claudeBaseUrl: '',
-      claudeApiKey: '',
-      machineId: defaultMachineValue,
-    });
-  }
-
   function closeAgentCreator() {
+    // AgentCreateForm owns its own state and is unmounted on close, so a fresh
+    // form is created on the next open — no explicit reset needed here.
     setIsCreatingAgent(false);
-    setAgentCreateSubmitted(false);
-    resetAgentForm();
   }
 
-  const agentCreateErrors = validateAgentForm(agentForm, {
-    locale,
-    machineOptions: agentMachineOptions,
-    displayNameLabel: agentDisplayNameLabel,
-    machineLabel: machineFieldLabel,
-  });
   const editMachineSelect = editingAgent
     ? machineSelectFor(agentEdit.machineId)
     : { options: agentMachineOptions, labels: agentMachineLabels };
@@ -2318,14 +3220,6 @@ function AgentsView({
       machineLabel: machineFieldLabel,
       statusLabel: locale === 'zh' ? '状态' : 'Status',
     },
-  );
-  const agentCreateClaudeErrors = claudeCredentialFieldErrors(
-    agentForm.defaultRuntime,
-    agentForm.claudeAuthMode,
-    agentForm.claudeBaseUrl,
-    agentForm.claudeApiKey,
-    'create',
-    locale,
   );
   const agentEditHasExistingClaudeKeys = editingAgent
     ? hasClaudeCredentialKeys(editingAgent.runtimeEnvKeys)
@@ -2364,10 +3258,7 @@ function AgentsView({
             aria-label={locale === 'zh' ? '创建智能体' : 'Create Agent'}
             className="icon-button"
             disabled={busy}
-            onClick={() => {
-              resetAgentForm();
-              setIsCreatingAgent(true);
-            }}
+            onClick={() => setIsCreatingAgent(true)}
             title={locale === 'zh' ? '创建智能体' : 'Create Agent'}
             type="button"
           >
@@ -2455,151 +3346,19 @@ function AgentsView({
               <X size={16} />
             </button>
           </div>
-        <FormGrid>
-          <Input
-            label={agentDisplayNameLabel}
-            value={agentForm.displayName}
-            onChange={(displayName) => setAgentForm({ ...agentForm, displayName })}
-            required
-            error={visibleError(
-              agentCreateErrors,
-              'displayName',
-              agentCreateSubmitted || Boolean(agentForm.displayName),
-            )}
-          />
-          <Input label={locale === 'zh' ? '描述' : 'Description'} value={agentForm.description} onChange={(description) => setAgentForm({ ...agentForm, description })} />
-          <TextArea label={locale === 'zh' ? '系统提示词' : 'System Prompt'} value={agentForm.systemPrompt} placeholder={SYSTEM_PROMPT_PLACEHOLDER} onChange={(systemPrompt) => setAgentForm({ ...agentForm, systemPrompt })} />
-          <Select
-            label="Runtime"
-            value={agentForm.defaultRuntime}
-            onChange={(defaultRuntime) => setAgentForm({ ...agentForm, defaultRuntime })}
-            options={AGENT_RUNTIME_OPTIONS}
-            labels={{ '': t.common.none, ...RUNTIME_DISPLAY_NAMES }}
-            error={visibleError(agentCreateErrors, 'defaultRuntime', agentCreateSubmitted)}
-          />
-          <Input
-            label={locale === 'zh' ? '模型' : 'Model'}
-            value={agentForm.defaultModel}
-            onChange={(defaultModel) => setAgentForm({ ...agentForm, defaultModel })}
-            placeholder={locale === 'zh' ? '可选，如 kimi-k2 / gpt-5.2 / gemini-3-pro' : 'optional, e.g. kimi-k2 / gpt-5.2 / gemini-3-pro'}
-          />
-          {agentForm.defaultRuntime === 'claude_code' ? (
-            <>
-              <div className="field">
-                <span>{locale === 'zh' ? 'Claude 登录方式' : 'Claude auth'}</span>
-                <div
-                  className="segmented-control claude-auth-toggle"
-                  aria-label={locale === 'zh' ? 'Claude 登录方式' : 'Claude auth mode'}
-                >
-                  {(['subscription', 'custom'] as ClaudeAuthMode[]).map((mode) => (
-                    <button
-                      key={mode}
-                      type="button"
-                      aria-pressed={agentForm.claudeAuthMode === mode}
-                      className={agentForm.claudeAuthMode === mode ? 'active' : ''}
-                      onClick={() =>
-                        setAgentForm({
-                          ...agentForm,
-                          claudeAuthMode: mode,
-                          ...(mode === 'subscription'
-                            ? { claudeBaseUrl: '', claudeApiKey: '' }
-                            : {}),
-                        })
-                      }
-                    >
-                      {claudeAuthModeLabel(mode, locale)}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              {agentForm.claudeAuthMode === 'custom' ? (
-                <>
-                  <Input
-                    label={locale === 'zh' ? 'API 接入地址 (Base URL)' : 'API Base URL'}
-                    value={agentForm.claudeBaseUrl}
-                    onChange={(claudeBaseUrl) => setAgentForm({ ...agentForm, claudeBaseUrl })}
-                    placeholder="https://api.anthropic.com"
-                    required
-                    error={agentCreateSubmitted ? agentCreateClaudeErrors.baseUrl : undefined}
-                  />
-                  <Input
-                    label={locale === 'zh' ? 'API 密钥 (API Key)' : 'API Key'}
-                    value={agentForm.claudeApiKey}
-                    onChange={(claudeApiKey) => setAgentForm({ ...agentForm, claudeApiKey })}
-                    type="password"
-                    required
-                    error={agentCreateSubmitted ? agentCreateClaudeErrors.apiKey : undefined}
-                  />
-                </>
-              ) : null}
-            </>
-          ) : null}
-          <TextArea label="Env" value={agentForm.runtimeEnv} placeholder="KEY=value" onChange={(runtimeEnv) => setAgentForm({ ...agentForm, runtimeEnv })} />
-          <Select
-            label={machineFieldLabel}
-            value={agentForm.machineId}
-            onChange={(machineId) => setAgentForm({ ...agentForm, machineId })}
-            options={agentMachineOptions}
-            labels={agentMachineLabels}
-            error={visibleError(agentCreateErrors, 'machineId', agentCreateSubmitted)}
-          />
-          <div className="inline-actions">
-          <button className="secondary" disabled={busy} onClick={closeAgentCreator} type="button">
-            {t.actions.cancel}
-          </button>
-          <button
-            className="primary"
-            disabled={
-              busy ||
-              hasValidationErrors(agentCreateErrors) ||
-              hasFieldErrors(agentCreateClaudeErrors)
-            }
-            onClick={() => {
-              setAgentCreateSubmitted(true);
-              if (
-                hasValidationErrors(agentCreateErrors) ||
-                hasFieldErrors(agentCreateClaudeErrors)
-              )
-                return;
-              void runAction(t.notices.agentCreated, async () => {
-                const defaultRuntime = agentForm.defaultRuntime || null;
-                const displayName = agentForm.displayName.trim();
-                let runtimeEnv = parseRuntimeEnv(agentForm.runtimeEnv);
-                if (defaultRuntime === 'claude_code') {
-                  if (agentForm.claudeAuthMode === 'subscription') {
-                    runtimeEnv = withoutClaudeCredentialKeys(runtimeEnv);
-                  } else {
-                    if (agentForm.claudeBaseUrl.trim())
-                      runtimeEnv[CLAUDE_BASE_URL_ENV_KEY] = agentForm.claudeBaseUrl.trim();
-                    if (agentForm.claudeApiKey.trim())
-                      runtimeEnv[CLAUDE_API_KEY_ENV_KEY] = agentForm.claudeApiKey.trim();
-                  }
-                }
-                await createAgent({
-                  displayName,
-                  description: nullableText(agentForm.description),
-                  defaultRuntime,
-                  runtimeEnv,
-                  // null = server-local (design D-A8).
-                  machineId: agentForm.machineId || null,
-                  profile: {
-                    displayName,
-                    description: nullableText(agentForm.description),
-                    systemPrompt: nullableText(agentForm.systemPrompt),
-                    stylePrompt: null,
-                    defaultRuntime,
-                    defaultModel: nullableText(agentForm.defaultModel),
-                  },
-                });
-                closeAgentCreator();
-              });
-            }}
-            type="button"
-          >
-            <Plus size={16} /> {locale === 'zh' ? '创建智能体' : 'Create Agent'}
-          </button>
-          </div>
-        </FormGrid>
+        <AgentCreateForm
+          data={data}
+          locale={locale}
+          canUseComputer={canUseComputer}
+          busy={busy}
+          onCancel={closeAgentCreator}
+          onSubmit={(payload) =>
+            void runAction(t.notices.agentCreated, async () => {
+              await createAgent(payload);
+              closeAgentCreator();
+            })
+          }
+        />
       </Modal>
     ) : null}
     {deletingAgent ? (

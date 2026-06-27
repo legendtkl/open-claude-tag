@@ -2932,11 +2932,30 @@ describe('auth config + logout (unguarded)', () => {
     expect(response.statusCode).toBe(200);
     expect(response.json()).toEqual({
       devAuthEnabled: false,
+      personalMode: false,
       serverPublicUrl: null,
       daemonVersion: null,
       desktopArtifacts: { arm64: false, x64: false },
       desktopVersion: null,
     });
+  });
+
+  it('reports personalMode in /admin/auth/config', async () => {
+    const off = makeAuthApp({ store: makeStore(), personalMode: false });
+    const offResponse = await off.inject({
+      method: 'GET',
+      url: '/admin/auth/config',
+      remoteAddress: '10.0.0.8',
+    });
+    expect(offResponse.json()).toMatchObject({ personalMode: false });
+
+    const on = makeAuthApp({ store: makeStore(), personalMode: true });
+    const onResponse = await on.inject({
+      method: 'GET',
+      url: '/admin/auth/config',
+      remoteAddress: '10.0.0.8',
+    });
+    expect(onResponse.json()).toMatchObject({ personalMode: true });
   });
 
   it('does not expose the removed SSO endpoints (exchange / sso-login 404)', async () => {

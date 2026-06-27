@@ -4419,6 +4419,10 @@ async function start(): Promise<void> {
     // break-glass token/loopback superadmin cannot do. When off, the dev-auth
     // endpoints 404 and the cc_dev_user cookie is never honored.
     devAuthEnabled: process.env.OPEN_TAG_DEV_AUTH === 'enabled',
+    // Single-user personal mode (set by the personal launcher's `up`). Surfaced
+    // on /admin/auth/config so the localhost console auto-launches its first-run
+    // onboarding wizard. Purely informational; gates no server behavior.
+    personalMode: process.env.OPEN_TAG_PERSONAL_MODE === 'enabled',
     // Daemon install-guide config for the Machines page. `SERVER_PUBLIC_URL` is
     // the worker daemon gateway URL a user's daemon dials; the daemon version is
     // read from apps/daemon/package.json so the guide can pin a concrete version.

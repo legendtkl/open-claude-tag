@@ -3440,6 +3440,15 @@ export interface RegisterAdminApiOptions {
    */
   devAuthEnabled?: boolean;
   /**
+   * Whether the server runs in single-user personal mode
+   * (`OPEN_TAG_PERSONAL_MODE=enabled`). Surfaced via `GET /admin/auth/config` so
+   * the localhost console can auto-launch its first-run onboarding wizard and
+   * frame server-local execution as the default. Defaults to env; injectable so
+   * tests do not depend on `process.env`. Purely informational — it changes no
+   * auth, ownership, or execution behavior on the server.
+   */
+  personalMode?: boolean;
+  /**
    * Public base URL a user's daemon dials (the worker daemon gateway, env
    * `SERVER_PUBLIC_URL`, e.g. `http://10.37.206.226:3001`). Surfaced via
    * `GET /admin/auth/config` so the Machines page can render the
@@ -3508,6 +3517,17 @@ function normalizeServerPublicUrl(value: string | null | undefined): string | nu
 function resolveDevAuthEnabled(options: RegisterAdminApiOptions): boolean {
   if (options.devAuthEnabled !== undefined) return options.devAuthEnabled;
   return process.env.OPEN_TAG_DEV_AUTH === 'enabled';
+}
+
+/**
+ * Personal mode is OFF unless explicitly enabled, mirroring the dev-auth
+ * resolver: the option overrides env so tests do not depend on `process.env`;
+ * when undefined we read `OPEN_TAG_PERSONAL_MODE === 'enabled'`. Surfaced on
+ * `/admin/auth/config` for the localhost console; it gates no server behavior.
+ */
+function resolvePersonalMode(options: RegisterAdminApiOptions): boolean {
+  if (options.personalMode !== undefined) return options.personalMode;
+  return process.env.OPEN_TAG_PERSONAL_MODE === 'enabled';
 }
 
 /** Dev-auth session cookie lifetime: 12h, a reasonable local session window. */
@@ -3727,6 +3747,7 @@ export function registerAdminApiRoutes(
   // config BEFORE it has an identity. dev-login sets the `cc_dev_user` cookie the
   // guard reads on every later request; logout clears it.
   const devAuthEnabled = resolveDevAuthEnabled(options);
+  const personalMode = resolvePersonalMode(options);
 
   // The daemon-install guide config travels on the same unauthenticated config
   // endpoint as the auth config: the Machines page reads `serverPublicUrl` /
@@ -3763,6 +3784,7 @@ export function registerAdminApiRoutes(
     ]);
     return {
       devAuthEnabled,
+      personalMode,
       serverPublicUrl,
       daemonVersion,
       // Whether each macOS app arch is actually downloadable right now (path set

@@ -477,6 +477,14 @@ export interface AuthConfig {
   /** True when the local dev-auth login mode is active (design D-A6). */
   devAuthEnabled: boolean;
   /**
+   * True when the server runs in single-user personal mode
+   * (`OPEN_TAG_PERSONAL_MODE=enabled`). The console uses this to auto-launch the
+   * first-run onboarding wizard, frame server-local execution as the default, and
+   * de-emphasize team-only machine pairing. Defaults to false so the full
+   * multi-tenant console behavior is unchanged when the flag is off.
+   */
+  personalMode: boolean;
+  /**
    * Public base URL a user's daemon dials (the worker daemon gateway). Null when
    * the deployer has not set `SERVER_PUBLIC_URL`; the install guide then shows a
    * `<SERVER_PUBLIC_URL>` placeholder.
@@ -509,6 +517,7 @@ export async function getAuthConfig(): Promise<AuthConfig> {
     const body = (await response.json()) as Partial<AuthConfig>;
     return {
       devAuthEnabled: body.devAuthEnabled === true,
+      personalMode: body.personalMode === true,
       serverPublicUrl: body.serverPublicUrl?.trim() || null,
       daemonVersion: body.daemonVersion?.trim() || null,
       desktopArtifacts: {
@@ -520,11 +529,68 @@ export async function getAuthConfig(): Promise<AuthConfig> {
   } catch {
     return {
       devAuthEnabled: false,
+      personalMode: false,
       serverPublicUrl: null,
       daemonVersion: null,
       desktopArtifacts: { arm64: false, x64: false },
       desktopVersion: null,
     };
+  }
+}
+
+/** Per-app Feishu WebSocket health entry from `GET /health` (`feishu.apps[]`). */
+export interface FeishuAppHealth {
+  appId: string;
+  wsStatus: 'disabled' | 'starting' | 'live' | 'unhealthy';
+  hasActiveBotBinding: boolean;
+}
+
+/** Minimal `GET /health` shape the onboarding wizard reads to confirm go-live. */
+export interface HealthSummary {
+  status: string;
+  feishu: {
+    access: string;
+    websocket: 'live' | 'unhealthy' | 'disabled';
+    apps: FeishuAppHealth[];
+  };
+}
+
+/**
+ * Best-effort read of `GET /health`. Returns null on any error so callers (the
+ * onboarding wizard's runtime check + go-live poll) can degrade gracefully rather
+ * than throw. Unauthenticated, like the rest of `/health`.
+ */
+export async function getHealth(signal?: AbortSignal): Promise<HealthSummary | null> {
+  try {
+    const response = await fetch('/health', { credentials: 'include', signal });
+    if (!response.ok) return null;
+    const body = (await response.json()) as Partial<HealthSummary> | null;
+    if (!body || typeof body !== 'object' || !body.feishu) return null;
+    const feishu = body.feishu;
+    return {
+      status: typeof body.status === 'string' ? body.status : 'unknown',
+      feishu: {
+        access: typeof feishu.access === 'string' ? feishu.access : 'unknown',
+        websocket:
+          feishu.websocket === 'live' || feishu.websocket === 'unhealthy'
+            ? feishu.websocket
+            : 'disabled',
+        apps: Array.isArray(feishu.apps)
+          ? feishu.apps.map((app) => ({
+              appId: String(app.appId),
+              wsStatus:
+                app.wsStatus === 'live' ||
+                app.wsStatus === 'starting' ||
+                app.wsStatus === 'unhealthy'
+                  ? app.wsStatus
+                  : 'disabled',
+              hasActiveBotBinding: app.hasActiveBotBinding === true,
+            }))
+          : [],
+      },
+    };
+  } catch {
+    return null;
   }
 }
 

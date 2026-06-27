@@ -16,6 +16,23 @@ describe('buildServiceEnv', () => {
     expect(env.API_PORT).toBe('3210');
     expect(env.API_URL).toBe('http://127.0.0.1:3210');
     expect(env.OPEN_TAG_FEISHU_ACCESS).toBe('disabled');
+    // The personal launcher always runs the stack in personal mode so the console
+    // auto-launches its onboarding wizard.
+    expect(env.OPEN_TAG_PERSONAL_MODE).toBe('enabled');
+  });
+
+  it('forces personal mode on even when the inherited env disables it', () => {
+    const config = {
+      apiPort: 3210,
+      apiUrl: 'http://127.0.0.1:3210',
+      feishuAccess: 'disabled',
+    } as unknown as PersonalConfig;
+    const env = buildServiceEnv(
+      config,
+      { OPEN_TAG_PERSONAL_MODE: 'disabled' },
+      'postgres://db',
+    );
+    expect(env.OPEN_TAG_PERSONAL_MODE).toBe('enabled');
   });
 });
 

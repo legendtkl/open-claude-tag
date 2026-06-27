@@ -410,6 +410,19 @@ describe('console API requests', () => {
     expect(fallback.devAuthEnabled).toBe(false);
   });
 
+  it('exposes personalMode from the auth config (default false when absent)', async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>
+      jsonResponse({ personalMode: true }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    const config = await getAuthConfig();
+    expect(config.personalMode).toBe(true);
+
+    fetchMock.mockResolvedValueOnce(jsonResponse({ devAuthEnabled: true }));
+    const fallback = await getAuthConfig();
+    expect(fallback.personalMode).toBe(false);
+  });
+
   it('POSTs the chosen identity to /admin/auth/dev-login', async () => {
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>
       jsonResponse({ role: 'user', devAuth: true }),
