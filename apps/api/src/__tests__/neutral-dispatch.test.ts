@@ -166,6 +166,15 @@ describe('buildNeutralQueuedTask', () => {
     expect(job.constraints).not.toHaveProperty('feishuContext');
   });
 
+  it('carries the thread target when the message is threaded (for worker terminal feedback)', () => {
+    const job = buildNeutralQueuedTask(
+      makeMessage({ conversation: { kind: 'slack', scopeId: 'C_chat', threadId: '169.42' } }),
+      'sess-1',
+      { taskId: 'task-3', intent: IntentType.CHAT_REPLY, runtime: 'auto', goal: 'g' },
+    );
+    expect(job.constraints.threadId).toBe('169.42');
+  });
+
   it('keeps an explicit runtime and falls back to message text for the goal', () => {
     const job = buildNeutralQueuedTask(makeMessage(), 'sess-1', {
       taskId: 'task-2',

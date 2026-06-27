@@ -6,6 +6,7 @@
   },
   "include": ["src"],
   "references": [
+    { "path": "../../packages/channel-slack" },
     { "path": "../../packages/core-types" },
     { "path": "../../packages/daemon-protocol" },
     { "path": "../../packages/feishu-adapter" },

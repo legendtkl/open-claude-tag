@@ -90,6 +90,7 @@ import {
   createFeishuTaskTrackingConfigFromEnv,
   normalizeInteractionReason,
 } from '@open-tag/feishu-adapter';
+import { SlackChannel } from '@open-tag/channel-slack';
 import { createLlmClientFromEnv } from '@open-tag/llm-client';
 import type { LlmClient } from '@open-tag/llm-client';
 import {
@@ -166,8 +167,11 @@ import {
 import {
   buildTaskConversationRef,
   createLarkChannelSender,
+  resolveTaskChannelSender,
   updateRunningFeedbackCard,
+  NeutralChannelFeedback,
   type ChannelSender,
+  type TaskFeedback,
 } from './channel-sender.js';
 import { ChecklistFeedback } from './checklist-feedback.js';
 import { runAdmissionReschedulerOnce as runAdmissionRescheduler } from './admission-rescheduler.js';
@@ -310,6 +314,10 @@ const DATABASE_URL =
   'postgresql://open-claude-tag:open-claude-tag@localhost:5432/open-claude-tag';
 const FEISHU_APP_ID = process.env.FEISHU_APP_ID ?? '';
 const FEISHU_APP_SECRET = process.env.FEISHU_APP_SECRET ?? '';
+// Optional Slack bot token for delivering a Slack-dispatched task's terminal
+// feedback to its own channel. Mirrors how the API builds its Slack sender
+// (apps/api/src/server.ts); absent ⇒ Slack tasks complete but skip delivery.
+const SLACK_BOT_TOKEN = process.env.SLACK_BOT_TOKEN?.trim() ?? '';
 const GRACEFUL_SHUTDOWN_TIMEOUT = parseInt(process.env.GRACEFUL_SHUTDOWN_TIMEOUT ?? '30000', 10);
 const WORKER_CONCURRENCY = parseInt(process.env.WORKER_CONCURRENCY ?? '5', 10);
 // Layer A agent workspace memory (local file store). Enabled by default for
@@ -374,6 +382,9 @@ const DAEMON_GATEWAY_PUBLIC = process.env.DAEMON_GATEWAY_PUBLIC === 'true';
 let db: Database;
 let feishuClient: FeishuClient | null = null;
 let feishuClientRegistry: WorkerFeishuClientRegistry | null = null;
+// Worker-held Slack sender (a SlackChannel) for non-Lark terminal feedback,
+// built in main() from SLACK_BOT_TOKEN. Null when no token is configured.
+let slackSender: ChannelSender | null = null;
 let runtimeManager: RuntimeManager;
 let daemonGateway: DaemonGateway | null = null;
 let queue: TaskQueue;
@@ -1095,6 +1106,10 @@ async function processTask(job: { id: string; data: TaskJobData }): Promise<void
   const chatId = taskConstraints.chatId as string | undefined;
   const ackMessageId = taskConstraints.ackMessageId as string | undefined;
   const replyToMessageId = taskConstraints.replyToMessageId as string | undefined;
+  // The task's own channel kind (neutral dispatch stamps it; legacy/Lark jobs
+  // omit it ⇒ default 'lark'), plus the neutral thread target for non-lark replies.
+  const channelKind = (taskConstraints.channelKind as string | undefined) ?? 'lark';
+  const channelThreadId = taskConstraints.threadId as string | undefined;
   const userMessageId = taskConstraints.userMessageId as string | undefined;
   const userMessageReactionId = taskConstraints.userMessageReactionId as string | undefined;
   const imageAttachment = taskConstraints.imageAttachment as
@@ -1125,7 +1140,7 @@ async function processTask(job: { id: string; data: TaskJobData }): Promise<void
 
   logger.info({ taskId, sessionId, runtimeHint }, 'Processing task');
 
-  let feedback: ThreePhaseFeedback | null = null;
+  let feedback: TaskFeedback | null = null;
   let taskFeishuClient: FeishuClient | null = null;
   let taskChannelSender: ChannelSender | null = null;
   // Additional "show your work" surface: a live named-stage checklist driven by
@@ -1271,35 +1286,69 @@ async function processTask(job: { id: string; data: TaskJobData }): Promise<void
       defaultClient: feishuClient,
     });
     taskFeishuClient = feedbackClientResolution.client;
-    // Route the primary task-feedback card through the neutral ChannelSender.
-    // Wrap the exact client ThreePhaseFeedback uses for done/failed so the
-    // running card cannot drift to a different/rotated client instance.
-    taskChannelSender = taskFeishuClient ? createLarkChannelSender(taskFeishuClient) : null;
-    // The live checklist posts a separate card into the same chat; only wire it
-    // when we have both a sender and a destination chat.
-    if (taskChannelSender && chatId) {
-      const checklistTitle = (goal.split('\n').find((line) => line.trim()) ?? 'Working on the task')
-        .trim()
-        .slice(0, 120);
-      checklist = new ChecklistFeedback({
-        sender: taskChannelSender,
-        conversation: buildTaskConversationRef(chatId, replyToMessageId),
-        title: checklistTitle,
-        logger,
-      });
-    }
+    if (channelKind === 'lark') {
+      // Lark path — unchanged. Route the primary task-feedback card through the
+      // neutral ChannelSender (same expression/calls as before): wrap the exact
+      // client ThreePhaseFeedback uses for done/failed so the running card cannot
+      // drift to a different/rotated client instance.
+      taskChannelSender = resolveTaskChannelSender('lark', { feishuClient: taskFeishuClient });
+      // The live checklist posts a separate card into the same chat; only wire it
+      // when we have both a sender and a destination chat.
+      if (taskChannelSender && chatId) {
+        const checklistTitle = (
+          goal.split('\n').find((line) => line.trim()) ?? 'Working on the task'
+        )
+          .trim()
+          .slice(0, 120);
+        checklist = new ChecklistFeedback({
+          sender: taskChannelSender,
+          conversation: buildTaskConversationRef(chatId, replyToMessageId),
+          title: checklistTitle,
+          logger,
+        });
+      }
 
-    // Setup feedback (will update the ACK card if chatId is available).
-    // replyToMessageId: thread-aware (only set in topic threads) so completion cards
-    // follow the same reply convention as other messages.
-    // ackMessageId: pre-existing ACK card from the API server for updateRunning to PATCH.
-    if (chatId && taskChannelSender) {
-      feedback = new ThreePhaseFeedback(taskChannelSender, chatId, replyToMessageId, ackMessageId);
-    } else if (chatId && feedbackClientResolution.missingAppClient) {
-      logger.error(
-        { taskId, feishuAppId: taskFeishuAppId },
-        'Cannot resolve Feishu client for task app; feedback will be skipped',
-      );
+      // Setup feedback (will update the ACK card if chatId is available).
+      // replyToMessageId: thread-aware (only set in topic threads) so completion cards
+      // follow the same reply convention as other messages.
+      // ackMessageId: pre-existing ACK card from the API server for updateRunning to PATCH.
+      if (chatId && taskChannelSender) {
+        feedback = new ThreePhaseFeedback(taskChannelSender, chatId, replyToMessageId, ackMessageId);
+      } else if (chatId && feedbackClientResolution.missingAppClient) {
+        logger.error(
+          { taskId, feishuAppId: taskFeishuAppId },
+          'Cannot resolve Feishu client for task app; feedback will be skipped',
+        );
+      }
+    } else {
+      // Non-lark (e.g. Slack): deliver the task's terminal outcome to ITS OWN
+      // channel through the kind-resolved sender. taskChannelSender stays null so
+      // the Lark-only running card + checklist are never wired for this kind (the
+      // neutral feedback owns its sender). No ack-card PATCH (a neutral-dispatched
+      // task has no pre-created card to edit) — a single terminal message is sent.
+      // Running-card live updates + full Block Kit parity are deferred.
+      const neutralSender = resolveTaskChannelSender(channelKind, { slackSender });
+      if (chatId && neutralSender) {
+        feedback = new NeutralChannelFeedback({
+          sender: neutralSender,
+          conversation: {
+            kind: channelKind,
+            scopeId: chatId,
+            ...(channelThreadId ? { threadId: channelThreadId } : {}),
+          },
+          logger,
+        });
+      } else {
+        logger.warn(
+          {
+            taskId,
+            channelKind,
+            hasSender: Boolean(neutralSender),
+            hasChatId: Boolean(chatId),
+          },
+          'No channel sender resolved for non-lark task; terminal feedback delivery skipped',
+        );
+      }
     }
 
     if (
@@ -3202,6 +3251,13 @@ async function main(): Promise<void> {
     logger,
   });
   feishuClient = feishuClientRegistry.primaryClient;
+  // Slack sender (optional): a SlackChannel doubles as the worker's ChannelSender,
+  // so a Slack-dispatched task's terminal feedback reaches its own channel. Built
+  // from env, mirroring how the API wires its Slack sender from SLACK_BOT_TOKEN.
+  slackSender = SLACK_BOT_TOKEN ? new SlackChannel({ token: SLACK_BOT_TOKEN }) : null;
+  if (slackSender) {
+    logger.info('Slack channel sender configured for non-lark task feedback delivery');
+  }
   if (FEISHU_ACCESS_DISABLED) {
     logger.info(
       { instanceId: INSTANCE_ID, instanceRole: INSTANCE_ROLE },

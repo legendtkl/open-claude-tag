@@ -218,6 +218,9 @@ importers:
 
   apps/worker:
     dependencies:
+      '@open-tag/channel-slack':
+        specifier: workspace:*
+        version: link:../../packages/channel-slack
       '@open-tag/core-types':
         specifier: workspace:*
         version: link:../../packages/core-types

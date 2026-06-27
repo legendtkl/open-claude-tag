@@ -103,6 +103,9 @@ export function buildNeutralQueuedTask(
       tenantKey: message.scope.installationId,
       chatId: message.scope.scopeId,
       channelKind: message.channel.kind,
+      // Carry the thread target so the worker's terminal feedback lands in the
+      // same thread the task started in (only set when the message is threaded).
+      ...(message.conversation.threadId ? { threadId: message.conversation.threadId } : {}),
       userMessageId: message.messageId,
       requesterOpenId: message.sender.id,
       replyLanguage: message.locale,
