@@ -68,3 +68,4 @@ history of decisions stays auditable.
 | [0006](0006-cross-channel-flag-broker.md) | Brokered, audited, isPrivate-safe cross-channel flagging | Accepted |
 | [0007](0007-stale-thread-nudge-scanner.md) | Stale-thread nudge scanner: audit-log idempotency + same-channel private nudge | Accepted |
 | [0008](0008-neutral-ack-in-place-terminal-update.md) | Thread the neutral ACK handle so the worker updates it in place | Accepted |
+| [0009](0009-embedded-postgres-db-provider.md) | DB-provider abstraction with an embedded-Postgres (zero-Docker) provider | Accepted |
