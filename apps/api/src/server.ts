@@ -425,12 +425,20 @@ async function resolveDebugFeishuAppContext(
 }
 
 async function handleSlashCommand(
-  event: NormalizedEvent,
+  message: InboundMessage,
   sessionId: string,
   replyToMessageId?: string,
   appContext: FeishuAppRuntimeContext = feishuAppRuntime.getPrimaryContext(),
   agentContext: TaskAgentContext = {},
 ): Promise<void> {
+  // ADR-0004 Stage 1a-ii: the slash-command path ENTERS as a channel-neutral
+  // InboundMessage. handleSlashCommand reads no lossless scalars of its own — it is
+  // a pure pass-through whose only consumers (the createSlashCommandHandler handler
+  // and upgradeRootProvisionalSession) still take a NormalizedEvent — so it recovers
+  // the lark-guarded native event once at the top and runs verbatim. The recovered
+  // native is byte-identical to the call-site `adaptNormalizedEvent` input (same
+  // object via channel.native), so behavior is unchanged. Outbound stays native.
+  const event = recoverFeishuNormalizedEvent(message);
   const handler = createSlashCommandHandler({
     db,
     feishuClient: appContext.client,
@@ -2682,7 +2690,7 @@ async function dispatchInboundMessageViaFeishuNative(
         );
       } else {
         await handleSlashCommand(
-          event,
+          adaptNormalizedEvent(event),
           sessionId,
           replyToMessageId,
           currentAppContext,
@@ -2694,7 +2702,13 @@ async function dispatchInboundMessageViaFeishuNative(
       routedCommand &&
       !isTaskSlashCommand(routedCommand)
     ) {
-      await handleSlashCommand(event, sessionId, replyToMessageId, currentAppContext, agentContext);
+      await handleSlashCommand(
+        adaptNormalizedEvent(event),
+        sessionId,
+        replyToMessageId,
+        currentAppContext,
+        agentContext,
+      );
     } else {
       await handleNormalMessage(
         adaptNormalizedEvent(effectiveEvent),
