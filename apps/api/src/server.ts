@@ -448,7 +448,7 @@ async function handleSlashCommand(
 
 // ── Normal message handler ──
 async function handleNormalMessage(
-  event: NormalizedEvent,
+  message: InboundMessage,
   sessionId: string,
   sessionScope: string,
   replyToMessageId?: string,
@@ -457,6 +457,17 @@ async function handleNormalMessage(
   extraTaskConstraints: Record<string, unknown> = {},
   explicitTaskId?: string,
 ): Promise<void> {
+  // ADR-0004 Stage 1a-ii: the main task-creation path ENTERS as a channel-neutral
+  // InboundMessage. Its lossless task-creation inputs (goal/summary fallback text,
+  // tenant, chat, requester) read from `message.*`; the Feishu OUTBOUND (ACK card /
+  // reply / reaction) and the downstream calls whose signatures still take a
+  // NormalizedEvent (orchestrator handleEvent, buildQueuedTaskInput,
+  // upgradeRootProvisionalSession, buildFeishuTaskSourceTopicKey) keep flowing from
+  // the lark-guarded recovered native event — those migrate in later slices. The
+  // recovered native is byte-identical to the call-site `adaptNormalizedEvent`
+  // input (same object via channel.native), so behavior is unchanged. The one
+  // non-lossless scalar (the exact message id) is also read from native.
+  const event = recoverFeishuNormalizedEvent(message);
   const result = await handleEvent(db, event, sessionId, {
     ...agentContext,
     extraTaskConstraints,
@@ -485,7 +496,7 @@ async function handleNormalMessage(
 
   if (result.type === 'task_created' && result.taskId) {
     const createdTaskId = result.taskId;
-    const goalText = result.goal ?? event.content.text ?? '';
+    const goalText = result.goal ?? message.content.text ?? '';
     const feedback = new ThreePhaseFeedback(
       createFeishuChannelSender(appContext.client),
       event.chatId,
@@ -526,14 +537,14 @@ async function handleNormalMessage(
         taskId: result.taskId,
         taskType: result.intent,
         sessionId,
-        summary: result.goal ?? event.content.text ?? '',
+        summary: result.goal ?? message.content.text ?? '',
         localStatus: TaskStatus.QUEUED,
-        tenantKey: event.tenantKey,
+        tenantKey: message.scope.installationId,
         sourceMessageId: event.messageId,
         sourceTopicKey: buildFeishuTaskSourceTopicKey(event, sessionId, sessionScope),
-        chatId: event.chatId,
+        chatId: message.scope.scopeId,
         replyToMessageId,
-        requesterOpenId: event.senderOpenId,
+        requesterOpenId: message.sender.id,
         agentId: agentContext.agentId,
         feishuAppId: agentContext.feishuAppId,
       });
@@ -2660,7 +2671,7 @@ async function dispatchInboundMessageViaFeishuNative(
       // Owner passed — route to orchestrator (TASK_COMMANDS) or slash handler
       if (isTaskSlashCommand(routedCommand)) {
         await handleNormalMessage(
-          effectiveEvent,
+          adaptNormalizedEvent(effectiveEvent),
           sessionId,
           sessionScope,
           replyToMessageId,
@@ -2686,7 +2697,7 @@ async function dispatchInboundMessageViaFeishuNative(
       await handleSlashCommand(event, sessionId, replyToMessageId, currentAppContext, agentContext);
     } else {
       await handleNormalMessage(
-        effectiveEvent,
+        adaptNormalizedEvent(effectiveEvent),
         sessionId,
         sessionScope,
         replyToMessageId,
