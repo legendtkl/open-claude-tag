@@ -159,7 +159,7 @@ describe('channel observation tap wiring in server.ts', () => {
   });
 
   it('observes un-addressed messages in the skip branch, strictly before any task work', () => {
-    const skipBranchIdx = serverSrc.indexOf('let event = normalizeEvent(adapted as any, config);');
+    const skipBranchIdx = serverSrc.indexOf('const event = normalizeEvent(adapted as any, config);');
     const obsBuildIdx = serverSrc.indexOf(
       'const observationEvent = normalizeEventForObservation(adapted as any, config);',
     );
@@ -186,7 +186,7 @@ describe('channel observation tap wiring in server.ts', () => {
   it('un-addressed observation branch returns without creating a task, ACK, or dispatch', () => {
     // Isolate the `if (!event) { ... }` skip branch body and assert it contains
     // the observation tap but none of the task-pipeline side effects.
-    const branchStart = serverSrc.indexOf('let event = normalizeEvent(adapted as any, config);');
+    const branchStart = serverSrc.indexOf('const event = normalizeEvent(adapted as any, config);');
     const branchReturn = serverSrc.indexOf('return true;', branchStart);
     const branchBody = serverSrc.slice(branchStart, branchReturn);
 

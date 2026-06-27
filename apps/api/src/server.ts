@@ -53,6 +53,7 @@ import {
 import { FeishuWsManager } from './feishu-ws-manager.js';
 import {
   FeishuClient,
+  adaptNormalizedEvent,
   normalizeDocumentCommentEvent,
   normalizeEvent,
   normalizeEventForObservation,
@@ -119,6 +120,7 @@ import { applyBufferGate } from './buffer-gate.js';
 import { tapChannelObservation } from './channel-observation-tap.js';
 import { tapAmbient, type AmbientTapDeps } from './ambient-tap.js';
 import { SlackChannel } from '@open-tag/channel-slack';
+import type { InboundMessage } from '@open-tag/channel-core';
 import {
   SLACK_EVENTS_PATH,
   createSlackEventsHandler,
@@ -2296,7 +2298,7 @@ async function processEventInner(
     return false;
   }
 
-  let event = normalizeEvent(adapted as any, config);
+  const event = normalizeEvent(adapted as any, config);
   if (!event) {
     // normalizeEvent drops un-addressed group messages (no @bot mention, @all,
     // or a slash command not addressed to this bot) so they never create a task.
@@ -2327,6 +2329,49 @@ async function processEventInner(
     );
     return true;
   }
+  // ADR-0004 Stage 1a-i: the addressed-message dispatch core now ENTERS as a
+  // channel-neutral InboundMessage. The Feishu edge adapts here; the seam recovers
+  // the native event and runs the existing behavior verbatim (byte-identical,
+  // because the same event object is threaded through `channel.native`).
+  const inbound = adaptNormalizedEvent(event);
+  return dispatchInboundMessageViaFeishuNative(inbound, { currentAppContext, feishuAppId });
+}
+
+/**
+ * Stage 1a-i boundary bridge (ADR-0004): recover the Feishu-native
+ * {@link NormalizedEvent} the dispatch core still consumes from the neutral
+ * {@link InboundMessage}'s typed `native` escape hatch. `adaptNormalizedEvent`
+ * preserves the original event by reference, so this is lossless. TEMPORARY: as
+ * later slices migrate each consumer to read `message.*`, the recovery point moves
+ * deeper and this helper is removed once nothing reads `native`.
+ */
+function recoverFeishuNormalizedEvent(message: InboundMessage): NormalizedEvent {
+  if (message.channel.kind !== 'lark') {
+    throw new Error(
+      `recoverFeishuNormalizedEvent: expected a lark-native message, got ${message.channel.kind}`,
+    );
+  }
+  return message.channel.native as NormalizedEvent;
+}
+
+/**
+ * Neutral inbound dispatch seam (ADR-0004, Stage 1a-i). The addressed-message
+ * dispatch core ENTERS as a channel-neutral {@link InboundMessage}. For this slice
+ * it recovers the Feishu-native event and runs the existing dispatch verbatim, so
+ * the Feishu path flows raw -> NormalizedEvent -> InboundMessage -> here ->
+ * existing behavior with no observable change. The reply/Feishu-client side is
+ * unchanged; later slices migrate downstream consumers to read `message.*`. Kept
+ * private and named "...ViaFeishuNative" so a non-Feishu channel is never routed
+ * here while replies still go through the Feishu client.
+ */
+async function dispatchInboundMessageViaFeishuNative(
+  message: InboundMessage,
+  ctx: { currentAppContext: FeishuAppRuntimeContext; feishuAppId: string | undefined },
+): Promise<boolean> {
+  const { currentAppContext, feishuAppId } = ctx;
+  // `let` because the existing body enriches the event by reassignment below.
+  let event = recoverFeishuNormalizedEvent(message);
+
   logger.info(
     { eventId: event.eventId, chatId: event.chatId, contentType: event.content.type },
     'Event normalized successfully',

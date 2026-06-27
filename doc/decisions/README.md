@@ -63,3 +63,4 @@ history of decisions stays auditable.
 | [0001](0001-lighten-self-dev-flow.md) | Lighten the self-dev flow (tiers + design-on-demand + ADRs) | Accepted |
 | [0002](0002-document-comment-session-resume.md) | Document Comment Session Resume | Accepted |
 | [0003](0003-chat-memory-index-detail-store.md) | Chat Memory Index And Detail Store | Accepted |
+| [0004](0004-inbound-message-pipeline-contract.md) | InboundMessage as the inbound pipeline contract | Accepted |
