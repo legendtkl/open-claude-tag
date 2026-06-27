@@ -17,6 +17,8 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
+import type { NormalizedEvent } from '@open-tag/core-types';
+import { adaptNormalizedEvent } from '@open-tag/feishu-adapter';
 
 const serverSrc = readFileSync(fileURLToPath(new URL('../server.ts', import.meta.url)), 'utf8');
 
@@ -48,15 +50,31 @@ describe('handleNormalMessage — neutral InboundMessage contract (ADR-0004 1a-i
     expect(body).toContain('message.sender.id');
   });
 
-  it('keeps non-lossless ids / topology and outbound on the recovered native event', () => {
+  it('keeps non-lossless ids / topology and the deferred native outbound (reply / reaction) on the recovered native event', () => {
     const body = handlerBody();
     // sourceMessageId is non-lossless (messageId-or-eventId fallback) -> native.
     expect(body).toContain('sourceMessageId: event.messageId');
     // topic key derivation uses empty-string-sensitive ?? chains -> native event.
     expect(body).toContain('buildFeishuTaskSourceTopicKey(event,');
-    // Outbound stays native this slice: ACK card is built off event.chatId.
-    expect(body).toMatch(/new ThreePhaseFeedback\([^]*?event\.chatId/);
+    // The direct reply + the OK reaction are deferred outbound surfaces this slice,
+    // so they still target the recovered native event (chat id / message id).
+    expect(body).toMatch(/appContext\.client\.sendMessage\(\s*'chat_id',\s*event\.chatId,/);
     expect(body).toContain("appContext.client.addReaction(event.messageId, 'OK')");
+  });
+
+  it('resolves the dispatch ACK destination from the neutral message scope (ADR-0004 1a-iii)', () => {
+    const body = handlerBody();
+    // The queued-task ACK now targets the chat via the neutral InboundMessage
+    // (message.scope.scopeId), not the recovered native event.chatId. The sender
+    // (createFeishuChannelSender) and the kind:'native' card payload stay Feishu, so
+    // the send is byte-identical; only the destination source moves onto the neutral
+    // surface. The reply target (replyToMessageId) stays native this slice.
+    expect(body).toMatch(
+      /new ThreePhaseFeedback\(\s*createFeishuChannelSender\(appContext\.client\),\s*message\.scope\.scopeId,/,
+    );
+    expect(body).not.toMatch(
+      /new ThreePhaseFeedback\(\s*createFeishuChannelSender\(appContext\.client\),\s*event\.chatId/,
+    );
   });
 
   it('does not read its own task-creation inputs from the neutral message id', () => {
@@ -72,4 +90,44 @@ describe('handleNormalMessage — call sites adapt the enriched event at the bou
     const calls = serverSrc.match(/handleNormalMessage\(\s*adaptNormalizedEvent\(effectiveEvent\),/g) ?? [];
     expect(calls).toHaveLength(2);
   });
+});
+
+/**
+ * Byte-identity proof for the ADR-0004 1a-iii destination switch. handleNormalMessage
+ * is fed `adaptNormalizedEvent(effectiveEvent)` and recovers `event === effectiveEvent`,
+ * so moving the ACK destination from `event.chatId` to `message.scope.scopeId` is
+ * byte-identical iff the adapter maps the chat id losslessly. Pin that invariant here
+ * (the send seam + card payload are unchanged, so the chat id is the only moving part).
+ */
+describe('dispatch ACK destination — neutral scope is byte-identical to native chatId (ADR-0004 1a-iii)', () => {
+  function makeEvent(overrides: Partial<NormalizedEvent> = {}): NormalizedEvent {
+    return {
+      eventId: 'evt_ack_1',
+      messageId: 'om_ack_1',
+      chatId: 'oc_ack_chat',
+      chatType: 'group',
+      senderOpenId: 'ou_ack_sender',
+      senderUnionId: 'on_ack_sender',
+      senderType: 'user',
+      tenantKey: 'tenant_ack',
+      content: { type: 'text', text: 'hello', raw: {} },
+      replyLanguage: 'zh-CN',
+      timestamp: 1710000000000,
+      ...overrides,
+    };
+  }
+
+  const cases: Array<{ name: string; event: NormalizedEvent }> = [
+    { name: 'group chat', event: makeEvent() },
+    { name: 'p2p chat', event: makeEvent({ chatId: 'oc_ack_p2p', chatType: 'p2p' }) },
+    { name: 'threaded message', event: makeEvent({ chatId: 'oc_ack_thread', threadId: 'omt_thread' }) },
+  ];
+
+  for (const { name, event } of cases) {
+    it(`${name}: scope.scopeId and conversation.scopeId equal the native chatId`, () => {
+      const inbound = adaptNormalizedEvent(event);
+      expect(inbound.scope.scopeId).toBe(event.chatId);
+      expect(inbound.conversation.scopeId).toBe(event.chatId);
+    });
+  }
 });

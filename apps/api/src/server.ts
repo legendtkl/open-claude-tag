@@ -466,16 +466,18 @@ async function handleNormalMessage(
   extraTaskConstraints: Record<string, unknown> = {},
   explicitTaskId?: string,
 ): Promise<void> {
-  // ADR-0004 Stage 1a-ii: the main task-creation path ENTERS as a channel-neutral
-  // InboundMessage. Its lossless task-creation inputs (goal/summary fallback text,
-  // tenant, chat, requester) read from `message.*`; the Feishu OUTBOUND (ACK card /
-  // reply / reaction) and the downstream calls whose signatures still take a
-  // NormalizedEvent (orchestrator handleEvent, buildQueuedTaskInput,
-  // upgradeRootProvisionalSession, buildFeishuTaskSourceTopicKey) keep flowing from
-  // the lark-guarded recovered native event — those migrate in later slices. The
-  // recovered native is byte-identical to the call-site `adaptNormalizedEvent`
-  // input (same object via channel.native), so behavior is unchanged. The one
-  // non-lossless scalar (the exact message id) is also read from native.
+  // ADR-0004 Stage 1a-ii/1a-iii: the main task-creation path ENTERS as a
+  // channel-neutral InboundMessage. Its lossless task-creation inputs (goal/summary
+  // fallback text, tenant, chat, requester) read from `message.*`, and as of 1a-iii
+  // the queued-task ACK card resolves its destination from `message.scope.scopeId`
+  // too. The deferred Feishu OUTBOUND (direct reply / reaction), the ACK reply
+  // target, and the downstream calls whose signatures still take a NormalizedEvent
+  // (orchestrator handleEvent, buildQueuedTaskInput, upgradeRootProvisionalSession,
+  // buildFeishuTaskSourceTopicKey) keep flowing from the lark-guarded recovered
+  // native event — those migrate in later slices. The recovered native is
+  // byte-identical to the call-site `adaptNormalizedEvent` input (same object via
+  // channel.native), so behavior is unchanged. The one non-lossless scalar (the
+  // exact message id) is also read from native.
   const event = recoverFeishuNormalizedEvent(message);
   const result = await handleEvent(db, message, sessionId, {
     ...agentContext,
@@ -510,9 +512,12 @@ async function handleNormalMessage(
   if (result.type === 'task_created' && result.taskId) {
     const createdTaskId = result.taskId;
     const goalText = result.goal ?? message.content.text ?? '';
+    // ADR-0004 1a-iii: the queued-task ACK destination now reads the neutral
+    // InboundMessage scope. `adaptNormalizedEvent` maps `scope.scopeId` straight
+    // from the chat id, so this is byte-identical to the recovered `event.chatId`.
     const feedback = new ThreePhaseFeedback(
       createFeishuChannelSender(appContext.client),
-      event.chatId,
+      message.scope.scopeId,
       replyToMessageId,
     );
     let ackMessageId: string | null = null;
