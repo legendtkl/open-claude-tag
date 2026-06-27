@@ -1,8 +1,11 @@
 /**
- * Wiring guard for ADR-0004 Stage 1a-ii: handleNormalMessage (the main
+ * Wiring guard for ADR-0004 Stage 1a-ii/1a-iii: handleNormalMessage (the main
  * task-creation path) accepts the channel-neutral InboundMessage and reads its
- * lossless task-creation inputs from the neutral surface, while the Feishu
- * OUTBOUND (ACK card / sendMessage / addReaction) and the still-native
+ * lossless task-creation inputs from the neutral surface. As of 1a-iii the ACK
+ * card and the orchestrator direct reply both route through the neutral channel
+ * sender (destination from message.scope.scopeId, byte-identical Feishu via a
+ * kind:'native' payload); only the OK reaction stays a deferred native outbound
+ * (Channel.react drops the reactionId the dispatch path stores). The still-native
  * downstream calls (orchestrator handleEvent, buildQueuedTaskInput,
  * upgradeRootProvisionalSession, buildFeishuTaskSourceTopicKey) keep flowing
  * from a lark-guarded recovered native event.
@@ -50,15 +53,26 @@ describe('handleNormalMessage — neutral InboundMessage contract (ADR-0004 1a-i
     expect(body).toContain('message.sender.id');
   });
 
-  it('keeps non-lossless ids / topology and the deferred native outbound (reply / reaction) on the recovered native event', () => {
+  it('routes the orchestrator direct reply through the neutral channel sender with the neutral scope (ADR-0004 1a-iii)', () => {
+    const body = handlerBody();
+    // The direct reply now resolves its destination from the neutral message scope
+    // and sends a kind:'native' payload through createFeishuChannelSender, so it no
+    // longer calls the Feishu client directly.
+    expect(body).toMatch(
+      /sendDispatchReplyViaChannel\(\s*appContext\.client,\s*message\.scope\.scopeId,/,
+    );
+    expect(body).not.toMatch(/appContext\.client\.sendMessage\(\s*'chat_id',\s*event\.chatId,/);
+  });
+
+  it('keeps non-lossless ids / topology and the deferred native OK reaction on the recovered native event', () => {
     const body = handlerBody();
     // sourceMessageId is non-lossless (messageId-or-eventId fallback) -> native.
     expect(body).toContain('sourceMessageId: event.messageId');
     // topic key derivation uses empty-string-sensitive ?? chains -> native event.
     expect(body).toContain('buildFeishuTaskSourceTopicKey(event,');
-    // The direct reply + the OK reaction are deferred outbound surfaces this slice,
-    // so they still target the recovered native event (chat id / message id).
-    expect(body).toMatch(/appContext\.client\.sendMessage\(\s*'chat_id',\s*event\.chatId,/);
+    // The OK reaction stays a deferred native outbound this slice: Channel.react
+    // returns void and drops the reactionId the dispatch path stores
+    // (userMessageReactionId), so routing it is not byte-identical yet.
     expect(body).toContain("appContext.client.addReaction(event.messageId, 'OK')");
   });
 

@@ -116,6 +116,7 @@ import { enqueueDiscussionTurnTaskOrFail } from './discussion-turn-enqueue.js';
 import { PrPollingService } from './pr-polling-service.js';
 import { registerManagedService, unregisterManagedService } from './service-process.js';
 import { getReplyToMessageId, upgradeRootProvisionalSession } from './reply-threading.js';
+import { sendDispatchReplyViaChannel } from './dispatch-reply.js';
 import { applyDebugFeishuOverrides, createLoopbackFeishuClient } from './debug-feishu-client.js';
 import { applyBufferGate } from './buffer-gate.js';
 import { tapChannelObservation } from './channel-observation-tap.js';
@@ -490,13 +491,14 @@ async function handleNormalMessage(
   });
 
   if (result.type === 'direct_reply' && result.reply) {
-    const replyResult = await appContext.client.sendMessage(
-      'chat_id',
-      event.chatId,
-      {
-        msg_type: 'text',
-        content: { text: result.reply },
-      } as any,
+    // ADR-0004 1a-iii: the orchestrator direct reply routes through the neutral
+    // channel sender, byte-identical to the prior direct client.sendMessage. The
+    // destination resolves from the neutral message scope; the reply target stays
+    // the (native) replyToMessageId this slice.
+    const sentMessageId = await sendDispatchReplyViaChannel(
+      appContext.client,
+      message.scope.scopeId,
+      { msg_type: 'text', content: { text: result.reply } },
       replyToMessageId,
     );
     await upgradeRootProvisionalSession({
@@ -504,7 +506,7 @@ async function handleNormalMessage(
       event,
       logger,
       sessionId,
-      sentMessageId: replyResult.messageId,
+      sentMessageId,
     });
     return;
   }
@@ -2460,15 +2462,19 @@ async function dispatchInboundMessageViaFeishuNative(
       );
     } catch (err) {
       if (err instanceof AgentAccessDeniedError) {
-        const denialReply = await currentAppContext.client.sendMessage('chat_id', event.chatId, {
-          msg_type: 'text',
-          content: { text: 'Permission denied: this agent is private.' },
-        } as any);
+        const denialReplyMessageId = await sendDispatchReplyViaChannel(
+          currentAppContext.client,
+          message.scope.scopeId,
+          {
+            msg_type: 'text',
+            content: { text: 'Permission denied: this agent is private.' },
+          },
+        );
         await markEventProcessed(db, event.eventId, feishuAppId);
         logger.info(
           {
             eventId: event.eventId,
-            messageId: denialReply.messageId,
+            messageId: denialReplyMessageId,
             senderOpenId: event.senderOpenId,
           },
           'Private agent route rejected',
@@ -2632,13 +2638,13 @@ async function dispatchInboundMessageViaFeishuNative(
     const isHelpRequest =
       message.content.type === 'command' && message.content.args?.trim() === '--help';
     if (isHelpRequest && routedCommand && getHelpText(routedCommand, replyLanguage)) {
-      const helpReply = await currentAppContext.client.sendMessage(
-        'chat_id',
-        event.chatId,
+      const helpReplyMessageId = await sendDispatchReplyViaChannel(
+        currentAppContext.client,
+        message.scope.scopeId,
         {
           msg_type: 'text',
           content: { text: getHelpText(routedCommand, replyLanguage) },
-        } as any,
+        },
         replyToMessageId,
       );
       await upgradeRootProvisionalSession({
@@ -2646,7 +2652,7 @@ async function dispatchInboundMessageViaFeishuNative(
         event,
         logger,
         sessionId,
-        sentMessageId: helpReply.messageId,
+        sentMessageId: helpReplyMessageId,
       });
     } else if (
       message.content.type === 'command' &&
@@ -2668,15 +2674,15 @@ async function dispatchInboundMessageViaFeishuNative(
         const senderRole =
           agentContext.senderAccess?.role ?? (await getUserRole(db, message.sender.id));
         if (senderRole !== UserRole.OWNER) {
-          const denialReply = await currentAppContext.client.sendMessage(
-            'chat_id',
-            event.chatId,
+          const denialReplyMessageId = await sendDispatchReplyViaChannel(
+            currentAppContext.client,
+            message.scope.scopeId,
             {
               msg_type: 'text',
               content: {
                 text: localizedReply.permissionDenied(routedCommand),
               },
-            } as any,
+            },
             replyToMessageId,
           );
           await upgradeRootProvisionalSession({
@@ -2684,7 +2690,7 @@ async function dispatchInboundMessageViaFeishuNative(
             event,
             logger,
             sessionId,
-            sentMessageId: denialReply.messageId,
+            sentMessageId: denialReplyMessageId,
           });
           await markEventProcessed(db, event.eventId, feishuAppId);
           logger.info(
