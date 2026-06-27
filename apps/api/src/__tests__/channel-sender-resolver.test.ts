@@ -117,6 +117,25 @@ describe('resolveChannelSender — fail-fast for unconfigured / unregistered kin
       /no channel sender registered/i,
     );
   });
+
+  it('fails closed for lark when no feishuAppContext is supplied (ADR-0005)', () => {
+    expect(() => resolveChannelSender('lark', {})).toThrowError(/lark.*feishuAppContext/i);
+  });
+});
+
+describe('resolveChannelSender — injectable slack sender (ADR-0005)', () => {
+  it('returns the injected slackSender for the slack slot', () => {
+    const injected = {
+      send: vi.fn(),
+      update: vi.fn(),
+    };
+    const resolved = resolveChannelSender('slack', { slackSender: injected });
+    expect(resolved).toBe(injected);
+  });
+
+  it('still throws "not configured yet" for slack without an injected sender', () => {
+    expect(() => resolveChannelSender('slack', {})).toThrowError(/slack.*not configured/i);
+  });
 });
 
 // Source-level wiring guard for the proactive (ambient) dispatch site. The

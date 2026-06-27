@@ -20,13 +20,22 @@ import type { FeedbackChannelSender } from '@open-tag/feishu-adapter';
 import type { FeishuAppRuntimeContext } from './feishu-app-runtime.js';
 
 /**
- * The per-request runtime context a sender factory resolves from. Today it only
- * carries the resolved Feishu app context (the lark factory reads its client). A
- * future Slack OAuth slice adds its own field here, so the resolution context
- * stays honest rather than pretending a Feishu context models every channel.
+ * The per-request runtime context a sender factory resolves from. Each field is
+ * the input ONE kind needs, so the context stays honest rather than pretending a
+ * Feishu context models every channel: the `lark` factory reads
+ * `feishuAppContext.client`; the `slack` factory reads the injected
+ * `slackSender`. Both are optional and each factory fails closed when its own
+ * input is absent (see {@link CHANNEL_SENDER_FACTORIES}).
  */
 export interface ChannelSenderResolutionContext {
-  feishuAppContext: FeishuAppRuntimeContext;
+  /** Per-request Feishu app context; required to resolve the `lark` sender. */
+  feishuAppContext?: FeishuAppRuntimeContext;
+  /**
+   * The injected `slack` sender (ADR-0005). A `SlackChannel` doubles as a
+   * {@link FeedbackChannelSender}; production wires one when a bot token is set,
+   * tests inject a recording stub. Absent ⇒ the `slack` slot stays unconfigured.
+   */
+  slackSender?: FeedbackChannelSender;
 }
 
 /** Build a {@link FeedbackChannelSender} for one channel kind from the per-request context. */
@@ -35,19 +44,27 @@ type ChannelSenderFactory = (ctx: ChannelSenderResolutionContext) => FeedbackCha
 /**
  * The registered sender factory per channel kind.
  *
- *  - `lark` yields exactly the prior `createFeishuChannelSender(appContext.client)`,
- *    so the Feishu dispatch path is byte-identical.
- *  - `slack` is a registered-but-unconfigured slot: it fails fast with a distinct
- *    "not configured yet" message until the Slack OAuth slice wires a real
- *    client/token into the resolution context.
+ *  - `lark` yields exactly the prior `createFeishuChannelSender(appContext.client)`
+ *    (byte-identical), and fails closed when no `feishuAppContext` is supplied —
+ *    every lark call site passes one, so lark resolution is unchanged.
+ *  - `slack` returns the injected `slackSender` when present, else fails fast with
+ *    a distinct "not configured yet" message until a token/sender is wired.
  *
  * A reply must never silently drop or fall back to another vendor, so an
  * unregistered kind also throws (see {@link resolveChannelSender}).
  */
 const CHANNEL_SENDER_FACTORIES: Partial<Record<ChannelKind, ChannelSenderFactory>> = {
-  lark: (ctx) => createFeishuChannelSender(ctx.feishuAppContext.client),
-  slack: () => {
-    throw new Error('Channel sender for channel kind "slack" is not configured yet');
+  lark: (ctx) => {
+    if (!ctx.feishuAppContext) {
+      throw new Error('Channel sender for channel kind "lark" requires a feishuAppContext');
+    }
+    return createFeishuChannelSender(ctx.feishuAppContext.client);
+  },
+  slack: (ctx) => {
+    if (!ctx.slackSender) {
+      throw new Error('Channel sender for channel kind "slack" is not configured yet');
+    }
+    return ctx.slackSender;
   },
 };
 

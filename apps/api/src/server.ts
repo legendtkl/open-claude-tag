@@ -69,6 +69,7 @@ import {
 } from '@open-tag/feishu-adapter';
 import type {
   CreateTrackedTaskInput,
+  FeedbackChannelSender,
   NormalizedDocumentCommentEvent,
   NormalizerConfig,
 } from '@open-tag/feishu-adapter';
@@ -85,6 +86,7 @@ import {
   handleEvent,
   selectRuntime,
   TaskLifecycleService,
+  transitionTask,
 } from '@open-tag/orchestrator';
 import type { MentionRoutingDecision, TaskCreatedEvent } from '@open-tag/orchestrator';
 import { TaskQueue, type TaskJobData } from '@open-tag/queue';
@@ -129,6 +131,7 @@ import {
   createSlackEventsHandler,
   createSlackInboundDispatch,
 } from './slack-events.js';
+import { dispatchNeutralMessage } from './neutral-dispatch.js';
 import { WorkerHealthMonitor } from './worker-health-monitor.js';
 import {
   WorktreeRetentionCleanupService,
@@ -238,6 +241,10 @@ const FEISHU_WEBHOOK_MAX_BODY_BYTES = 1024 * 1024;
 // endpoint at all (404). The bot token is optional for inbound-only use.
 const SLACK_SIGNING_SECRET = process.env.SLACK_SIGNING_SECRET?.trim() ?? '';
 const SLACK_BOT_TOKEN = process.env.SLACK_BOT_TOKEN ?? '';
+// Opt-in @-mention addressing gate for Slack task dispatch (ADR-0005). Unset ⇒
+// Slack stays observation-only (no task dispatch), so production behavior is
+// unchanged by default.
+const SLACK_BOT_USER_ID = process.env.SLACK_BOT_USER_ID?.trim() ?? '';
 const FEISHU_WEBHOOK_MAX_TIMESTAMP_SKEW_SECONDS = Number.parseInt(
   process.env.FEISHU_WEBHOOK_MAX_TIMESTAMP_SKEW_SECONDS ?? '600',
   10,
@@ -3221,10 +3228,50 @@ if (SLACK_SIGNING_SECRET) {
   // `db` is assigned during async startup (below), after this synchronous route
   // registration, so build the dispatcher per-call to read `db` at request time
   // — the same deferred-`db` pattern the Feishu webhook handler uses.
+  const slackChannel = new SlackChannel({ token: SLACK_BOT_TOKEN });
+  // `SlackChannel` implements send/update, so it doubles as the neutral ACK
+  // sender once a bot token is configured. With no token the slot stays
+  // unconfigured (the resolver throws and the neutral path's best-effort ACK
+  // swallows it), so an enabled-without-token instance degrades to no-ACK rather
+  // than losing tasks — warned at startup so the misconfig is not silent.
+  const slackFeedbackSender: FeedbackChannelSender | undefined = SLACK_BOT_TOKEN
+    ? slackChannel
+    : undefined;
+  if (SLACK_BOT_USER_ID && !slackFeedbackSender) {
+    logger.warn(
+      { path: SLACK_EVENTS_PATH },
+      'Slack task dispatch is enabled (SLACK_BOT_USER_ID set) but no SLACK_BOT_TOKEN is configured; queued Slack tasks will not receive an ACK until a bot token is set',
+    );
+  }
   const slackHandler = createSlackEventsHandler({
     signingSecret: SLACK_SIGNING_SECRET,
-    channel: new SlackChannel({ token: SLACK_BOT_TOKEN }),
-    dispatch: (message, ctx) => createSlackInboundDispatch({ db, logger })(message, ctx),
+    channel: slackChannel,
+    dispatch: (message, ctx) =>
+      createSlackInboundDispatch({
+        db,
+        logger,
+        botUserId: SLACK_BOT_USER_ID || undefined,
+        // Neutral (ADR-0005) task dispatch for messages addressed to the bot.
+        // db/queue are read at request time (assigned during async startup).
+        dispatchTask: async (inbound) => {
+          await dispatchNeutralMessage(inbound, {
+            resolveSession: (msg) => resolveSession(db, msg),
+            createTask: (msg, sessionId, options) => handleEvent(db, msg, sessionId, options),
+            getTaskStatus: async (taskId) => {
+              const [row] = await db
+                .select({ status: tasks.status })
+                .from(tasks)
+                .where(eq(tasks.id, taskId))
+                .limit(1);
+              return row?.status ?? null;
+            },
+            transitionTask: (taskId, status) => transitionTask(db, taskId, status),
+            enqueue: (job) => queue.enqueue(job),
+            resolveSender: (kind) => resolveChannelSender(kind, { slackSender: slackFeedbackSender }),
+            logger,
+          });
+        },
+      })(message, ctx),
     logger,
   });
   app.post(SLACK_EVENTS_PATH, { bodyLimit: FEISHU_WEBHOOK_MAX_BODY_BYTES }, slackHandler);

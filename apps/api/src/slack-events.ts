@@ -22,11 +22,16 @@
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import type { InboundMessage } from '@open-tag/channel-core';
 import { handleSlackEvent, verifySlackSignature } from '@open-tag/channel-slack';
-import { checkAndRecordEvent, markEventProcessed } from '@open-tag/feishu-adapter';
+import {
+  checkAndRecordEvent,
+  markEventProcessed,
+  releaseInboundEventClaim,
+} from '@open-tag/feishu-adapter';
 import { ingestObservation } from '@open-tag/memory';
 import type { Logger } from '@open-tag/observability';
 import type { Database } from '@open-tag/storage';
 import { CHANNEL_MEMORY_ENABLED } from './channel-observation-tap.js';
+import { isMessageAddressedToBot } from './neutral-dispatch.js';
 
 export const SLACK_EVENTS_PATH = '/slack/events';
 
@@ -152,6 +157,18 @@ export interface SlackInboundDispatchDeps {
   logger: Logger;
   /** Defaults to {@link CHANNEL_MEMORY_ENABLED}; injectable for tests. */
   channelMemoryEnabled?: boolean;
+  /**
+   * Dispatch a task for a message addressed to the bot (the neutral path,
+   * ADR-0005). Omitted ⇒ observation only (today's behavior). NOT wrapped in a
+   * best-effort guard: a failure propagates so the route returns 500 and the
+   * dedup claim stays open for a stale-claim redelivery to recover.
+   */
+  dispatchTask?: (message: InboundMessage) => Promise<void>;
+  /**
+   * Bot user id for the @-mention addressing gate. Unset ⇒ no message is
+   * addressed, so no task is ever dispatched (safe-by-default opt-in).
+   */
+  botUserId?: string;
 }
 
 /**
@@ -193,31 +210,45 @@ export function createSlackInboundDispatch(deps: SlackInboundDispatchDeps): Slac
       return;
     }
 
-    if (!channelMemoryEnabled) {
-      // Close the claim so the row does not sit `received` and look reclaimable.
-      await markEventProcessedBestEffort(deps, message.dedupeKey);
-      return;
+    // Observe every accepted message (addressed or not), best-effort — mirroring
+    // the Lark observation tap; a write must never block or fail the ack.
+    if (channelMemoryEnabled) {
+      try {
+        const result = await ingestObservation(deps.db, message);
+        deps.logger.info(
+          {
+            dedupeKey: message.dedupeKey,
+            scopeId: message.scope.scopeId,
+            written: result.written,
+            reason: result.reason,
+          },
+          'Slack inbound observation ingested',
+        );
+      } catch (err) {
+        deps.logger.warn(
+          { err, dedupeKey: message.dedupeKey },
+          'Slack inbound observation ingest failed (best-effort, non-fatal)',
+        );
+      }
     }
 
-    try {
-      const result = await ingestObservation(deps.db, message);
-      deps.logger.info(
-        {
-          dedupeKey: message.dedupeKey,
-          scopeId: message.scope.scopeId,
-          written: result.written,
-          reason: result.reason,
-        },
-        'Slack inbound observation ingested',
-      );
-    } catch (err) {
-      // Best-effort memory, mirroring the Lark observation tap: an observation
-      // write must never block or fail the ack. At-most-once by design.
-      deps.logger.warn(
-        { err, dedupeKey: message.dedupeKey },
-        'Slack inbound observation ingest failed (best-effort, non-fatal)',
-      );
+    // Addressed to the bot ⇒ dispatch a task through the neutral path. On failure
+    // (e.g. enqueue down) RELEASE the dedup claim and rethrow: the route returns
+    // 500 and the immediate Slack retry re-claims and re-attempts (idempotent on
+    // the deterministic task id), instead of being dropped as an in-flight
+    // duplicate while the task sits jobless until the 5-minute stale takeover —
+    // by when Slack may have stopped retrying. dispatchNeutralMessage makes
+    // enqueue the durable boundary, so the re-attempt cannot double-dispatch.
+    if (deps.dispatchTask && isMessageAddressedToBot(message, deps.botUserId)) {
+      try {
+        await deps.dispatchTask(message);
+      } catch (err) {
+        await releaseClaimBestEffort(deps, message.dedupeKey);
+        throw err;
+      }
     }
+
+    // Close the claim so the row does not sit `received` and look reclaimable.
     await markEventProcessedBestEffort(deps, message.dedupeKey);
   };
 }
@@ -233,6 +264,25 @@ async function markEventProcessedBestEffort(
     deps.logger.warn(
       { err, dedupeKey },
       'Slack inbound: failed to mark dedupe claim processed (non-fatal)',
+    );
+  }
+}
+
+/**
+ * Release the dedupe claim after a failed task dispatch so the immediate retry
+ * re-attempts. A release failure only leaves the row reclaimable after the stale
+ * window, so it is swallowed (the original error is still rethrown by the caller).
+ */
+async function releaseClaimBestEffort(
+  deps: SlackInboundDispatchDeps,
+  dedupeKey: string,
+): Promise<void> {
+  try {
+    await releaseInboundEventClaim(deps.db, dedupeKey, undefined);
+  } catch (err) {
+    deps.logger.warn(
+      { err, dedupeKey },
+      'Slack inbound: failed to release dedupe claim after dispatch failure (non-fatal)',
     );
   }
 }

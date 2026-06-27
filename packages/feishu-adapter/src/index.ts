@@ -23,7 +23,7 @@ export type {
 } from './normalizer.js';
 export { parseReferencedFeishuMessage } from './referenced-message.js';
 export type { FeishuMessageDetail } from './referenced-message.js';
-export { checkAndRecordEvent, markEventProcessed } from './dedup.js';
+export { checkAndRecordEvent, markEventProcessed, releaseInboundEventClaim } from './dedup.js';
 export type { DedupResult } from './dedup.js';
 export {
   buildAckCard,

@@ -105,3 +105,25 @@ export async function markEventProcessed(
     .set({ status: 'processed', processedAt: new Date() })
     .where(eventKeyWhere(eventId, feishuAppId));
 }
+
+/**
+ * Release (delete) a claim so the SAME event can be re-claimed and re-processed.
+ *
+ * For a side effect that completes in seconds (the observation path), a
+ * `received` claim younger than the stale window is rightly treated as an
+ * in-flight duplicate and a redelivery is dropped. But when a delivery FAILS
+ * before its durable boundary (e.g. a task that was created but not yet
+ * enqueued), dropping the in-window redelivery would strand the work until the
+ * 5-minute stale takeover — and the upstream may stop retrying first. Releasing
+ * the claim on failure lets the immediate redelivery re-attempt instead. Safe
+ * because the re-attempt is idempotent (deterministic task id + idempotent
+ * enqueue). Best-effort by caller convention: a release failure only leaves a
+ * reclaimable-after-stale-window row, never a duplicate side effect.
+ */
+export async function releaseInboundEventClaim(
+  db: Database,
+  eventId: string,
+  feishuAppId?: string,
+): Promise<void> {
+  await db.delete(inboundEvents).where(eventKeyWhere(eventId, feishuAppId));
+}
