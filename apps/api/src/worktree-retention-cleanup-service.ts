@@ -55,6 +55,8 @@ export function shouldRunWorktreeRetentionCleanup(options: {
 
 export class WorktreeRetentionCleanupService {
   private timer: ReturnType<typeof setInterval> | null = null;
+  /** Guards against overlapping ticks: a slow scan must not be re-entered before it finishes. */
+  private ticking = false;
 
   constructor(
     private readonly db: Database,
@@ -63,6 +65,13 @@ export class WorktreeRetentionCleanupService {
       intervalMs?: number;
       retentionMs?: number;
       conversationIdleMs?: number;
+      /**
+       * Optional, error-isolated stale-thread nudge scan (Stage 5). Injected by
+       * the composition root with all heavy deps closed over; the scan's own
+       * Gate-0 flag check makes it a complete no-op when disabled (default). Absent
+       * ⇒ the tick simply skips this step (e.g. isolated instances / tests).
+       */
+      staleThreadScan?: () => Promise<void>;
     } = {},
   ) {}
 
@@ -85,21 +94,41 @@ export class WorktreeRetentionCleanupService {
   }
 
   /**
-   * One scheduled tick: worktree retention THEN the conversation-workspace idle
-   * scan, each in its own try/catch. The scan is additive and independent — a
-   * failure in either task is logged but must not crash the service or block the
-   * other task.
+   * One scheduled tick: worktree retention, THEN the conversation-workspace idle
+   * scan, THEN the stale-thread nudge scan — each in its own try/catch. Every step
+   * is additive and independent: a failure in one is logged but must not crash the
+   * service or block the others.
+   *
+   * Re-entrancy guarded: if a previous tick is still running (a slow scan), this
+   * tick is skipped. Combined with the primary-API-only invariant, that keeps the
+   * stale-thread scan's check-then-send idempotency free of overlapping-tick races.
    */
   private async tick(retentionMs: number, conversationIdleMs: number): Promise<void> {
-    try {
-      await this.runOnce(retentionMs);
-    } catch (err) {
-      logger.error({ err }, 'Worktree retention cleanup tick failed');
+    if (this.ticking) {
+      logger.warn('Reconciler tick skipped (previous tick still running)');
+      return;
     }
+    this.ticking = true;
     try {
-      await this.runConversationWorkspaceScan(conversationIdleMs);
-    } catch (err) {
-      logger.error({ err }, 'Conversation workspace idle scan tick failed');
+      try {
+        await this.runOnce(retentionMs);
+      } catch (err) {
+        logger.error({ err }, 'Worktree retention cleanup tick failed');
+      }
+      try {
+        await this.runConversationWorkspaceScan(conversationIdleMs);
+      } catch (err) {
+        logger.error({ err }, 'Conversation workspace idle scan tick failed');
+      }
+      try {
+        if (this.options.staleThreadScan) {
+          await this.options.staleThreadScan();
+        }
+      } catch (err) {
+        logger.error({ err }, 'Stale-thread nudge scan tick failed');
+      }
+    } finally {
+      this.ticking = false;
     }
   }
 

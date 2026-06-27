@@ -197,4 +197,65 @@ describe('worktree-retention-cleanup-service', () => {
       'Worktree retention cleanup tick failed',
     );
   });
+
+  it('runs the injected stale-thread scan on each tick alongside the other steps', async () => {
+    const staleThreadScan = vi.fn(async () => undefined);
+    const service = new WorktreeRetentionCleanupService({} as Database, '/repo', {
+      intervalMs: 1000,
+      retentionMs: 2000,
+      conversationIdleMs: 5000,
+      staleThreadScan,
+    });
+
+    service.start();
+    await vi.advanceTimersByTimeAsync(1000);
+
+    expect(mockCleanStaleWorktrees).toHaveBeenCalledTimes(1);
+    expect(mockReapIdle).toHaveBeenCalledTimes(1);
+    expect(staleThreadScan).toHaveBeenCalledTimes(1);
+  });
+
+  it('skips the stale-thread scan step cleanly when no scan is injected', async () => {
+    const service = new WorktreeRetentionCleanupService({} as Database, '/repo', {
+      intervalMs: 1000,
+      retentionMs: 2000,
+      conversationIdleMs: 5000,
+    });
+
+    service.start();
+    await vi.advanceTimersByTimeAsync(1000);
+
+    // The other steps still ran; no stale-thread error was logged.
+    expect(mockReapIdle).toHaveBeenCalledTimes(1);
+    expect(loggerMock.error).not.toHaveBeenCalledWith(
+      expect.anything(),
+      'Stale-thread nudge scan tick failed',
+    );
+  });
+
+  it('isolates a stale-thread scan failure: the other steps still ran and the tick survives', async () => {
+    const staleThreadScan = vi.fn(async () => {
+      throw new Error('scan boom');
+    });
+    const service = new WorktreeRetentionCleanupService({} as Database, '/repo', {
+      intervalMs: 1000,
+      retentionMs: 2000,
+      conversationIdleMs: 5000,
+      staleThreadScan,
+    });
+
+    service.start();
+    await vi.advanceTimersByTimeAsync(1000);
+
+    expect(mockCleanStaleWorktrees).toHaveBeenCalledTimes(1);
+    expect(mockReapIdle).toHaveBeenCalledTimes(1);
+    expect(loggerMock.error).toHaveBeenCalledWith(
+      expect.objectContaining({ err: expect.any(Error) }),
+      'Stale-thread nudge scan tick failed',
+    );
+
+    // Still alive: the next tick runs the scan again.
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(staleThreadScan).toHaveBeenCalledTimes(2);
+  });
 });

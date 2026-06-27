@@ -137,6 +137,13 @@ import {
   WorktreeRetentionCleanupService,
   shouldRunWorktreeRetentionCleanup,
 } from './worktree-retention-cleanup-service.js';
+import {
+  scanStaleThreads,
+  buildLoadStaleThreadCandidates,
+  buildAlreadyHandled,
+  buildStaleThreadDelivery,
+  DEFAULT_STALE_THREAD_IDLE_MS,
+} from './stale-thread-scanner.js';
 import { MultiFeishuAppRuntime, type FeishuAppRuntimeContext } from './feishu-app-runtime.js';
 import { registerAdminApiRoutes, isEffectivelyLoopback } from './admin-api.js';
 import { classifyFeishuTrackingIntent } from './feishu-tracking-intent.js';
@@ -2039,6 +2046,59 @@ function parseAmbientChannelAllowlist(raw?: string | null): Set<string> {
 function resolveAmbientConfig(event: NormalizedEvent): AmbientConfig {
   const channelEnabled = AMBIENT_GLOBAL_ENABLED && AMBIENT_CHANNEL_ALLOWLIST.has(event.chatId);
   return { globalEnabled: AMBIENT_GLOBAL_ENABLED, channelEnabled };
+}
+
+// ── Stale-thread nudge scanner wiring (Stage 5) ──
+//
+// DEFAULT-OFF, two-layer airtight, exactly like the ambient post gate: a stale
+// thread is nudged only when BOTH the global `OPEN_TAG_STALE_THREAD_SCANNER_ENABLED`
+// switch is on AND the thread's chatId is in the explicit
+// `OPEN_TAG_STALE_THREAD_CHANNELS` allowlist. The scan is reused via the
+// reconciler tick (primary-API-only) and is a complete no-op when the global flag
+// is off (no DB query, no audit, no send).
+const STALE_THREAD_SCANNER_ENABLED = parseAmbientFlag(
+  process.env.OPEN_TAG_STALE_THREAD_SCANNER_ENABLED,
+);
+const STALE_THREAD_CHANNEL_ALLOWLIST = parseAmbientChannelAllowlist(
+  process.env.OPEN_TAG_STALE_THREAD_CHANNELS,
+);
+
+function parseStaleThreadIdleMs(env: NodeJS.ProcessEnv = process.env): number {
+  const parsed = Number.parseInt(env.STALE_THREAD_IDLE_MS ?? '', 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) return DEFAULT_STALE_THREAD_IDLE_MS;
+  return parsed;
+}
+
+/**
+ * Build the error-isolated stale-thread nudge scan injected into the reconciler
+ * tick. Closes over the shared API resources (db / audit / Feishu runtime) and the
+ * env-derived two-layer config. The scan's own Gate-0 flag check makes it a
+ * complete no-op when disabled (the default), so wiring it is always safe.
+ */
+function buildStaleThreadScan(): () => Promise<void> {
+  const idleMs = parseStaleThreadIdleMs();
+  const loadCandidates = buildLoadStaleThreadCandidates(db);
+  const alreadyHandled = buildAlreadyHandled(db);
+  const deliver = buildStaleThreadDelivery({
+    resolveContextById: (feishuAppId) => feishuAppRuntime?.getContextById(feishuAppId) ?? null,
+    resolvePrimaryContext: () => {
+      try {
+        return feishuAppRuntime?.getPrimaryContext() ?? null;
+      } catch {
+        return null;
+      }
+    },
+  });
+  return () =>
+    scanStaleThreads({
+      globalEnabled: STALE_THREAD_SCANNER_ENABLED,
+      idleMs,
+      isChannelAllowed: (chatId) => STALE_THREAD_CHANNEL_ALLOWLIST.has(chatId),
+      loadCandidates,
+      alreadyHandled,
+      audit: auditService,
+      deliver,
+    });
 }
 
 /** Extract the first JSON object from a model reply (tolerates code fences/prose). */
@@ -4344,7 +4404,9 @@ async function start(): Promise<void> {
   });
 
   if (shouldRunWorktreeRetentionCleanup({ instanceRole: INSTANCE_ROLE, processType: 'api' })) {
-    worktreeRetentionCleanupService = new WorktreeRetentionCleanupService(db, OPEN_TAG_REPO_ROOT);
+    worktreeRetentionCleanupService = new WorktreeRetentionCleanupService(db, OPEN_TAG_REPO_ROOT, {
+      staleThreadScan: buildStaleThreadScan(),
+    });
   } else {
     logger.info(
       { instanceId: INSTANCE_ID, instanceRole: INSTANCE_ROLE },
