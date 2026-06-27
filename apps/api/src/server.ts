@@ -2571,20 +2571,27 @@ async function dispatchInboundMessageViaFeishuNative(
       return true;
     }
 
+    // ADR-0004 Stage 1a-ii: the slash-command routing/intent decisions below read
+    // from the channel-neutral InboundMessage instead of the recovered native
+    // event. `content.type` and `sender.id` are value-identical to the event
+    // (direct copies adaptNormalizedEvent makes and the enrichment passes through
+    // untouched); `content.command`/`args` are decision-equivalent for these
+    // truthiness-guarded uses (the adapter drops only the empty-string-vs-undefined
+    // distinction, which every guard collapses identically). `routedCommand`
+    // single-sources the command so its truthiness guard narrows it for the
+    // outbound text builders too, while the Feishu client write itself (chatId,
+    // localizer, sendMessage) stays on the native event.
+    const routedCommand = message.content.command;
     // --help is always allowed regardless of role — show help text and skip further processing
     const isHelpRequest =
-      event.content.type === 'command' && event.content.args?.trim() === '--help';
-    if (
-      isHelpRequest &&
-      event.content.command &&
-      getHelpText(event.content.command, replyLanguage)
-    ) {
+      message.content.type === 'command' && message.content.args?.trim() === '--help';
+    if (isHelpRequest && routedCommand && getHelpText(routedCommand, replyLanguage)) {
       const helpReply = await currentAppContext.client.sendMessage(
         'chat_id',
         event.chatId,
         {
           msg_type: 'text',
-          content: { text: getHelpText(event.content.command, replyLanguage) },
+          content: { text: getHelpText(routedCommand, replyLanguage) },
         } as any,
         replyToMessageId,
       );
@@ -2596,9 +2603,9 @@ async function dispatchInboundMessageViaFeishuNative(
         sentMessageId: helpReply.messageId,
       });
     } else if (
-      event.content.type === 'command' &&
-      event.content.command &&
-      isOwnerOnlySlashCommand(event.content.command)
+      message.content.type === 'command' &&
+      routedCommand &&
+      isOwnerOnlySlashCommand(routedCommand)
     ) {
       // Guard owner-only commands before they reach the orchestrator or handler
       const openAccess = process.env.OPEN_ACCESS === 'true';
@@ -2613,7 +2620,7 @@ async function dispatchInboundMessageViaFeishuNative(
         );
       } else {
         const senderRole =
-          agentContext.senderAccess?.role ?? (await getUserRole(db, event.senderOpenId));
+          agentContext.senderAccess?.role ?? (await getUserRole(db, message.sender.id));
         if (senderRole !== UserRole.OWNER) {
           const denialReply = await currentAppContext.client.sendMessage(
             'chat_id',
@@ -2621,7 +2628,7 @@ async function dispatchInboundMessageViaFeishuNative(
             {
               msg_type: 'text',
               content: {
-                text: localizedReply.permissionDenied(event.content.command),
+                text: localizedReply.permissionDenied(routedCommand),
               },
             } as any,
             replyToMessageId,
@@ -2646,7 +2653,7 @@ async function dispatchInboundMessageViaFeishuNative(
         }
       }
       // Owner passed — route to orchestrator (TASK_COMMANDS) or slash handler
-      if (isTaskSlashCommand(event.content.command)) {
+      if (isTaskSlashCommand(routedCommand)) {
         await handleNormalMessage(
           effectiveEvent,
           sessionId,
@@ -2667,9 +2674,9 @@ async function dispatchInboundMessageViaFeishuNative(
         );
       }
     } else if (
-      event.content.type === 'command' &&
-      event.content.command &&
-      !isTaskSlashCommand(event.content.command)
+      message.content.type === 'command' &&
+      routedCommand &&
+      !isTaskSlashCommand(routedCommand)
     ) {
       await handleSlashCommand(event, sessionId, replyToMessageId, currentAppContext, agentContext);
     } else {
