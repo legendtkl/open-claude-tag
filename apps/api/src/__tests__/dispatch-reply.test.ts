@@ -8,7 +8,8 @@
  * forwarded `sendMessage` wire args + the returned message id are identical to
  * the prior direct call. The source block pins that server.ts actually routes
  * the four reply sites (and resolves the destination from the neutral
- * `message.scope.scopeId`), while the deferred OK reaction stays native.
+ * `message.scope.scopeId`). The OK reaction routes through its own neutral helper
+ * (`addDispatchReactionViaChannel`), covered by `dispatch-reaction.test.ts`.
  */
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';

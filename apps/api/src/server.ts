@@ -119,6 +119,7 @@ import { PrPollingService } from './pr-polling-service.js';
 import { registerManagedService, unregisterManagedService } from './service-process.js';
 import { getReplyToMessageId, upgradeRootProvisionalSession } from './reply-threading.js';
 import { sendDispatchReplyViaChannel } from './dispatch-reply.js';
+import { addDispatchReactionViaChannel } from './dispatch-reaction.js';
 import { resolveChannelSender } from './channel-sender-resolver.js';
 import { applyDebugFeishuOverrides, createLoopbackFeishuClient } from './debug-feishu-client.js';
 import { applyBufferGate } from './buffer-gate.js';
@@ -598,11 +599,21 @@ async function handleNormalMessage(
         .where(eq(sessions.id, sessionId))
         .limit(1);
 
-      // Add OK reaction to user's message to signal processing has started
+      // Add OK reaction to user's message to signal processing has started.
+      // ADR-0004: routed through the neutral channel contract (Channel.react ->
+      // ReactionRef) instead of a raw client call. Byte-identical to the prior
+      // direct reaction add: the same client, target message id, and emoji,
+      // returning the same reaction id — which still threads into
+      // userMessageReactionId so the worker removes it on completion. The reaction
+      // target is the (native) message id, recovered under the lark guard.
       let userMessageReactionId: string | undefined;
       try {
-        const reactionResult = await appContext.client.addReaction(event.messageId, 'OK');
-        userMessageReactionId = reactionResult.reactionId || undefined;
+        const reactionId = await addDispatchReactionViaChannel(
+          appContext.client,
+          event.messageId,
+          'OK',
+        );
+        userMessageReactionId = reactionId || undefined;
       } catch (err) {
         logger.warn({ err, messageId: event.messageId }, 'Failed to add reaction to user message');
       }

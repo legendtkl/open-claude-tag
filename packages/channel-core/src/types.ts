@@ -184,6 +184,20 @@ export interface DeliveryRef {
 }
 
 /**
+ * A handle over a reaction a channel placed on a message — mirrors
+ * {@link DeliveryRef}/{@link RemoteAttachmentRef}. It carries the provider
+ * reaction id a later removal needs (Lark's `reaction_id`); channels whose
+ * reactions have no removable per-reaction id (Slack identifies a reaction by
+ * the `{channel, timestamp, name}` tuple) return an empty `reactionId` and keep
+ * that identity behind the typed `native` escape hatch.
+ */
+export interface ReactionRef {
+  kind: ChannelKind;
+  reactionId: string;
+  native?: unknown;
+}
+
+/**
  * Optional controls for an outbound {@link Channel.send}. `idempotencyKey` is a
  * caller-supplied, exactly-once token: the adapter threads it into the provider's
  * dedupe slot (Lark's message `uuid`) so a retry/crash re-send of the same logical
@@ -215,7 +229,12 @@ export interface Channel {
   extractAddressingSignals(msg: InboundMessage): AddressingSignal[];
   send(to: ConversationRef, msg: OutboundMessage, opts?: SendOptions): Promise<DeliveryRef>;
   update(ref: DeliveryRef, msg: OutboundMessage, opts?: { revision?: number }): Promise<DeliveryRef>;
-  react?(ref: DeliveryRef, emoji: string): Promise<void>;
+  /**
+   * Place a reaction on the message handle and return a {@link ReactionRef}
+   * carrying the provider reaction id a later removal needs. Optional: a channel
+   * without reaction support omits it.
+   */
+  react?(ref: DeliveryRef, emoji: string): Promise<ReactionRef>;
   uploadArtifact(file: LocalFile): Promise<RemoteAttachmentRef>;
   fetchAttachment(att: AttachmentRef, destDir: string): Promise<LocalFile>;
   resolveScope(msg: InboundMessage): ChannelScope;

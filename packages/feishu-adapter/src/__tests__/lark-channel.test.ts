@@ -159,6 +159,35 @@ describe('LarkChannel', () => {
     expect(next.revision).toBe(1);
   });
 
+  it('reacts via the client and returns a lark ReactionRef carrying the reaction id', async () => {
+    const ref = {
+      kind: 'lark' as const,
+      logicalMessageId: 'msg_user_1',
+      revision: 0,
+      physicalIds: ['msg_user_1'],
+    };
+
+    const reaction = await channel.react(ref, 'OK');
+
+    expect(stub.addReaction).toHaveBeenCalledTimes(1);
+    expect(stub.addReaction).toHaveBeenCalledWith('msg_user_1', 'OK');
+    expect(reaction).toEqual({ kind: 'lark', reactionId: 'r1', native: { reactionId: 'r1' } });
+  });
+
+  it('reacting on a ref with no physical id is a no-op with an empty reaction id', async () => {
+    const ref = {
+      kind: 'lark' as const,
+      logicalMessageId: '',
+      revision: 0,
+      physicalIds: [] as string[],
+    };
+
+    const reaction = await channel.react(ref, 'OK');
+
+    expect(stub.addReaction).not.toHaveBeenCalled();
+    expect(reaction).toEqual({ kind: 'lark', reactionId: '' });
+  });
+
   it('resolves the neutral scope from an inbound message', () => {
     const inbound = channel.normalize(makeRawEvent());
     expect(channel.resolveScope(inbound!)).toBe(inbound!.scope);

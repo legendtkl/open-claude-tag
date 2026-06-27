@@ -214,6 +214,34 @@ describe('SlackChannel', () => {
     expect(next.revision).toBe(1);
   });
 
+  it('reacts via reactions.add and returns a slack ReactionRef carrying the tuple identity', async () => {
+    fetchMock = mockFetch({ ok: true });
+    channel = new SlackChannel({ token: 'xoxb-test', fetch: fetchMock.fetch });
+    const ref = {
+      kind: 'slack' as const,
+      logicalMessageId: '1710000000.000999',
+      revision: 0,
+      physicalIds: ['1710000000.000999'],
+      native: { ok: true, channel: 'C123', ts: '1710000000.000999' },
+    };
+
+    const reaction = await channel.react(ref, ':white_check_mark:');
+
+    const [url, init] = fetchMock.calls.mock.calls[0];
+    expect(url).toBe('https://slack.com/api/reactions.add');
+    const body = JSON.parse((init as RequestInit).body as string);
+    expect(body).toEqual({ channel: 'C123', timestamp: '1710000000.000999', name: 'white_check_mark' });
+    // Slack has no per-reaction id, so reactionId is empty but the removable
+    // {channel, timestamp, name} tuple identity is preserved under native.
+    expect(reaction.kind).toBe('slack');
+    expect(reaction.reactionId).toBe('');
+    expect(reaction.native).toMatchObject({
+      channel: 'C123',
+      timestamp: '1710000000.000999',
+      name: 'white_check_mark',
+    });
+  });
+
   it('resolves the neutral scope from an inbound message', () => {
     const inbound = channel.normalize(makeRawEvent());
     expect(channel.resolveScope(inbound!)).toBe(inbound!.scope);

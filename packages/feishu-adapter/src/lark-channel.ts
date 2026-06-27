@@ -22,6 +22,7 @@ import type {
   InboundMessage,
   LocalFile,
   OutboundMessage,
+  ReactionRef,
   RemoteAttachmentRef,
   SendOptions,
 } from '@open-tag/channel-core';
@@ -251,10 +252,14 @@ export class LarkChannel implements Channel {
     return { ...ref, revision, native: card };
   }
 
-  async react(ref: DeliveryRef, emoji: string): Promise<void> {
+  async react(ref: DeliveryRef, emoji: string): Promise<ReactionRef> {
     const [physicalId] = ref.physicalIds;
-    if (!physicalId) return;
-    await this.client.addReaction(physicalId, emoji);
+    if (!physicalId) return { kind: this.kind, reactionId: '' };
+    // Byte-identical to a direct `client.addReaction(messageId, emoji)`: the
+    // returned `reaction_id` is the handle a later removal (the worker's
+    // FeishuClient.removeReaction) needs, so it surfaces as ReactionRef.reactionId.
+    const result = await this.client.addReaction(physicalId, emoji);
+    return { kind: this.kind, reactionId: result.reactionId, native: result };
   }
 
   async uploadArtifact(_file: LocalFile): Promise<RemoteAttachmentRef> {

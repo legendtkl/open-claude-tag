@@ -1,7 +1,12 @@
 import { escapeAtText } from './text-utils.js';
 import { createLogger } from '@open-tag/observability';
 import { truncateText } from '@open-tag/core-types';
-import type { ConversationRef, DeliveryRef, OutboundMessage } from '@open-tag/channel-core';
+import type {
+  ConversationRef,
+  DeliveryRef,
+  OutboundMessage,
+  ReactionRef,
+} from '@open-tag/channel-core';
 import type { FeishuClient } from './feishu-client.js';
 import { LarkChannel } from './lark-channel.js';
 import type { NormalizerConfig } from './normalizer.js';
@@ -26,6 +31,12 @@ import {
 export interface FeedbackChannelSender {
   send(to: ConversationRef, msg: OutboundMessage): Promise<DeliveryRef>;
   update(ref: DeliveryRef, msg: OutboundMessage): Promise<DeliveryRef>;
+  /**
+   * Place a reaction on a message handle, returning the {@link ReactionRef} that
+   * carries the provider reaction id a later removal needs. Optional so existing
+   * send/update-only senders stay conformant; {@link LarkChannel} implements it.
+   */
+  react?(ref: DeliveryRef, emoji: string): Promise<ReactionRef>;
 }
 
 // LarkChannel.normalize() is the only consumer of NormalizerConfig; the feedback

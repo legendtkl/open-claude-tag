@@ -25,6 +25,7 @@ import type {
   LocalFile,
   Mention,
   OutboundMessage,
+  ReactionRef,
   RemoteAttachmentRef,
   SendOptions,
 } from '@open-tag/channel-core';
@@ -403,15 +404,17 @@ export class SlackChannel implements Channel {
     return { ...ref, revision, native: last ?? ref.native };
   }
 
-  async react(ref: DeliveryRef, emoji: string): Promise<void> {
+  async react(ref: DeliveryRef, emoji: string): Promise<ReactionRef> {
     const [ts] = ref.physicalIds;
-    if (!ts) return;
+    if (!ts) return { kind: SLACK, reactionId: '' };
     const channel = this.channelFromRef(ref);
-    await this.callJson('reactions.add', {
-      channel,
-      timestamp: ts,
-      name: emoji.replace(/^:|:$/g, ''),
-    });
+    const name = emoji.replace(/^:|:$/g, '');
+    const res = await this.callJson('reactions.add', { channel, timestamp: ts, name });
+    // Slack's reactions.add returns no per-reaction id — a reaction is identified
+    // by its `{channel, timestamp, name}` tuple, which is also what reactions.remove
+    // takes. So `reactionId` stays empty and the removable identity is preserved
+    // under `native` for any later removal.
+    return { kind: SLACK, reactionId: '', native: { channel, timestamp: ts, name, response: res } };
   }
 
   async uploadArtifact(file: LocalFile): Promise<RemoteAttachmentRef> {
