@@ -79,16 +79,28 @@ describe('handleNormalMessage — neutral InboundMessage contract (ADR-0004 1a-i
   it('resolves the dispatch ACK destination from the neutral message scope (ADR-0004 1a-iii)', () => {
     const body = handlerBody();
     // The queued-task ACK now targets the chat via the neutral InboundMessage
-    // (message.scope.scopeId), not the recovered native event.chatId. The sender
-    // (createFeishuChannelSender) and the kind:'native' card payload stay Feishu, so
-    // the send is byte-identical; only the destination source moves onto the neutral
-    // surface. The reply target (replyToMessageId) stays native this slice.
-    expect(body).toMatch(
-      /new ThreePhaseFeedback\(\s*createFeishuChannelSender\(appContext\.client\),\s*message\.scope\.scopeId,/,
-    );
+    // (message.scope.scopeId), not the recovered native event.chatId. The send is
+    // byte-identical (the resolved lark sender + kind:'native' card payload stay
+    // Feishu); only the destination source moves onto the neutral surface. The
+    // reply target (replyToMessageId) stays native this slice.
+    expect(body).toMatch(/new ThreePhaseFeedback\(\s*resolveChannelSender\(/);
+    expect(body).toMatch(/message\.scope\.scopeId,/);
     expect(body).not.toMatch(
       /new ThreePhaseFeedback\(\s*createFeishuChannelSender\(appContext\.client\),\s*event\.chatId/,
     );
+  });
+
+  it('resolves the dispatch ACK sender by the inbound message channel kind (ADR-0004 1a-iii)', () => {
+    const body = handlerBody();
+    // The ACK sender is no longer hardcoded to Feishu: it resolves from the
+    // inbound message's channel kind, so a non-Feishu inbound gets its own
+    // sender. For the lark dispatch path this still yields the Feishu sender.
+    expect(body).toMatch(
+      /resolveChannelSender\(\s*message\.channel\.kind,\s*\{\s*feishuAppContext:\s*appContext\s*\}\s*\)/,
+    );
+    // The feedback sender must no longer be the hardcoded Feishu one (guard the
+    // wiring, not the explanatory comments that name the prior call).
+    expect(body).not.toMatch(/new ThreePhaseFeedback\(\s*createFeishuChannelSender\(/);
   });
 
   it('does not read its own task-creation inputs from the neutral message id', () => {

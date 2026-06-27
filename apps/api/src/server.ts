@@ -117,6 +117,7 @@ import { PrPollingService } from './pr-polling-service.js';
 import { registerManagedService, unregisterManagedService } from './service-process.js';
 import { getReplyToMessageId, upgradeRootProvisionalSession } from './reply-threading.js';
 import { sendDispatchReplyViaChannel } from './dispatch-reply.js';
+import { resolveChannelSender } from './channel-sender-resolver.js';
 import { applyDebugFeishuOverrides, createLoopbackFeishuClient } from './debug-feishu-client.js';
 import { applyBufferGate } from './buffer-gate.js';
 import { tapChannelObservation } from './channel-observation-tap.js';
@@ -517,8 +518,11 @@ async function handleNormalMessage(
     // ADR-0004 1a-iii: the queued-task ACK destination now reads the neutral
     // InboundMessage scope. `adaptNormalizedEvent` maps `scope.scopeId` straight
     // from the chat id, so this is byte-identical to the recovered `event.chatId`.
+    // The ACK sender resolves from the inbound `message.channel.kind`; for the
+    // lark dispatch path that is exactly `createFeishuChannelSender(appContext.client)`
+    // (byte-identical), with a registered slot where a future Slack sender plugs in.
     const feedback = new ThreePhaseFeedback(
-      createFeishuChannelSender(appContext.client),
+      resolveChannelSender(message.channel.kind, { feishuAppContext: appContext }),
       message.scope.scopeId,
       replyToMessageId,
     );
@@ -2209,8 +2213,12 @@ async function dispatchAmbientReply(
   // strand a created task" boundary.
   try {
     const replyToMessageId = getReplyToMessageId(sourceEvent);
+    // The proactive ACK sender resolves from the same inbound message's channel
+    // kind (`inbound` is adapted from `sourceEvent` above). For the lark ambient
+    // path this is exactly `createFeishuChannelSender(appContext.client)`
+    // (byte-identical); a non-Feishu kind resolves its own sender or fails fast.
     const feedback = new ThreePhaseFeedback(
-      createFeishuChannelSender(appContext.client),
+      resolveChannelSender(inbound.channel.kind, { feishuAppContext: appContext }),
       sourceEvent.chatId,
       replyToMessageId,
     );
