@@ -2141,7 +2141,7 @@ async function dispatchAmbientReply(
     throw err;
   }
 
-  const { sessionId } = await resolveSession(db, sourceEvent);
+  const { sessionId } = await resolveSession(db, adaptNormalizedEvent(sourceEvent));
   // Idempotency: the un-addressed branch skips the task-dedup table, so derive a
   // DETERMINISTIC task id from the source message. A Feishu redelivery of the
   // same event resolves to the SAME id → handleEvent's onConflictDoNothing
@@ -2521,8 +2521,13 @@ async function dispatchInboundMessageViaFeishuNative(
       }
     }
 
-    // Session routing
-    const { sessionId, scope: sessionScope } = await resolveSession(db, event);
+    // Session routing — ADR-0004 Stage 1a: resolve from the neutral message
+    // contract. Re-adapt the (thread/reference-)enriched event so the neutral
+    // surface reflects the resolved thread/root/parent; the inbound `message`
+    // captured at entry predates this enrichment, and `resolveSession` keys lark
+    // sessions byte-identically off it.
+    const sessionInbound = adaptNormalizedEvent(event);
+    const { sessionId, scope: sessionScope } = await resolveSession(db, sessionInbound);
     await aliasQuotedImageTopicStart({
       event,
       sessionId,

@@ -1,3 +1,4 @@
+import type { InboundMessage } from '@open-tag/channel-core';
 import type { NormalizedEvent } from '@open-tag/core-types';
 import type { Database } from '@open-tag/storage';
 import {
@@ -50,66 +51,145 @@ interface ExistingSessionRow {
   projectId?: string | null;
 }
 
-export async function resolveSession(db: Database, event: NormalizedEvent): Promise<ResolveResult> {
-  const tenant = event.tenantKey;
-  const sessionDefaults = await readSessionDefaults(db, tenant, event.chatId);
+/**
+ * The primitive inputs the session-key derivation needs, projected off the neutral
+ * {@link InboundMessage}. Neutral scope/conversation/content/sender drive every key
+ * shape; only the byte-identity-critical bits that are non-lossless on the typed
+ * surface dip into the lark `channel.native` (see {@link extractSessionKeyInputs}).
+ */
+interface SessionKeyInputs {
+  /** Key namespace. `lark` keeps the historical `feishu` value so persisted keys stay byte-identical. */
+  namespace: string;
+  tenant: string;
+  chatId: string;
+  isPrivate: boolean;
+  isGroup: boolean;
+  messageId: string;
+  threadId?: string;
+  rootMessageId?: string;
+  parentMessageId?: string;
+  contentType: string;
+  command?: string;
+  args?: string;
+  senderId: string;
+  /**
+   * Message ids of quoted IMAGE messages. Used to keep a quoted-image topic-start
+   * from binding to the referenced image's id. This is the only key input that is
+   * non-lossless on the neutral surface (the adapter drops a referenced message's
+   * imageAttachment), so it dips into the lark `channel.native`; a non-lark channel
+   * has no such concept and contributes an empty set.
+   */
+  referencedImageMessageIds: Set<string>;
+}
+
+/**
+ * Session-key namespace for a channel. Lark MUST stay `feishu` so persisted
+ * `sessions.sessionKey` strings remain byte-identical; a future channel derives its
+ * namespace from its kind and keys purely off the neutral scope/conversation.
+ */
+function sessionKeyNamespace(message: InboundMessage): string {
+  return message.channel.kind === 'lark' ? 'feishu' : message.channel.kind;
+}
+
+/** Quoted-image message ids from a lark native event; empty for any non-lark channel. */
+function larkReferencedImageMessageIds(native: NormalizedEvent | undefined): Set<string> {
+  if (!native) return new Set<string>();
+  return new Set(
+    native.content.referencedMessages
+      ?.filter((message) => message.imageAttachment)
+      .flatMap((message) =>
+        [message.messageId, message.imageAttachment?.messageId].filter(
+          (value): value is string => Boolean(value),
+        ),
+      ) ?? [],
+  );
+}
+
+/**
+ * Project the neutral {@link InboundMessage} onto the primitive session-key inputs.
+ * Neutral scope/conversation/content/sender drive every key shape; only the two
+ * byte-identity-critical bits that are non-lossless on the typed surface — the exact
+ * lark message id and the quoted-image ids — dip into the lark `channel.native`,
+ * guarded by `kind === 'lark'` (mirroring `recoverFeishuNormalizedEvent`).
+ */
+function extractSessionKeyInputs(message: InboundMessage): SessionKeyInputs {
+  const larkNative =
+    message.channel.kind === 'lark' ? (message.channel.native as NormalizedEvent) : undefined;
+  return {
+    namespace: sessionKeyNamespace(message),
+    tenant: message.scope.installationId,
+    chatId: message.scope.scopeId,
+    isPrivate: message.scope.isPrivate,
+    isGroup: !message.scope.isPrivate,
+    // Lark: the native message id is byte-authoritative. The neutral surface
+    // replaces an empty id with eventId, which would shift the bootstrap key.
+    messageId: larkNative?.messageId ?? message.messageId,
+    threadId: message.conversation.threadId,
+    rootMessageId: message.conversation.reply?.rootId,
+    parentMessageId: message.conversation.reply?.parentId,
+    contentType: message.content.type,
+    command: message.content.command,
+    args: message.content.args,
+    senderId: message.sender.id,
+    referencedImageMessageIds: larkReferencedImageMessageIds(larkNative),
+  };
+}
+
+export async function resolveSession(
+  db: Database,
+  message: InboundMessage,
+): Promise<ResolveResult> {
+  const inputs = extractSessionKeyInputs(message);
+  const { namespace: ns, tenant, chatId } = inputs;
+  const sessionDefaults = await readSessionDefaults(db, tenant, chatId);
   const parentOnlyThreadId =
-    !event.threadId && !event.rootMessageId ? event.parentMessageId : undefined;
+    !inputs.threadId && !inputs.rootMessageId ? inputs.parentMessageId : undefined;
   const candidateThreadIds = uniqueValues([
-    normalizeThreadSessionCandidate(event, event.threadId),
-    normalizeThreadSessionCandidate(event, event.rootMessageId),
+    normalizeThreadSessionCandidate(inputs, inputs.threadId),
+    normalizeThreadSessionCandidate(inputs, inputs.rootMessageId),
   ]);
   const candidateThreadIdsWithParent = uniqueValues([
-    normalizeThreadSessionCandidate(event, event.threadId),
-    normalizeThreadSessionCandidate(event, event.rootMessageId),
-    normalizeThreadSessionCandidate(event, event.parentMessageId),
+    normalizeThreadSessionCandidate(inputs, inputs.threadId),
+    normalizeThreadSessionCandidate(inputs, inputs.rootMessageId),
+    normalizeThreadSessionCandidate(inputs, inputs.parentMessageId),
   ]);
 
   // Rule 1: P2P — root messages bootstrap a topic-scoped session;
   // follow-up topic messages resolve through the thread/alias path.
-  if (event.chatType === 'p2p') {
+  if (inputs.isPrivate) {
     if (candidateThreadIdsWithParent.length > 0) {
       return resolveThreadSessionCandidates(
         db,
+        ns,
         tenant,
-        event.chatId,
+        chatId,
         candidateThreadIdsWithParent,
         sessionDefaults,
       );
     }
 
-    const provisionalKey = `feishu:${tenant}:${event.chatId}:bootstrap:${event.messageId}`;
-    return getOrCreateSession(
-      db,
-      provisionalKey,
-      event.chatId,
-      'thread',
-      sessionDefaults,
-      event.senderOpenId,
-    );
+    const provisionalKey = `${ns}:${tenant}:${chatId}:bootstrap:${inputs.messageId}`;
+    return getOrCreateSession(db, provisionalKey, chatId, 'thread', sessionDefaults, inputs.senderId);
   }
 
   // Rule 2: Slash commands
-  if (event.content.type === 'command') {
-    const cmd = event.content.command;
-    const isHelpRequest = event.content.args?.trim() === '--help';
+  if (inputs.contentType === 'command') {
+    const cmd = inputs.command;
+    const isHelpRequest = inputs.args?.trim() === '--help';
 
     if (cmd === '/new' && !isHelpRequest) {
-      return createManualSession(db, tenant, event);
+      return createManualSession(db, ns, tenant, chatId);
     }
 
     if (cmd === '/reset' && !isHelpRequest) {
       // Reset active pointer to group:main
-      const mainKey = `feishu:${tenant}:${event.chatId}:group:main`;
+      const mainKey = `${ns}:${tenant}:${chatId}:group:main`;
       await db
         .delete(chatActiveSessions)
         .where(
-          and(
-            eq(chatActiveSessions.tenantKey, tenant),
-            eq(chatActiveSessions.chatId, event.chatId),
-          ),
+          and(eq(chatActiveSessions.tenantKey, tenant), eq(chatActiveSessions.chatId, chatId)),
         );
-      return getOrCreateSession(db, mainKey, event.chatId, 'group-main', sessionDefaults);
+      return getOrCreateSession(db, mainKey, chatId, 'group-main', sessionDefaults);
     }
   }
 
@@ -122,22 +202,10 @@ export async function resolveSession(db: Database, event: NormalizedEvent): Prom
   // bootstrap from the current message id instead of binding the session to the
   // quoted source.
   if (candidateThreadIds.length > 0) {
-    return resolveThreadSessionCandidates(
-      db,
-      tenant,
-      event.chatId,
-      candidateThreadIds,
-      sessionDefaults,
-    );
+    return resolveThreadSessionCandidates(db, ns, tenant, chatId, candidateThreadIds, sessionDefaults);
   }
   if (parentOnlyThreadId) {
-    const existing = await findThreadSession(
-      db,
-      tenant,
-      event.chatId,
-      parentOnlyThreadId,
-      sessionDefaults,
-    );
+    const existing = await findThreadSession(db, ns, tenant, chatId, parentOnlyThreadId, sessionDefaults);
     if (existing) return existing;
   }
 
@@ -145,9 +213,7 @@ export async function resolveSession(db: Database, event: NormalizedEvent): Prom
   const activeManual = await db
     .select()
     .from(chatActiveSessions)
-    .where(
-      and(eq(chatActiveSessions.tenantKey, tenant), eq(chatActiveSessions.chatId, event.chatId)),
-    )
+    .where(and(eq(chatActiveSessions.tenantKey, tenant), eq(chatActiveSessions.chatId, chatId)))
     .limit(1);
 
   if (activeManual.length > 0) {
@@ -169,10 +235,7 @@ export async function resolveSession(db: Database, event: NormalizedEvent): Prom
       await db
         .delete(chatActiveSessions)
         .where(
-          and(
-            eq(chatActiveSessions.tenantKey, tenant),
-            eq(chatActiveSessions.chatId, event.chatId),
-          ),
+          and(eq(chatActiveSessions.tenantKey, tenant), eq(chatActiveSessions.chatId, chatId)),
         );
     }
   }
@@ -180,33 +243,34 @@ export async function resolveSession(db: Database, event: NormalizedEvent): Prom
   // Rule 5: Group main (default) or provisional
   // True root messages (no thread/root/parent context) bootstrap a provisional
   // session so the alias-upgrade path can later attach the new topic to it.
-  if (candidateThreadIds.length === 0 && event.chatType === 'group') {
-    const provisionalKey = `feishu:${tenant}:${event.chatId}:bootstrap:${event.messageId}`;
-    return getOrCreateSession(db, provisionalKey, event.chatId, 'thread', sessionDefaults);
+  if (candidateThreadIds.length === 0 && inputs.isGroup) {
+    const provisionalKey = `${ns}:${tenant}:${chatId}:bootstrap:${inputs.messageId}`;
+    return getOrCreateSession(db, provisionalKey, chatId, 'thread', sessionDefaults);
   }
 
   // Fallback: group main
-  const mainKey = `feishu:${tenant}:${event.chatId}:group:main`;
-  return getOrCreateSession(db, mainKey, event.chatId, 'group-main', sessionDefaults);
+  const mainKey = `${ns}:${tenant}:${chatId}:group:main`;
+  return getOrCreateSession(db, mainKey, chatId, 'group-main', sessionDefaults);
 }
 
 async function createManualSession(
   db: Database,
+  ns: string,
   tenant: string,
-  event: NormalizedEvent,
+  chatId: string,
 ): Promise<ResolveResult> {
   const uuid = randomUUID();
-  const key = `feishu:${tenant}:${event.chatId}:manual:${uuid}`;
-  const sessionDefaults = await readSessionDefaults(db, tenant, event.chatId);
+  const key = `${ns}:${tenant}:${chatId}:manual:${uuid}`;
+  const sessionDefaults = await readSessionDefaults(db, tenant, chatId);
 
-  const result = await getOrCreateSession(db, key, event.chatId, 'group-manual', sessionDefaults);
+  const result = await getOrCreateSession(db, key, chatId, 'group-manual', sessionDefaults);
 
   // Update active session pointer
   await db
     .insert(chatActiveSessions)
     .values({
       tenantKey: tenant,
-      chatId: event.chatId,
+      chatId,
       activeSessionId: result.sessionId,
       createdBy: undefined,
       expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000), // 24h expiry
@@ -225,19 +289,20 @@ async function createManualSession(
 
 async function resolveThreadSessionCandidates(
   db: Database,
+  ns: string,
   tenant: string,
   chatId: string,
   threadIds: string[],
   sessionDefaults: SessionDefaults,
 ): Promise<ResolveResult> {
   for (const threadId of threadIds) {
-    const existing = await findThreadSession(db, tenant, chatId, threadId, sessionDefaults);
+    const existing = await findThreadSession(db, ns, tenant, chatId, threadId, sessionDefaults);
     if (existing) return existing;
   }
 
   return getOrCreateSession(
     db,
-    `feishu:${tenant}:${chatId}:thread:${threadIds[0]}`,
+    `${ns}:${tenant}:${chatId}:thread:${threadIds[0]}`,
     chatId,
     'thread',
     sessionDefaults,
@@ -246,12 +311,13 @@ async function resolveThreadSessionCandidates(
 
 async function findThreadSession(
   db: Database,
+  ns: string,
   tenant: string,
   chatId: string,
   threadId: string,
   defaults: SessionDefaults,
 ): Promise<ResolveResult | null> {
-  const key = `feishu:${tenant}:${chatId}:thread:${threadId}`;
+  const key = `${ns}:${tenant}:${chatId}:thread:${threadId}`;
   const alias = await db
     .select()
     .from(sessionAliases)
@@ -302,6 +368,11 @@ async function resolveExistingSession(
   };
 }
 
+// NOTE: `aliasThreadKeysForSession` / `upgradeProvisionalSession` build thread
+// keys with the literal `feishu` namespace, matching `resolveSession`'s lark keys
+// (where the namespace resolves to `feishu`). They are called only for the lark
+// path today; a future non-lark channel that needs alias/upgrade would thread a
+// namespace through here the same way `resolveSession` does.
 export async function aliasThreadKeysForSession(
   db: Database,
   sessionId: string,
@@ -978,18 +1049,12 @@ function uniqueValues(values: Array<string | undefined>): string[] {
 }
 
 function normalizeThreadSessionCandidate(
-  event: NormalizedEvent,
-  messageId: string | undefined,
+  inputs: SessionKeyInputs,
+  candidateId: string | undefined,
 ): string | undefined {
-  if (!messageId) return undefined;
-  if (messageId === event.messageId) {
-    return event.chatType === 'group' && messageId.startsWith('om_') ? undefined : messageId;
+  if (!candidateId) return undefined;
+  if (candidateId === inputs.messageId) {
+    return inputs.isGroup && candidateId.startsWith('om_') ? undefined : candidateId;
   }
-  const referencedImageIds = new Set(
-    event.content.referencedMessages
-      ?.filter((message) => message.imageAttachment)
-      .flatMap((message) => [message.messageId, message.imageAttachment?.messageId].filter(Boolean)) ??
-      [],
-  );
-  return referencedImageIds.has(messageId) ? undefined : messageId;
+  return inputs.referencedImageMessageIds.has(candidateId) ? undefined : candidateId;
 }

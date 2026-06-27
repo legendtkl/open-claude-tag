@@ -6,7 +6,9 @@
   },
   "include": ["src"],
   "references": [
+    { "path": "../channel-core" },
     { "path": "../core-types" },
+    { "path": "../feishu-adapter" },
     { "path": "../storage" }
   ]
 }

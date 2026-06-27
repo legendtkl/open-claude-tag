@@ -2,10 +2,18 @@ import { afterEach, beforeEach, describe, it, expect } from 'vitest';
 import {
   aliasThreadKeysForSession,
   canonicalizeSessionId,
-  resolveSession,
+  resolveSession as resolveSessionInbound,
   upgradeProvisionalSession,
 } from '../resolve.js';
+import { adaptNormalizedEvent } from '@open-tag/feishu-adapter';
 import type { NormalizedEvent } from '@open-tag/core-types';
+
+// resolveSession now takes the neutral InboundMessage. The existing cases build
+// NormalizedEvents, so route them through the REAL adapter — this also proves the
+// migrated resolver keys lark sessions byte-identically off the neutral contract.
+function resolveSession(db: Parameters<typeof resolveSessionInbound>[0], event: NormalizedEvent) {
+  return resolveSessionInbound(db, adaptNormalizedEvent(event));
+}
 import {
   admissionLeases,
   agentDelegations,
@@ -1647,5 +1655,98 @@ describe('resolveSession', () => {
     expect(tenantA.sessionKey).toBe('feishu:tenant_a:chat_p2p:bootstrap:om_dm_root_001');
     expect(tenantB.sessionKey).toBe('feishu:tenant_b:chat_p2p:bootstrap:om_dm_root_001');
     expect(tenantA.sessionId).not.toBe(tenantB.sessionId);
+  });
+});
+
+// Byte-identity gate: the migrated resolver consumes the neutral InboundMessage but
+// MUST still produce the exact same persisted `sessionKey` string for the lark path
+// across every session kind, or every existing session would miss on resume. Each
+// case adapts a NormalizedEvent through the REAL adapter and pins the literal key —
+// covering the one input that is non-lossless on the typed surface (a quoted image's
+// id, recovered via channel.native).
+describe('resolveSession — lark sessionKey byte-identity (neutral contract)', () => {
+  it('keeps a group thread key byte-identical', async () => {
+    const { db } = createDb();
+    const result = await resolveSessionInbound(
+      db,
+      adaptNormalizedEvent(
+        createEvent({
+          chatType: 'group',
+          chatId: 'chat_group',
+          messageId: 'om_followup_thread_001',
+          threadId: 'omt_topic_001',
+        }),
+      ),
+    );
+    expect(result.sessionKey).toBe('feishu:tenant_001:chat_group:thread:omt_topic_001');
+    expect(result.scope).toBe('thread');
+  });
+
+  it('keeps the group main key byte-identical (/reset)', async () => {
+    const { db } = createDb();
+    const result = await resolveSessionInbound(
+      db,
+      adaptNormalizedEvent(
+        createEvent({
+          chatType: 'group',
+          chatId: 'chat_group',
+          messageId: 'om_reset_main_001',
+          content: { type: 'command', command: '/reset', args: '' },
+        }),
+      ),
+    );
+    expect(result.sessionKey).toBe('feishu:tenant_001:chat_group:group:main');
+    expect(result.scope).toBe('group-main');
+  });
+
+  it('keeps a private (DM) bootstrap key byte-identical', async () => {
+    const { db } = createDb();
+    const result = await resolveSessionInbound(
+      db,
+      adaptNormalizedEvent(
+        createEvent({
+          chatType: 'p2p',
+          chatId: 'chat_p2p',
+          messageId: 'om_dm_root_byte_001',
+        }),
+      ),
+    );
+    expect(result.sessionKey).toBe('feishu:tenant_001:chat_p2p:bootstrap:om_dm_root_byte_001');
+    expect(result.scope).toBe('thread');
+  });
+
+  it('keeps the quoted-image bootstrap key byte-identical (non-lossless native read)', async () => {
+    const { db } = createDb();
+    const result = await resolveSessionInbound(
+      db,
+      adaptNormalizedEvent(
+        createEvent({
+          chatType: 'group',
+          chatId: 'chat_group',
+          messageId: 'om_group_quote_request_byte_001',
+          threadId: 'om_quoted_image_byte_002',
+          rootMessageId: 'om_quoted_image_byte_002',
+          parentMessageId: 'om_quoted_image_byte_002',
+          content: {
+            type: 'text',
+            referencedMessages: [
+              {
+                messageId: 'om_quoted_image_byte_002',
+                contentType: 'image',
+                entries: [],
+                imageAttachment: {
+                  imageKey: 'img_quoted_byte_002',
+                  messageId: 'om_quoted_image_byte_002',
+                },
+              },
+            ],
+          },
+        }),
+      ),
+    );
+    expect(result.sessionKey).toBe(
+      'feishu:tenant_001:chat_group:bootstrap:om_group_quote_request_byte_001',
+    );
+    expect(result.scope).toBe('thread');
   });
 });

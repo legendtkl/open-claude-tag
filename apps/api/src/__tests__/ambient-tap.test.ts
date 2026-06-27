@@ -342,7 +342,7 @@ describe('ambient tap wiring in server.ts', () => {
   it('keeps the ambient tap strictly before dedup record and session resolution', () => {
     const ambIdx = serverSrc.indexOf('tapAmbient(buildAmbientTapDeps(');
     const dedupIdx = serverSrc.indexOf('checkAndRecordEvent(db, event.eventId');
-    const sessionIdx = serverSrc.indexOf('resolveSession(db, event)');
+    const sessionIdx = serverSrc.indexOf('resolveSession(db, sessionInbound)');
     expect(dedupIdx).toBeGreaterThan(ambIdx);
     expect(sessionIdx).toBeGreaterThan(ambIdx);
   });

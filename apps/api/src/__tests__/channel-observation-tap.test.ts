@@ -166,7 +166,7 @@ describe('channel observation tap wiring in server.ts', () => {
     const unaddressedTapIdx = serverSrc.indexOf('tapChannelObservation(db, observationEvent)');
     const skipReturnIdx = serverSrc.indexOf("'Event normalized to null, skipping'");
     const dedupCallIdx = serverSrc.indexOf('checkAndRecordEvent(db, event.eventId');
-    const sessionIdx = serverSrc.indexOf('resolveSession(db, event)');
+    const sessionIdx = serverSrc.indexOf('resolveSession(db, sessionInbound)');
 
     // The un-addressed tap is built and fired between the normalizeEvent null
     // check and the skip branch's return — i.e. it is inside the dead-end

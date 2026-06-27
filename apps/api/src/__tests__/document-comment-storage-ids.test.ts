@@ -60,6 +60,20 @@ describe('buildDocumentCommentStorageIds', () => {
     expect(second.sessionKey).not.toBe(first.sessionKey);
   });
 
+  it('keeps the document-comment sessionKey namespace and shape byte-stable', () => {
+    // Document-comment sessions resolve through THIS path, never resolveSession, so
+    // the neutral-contract session-keying migration must not touch their key shape:
+    // `feishu:{tenant}:document-comment:{stableUuid}`.
+    const ids = buildDocumentCommentStorageIds({
+      event: makeEvent({ tenantKey: 'tenant_test' }),
+      feishuAppId: 'feishu_app_1',
+      agentId: 'agent_1',
+    });
+    expect(ids.sessionKey).toMatch(
+      /^feishu:tenant_test:document-comment:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
+    );
+  });
+
   it('isolates different receiving apps in the same document comment thread', () => {
     const first = buildDocumentCommentStorageIds({
       event: makeEvent({ eventId: 'evt_1', replyId: 'reply_001', appId: 'cli_app_1' }),
