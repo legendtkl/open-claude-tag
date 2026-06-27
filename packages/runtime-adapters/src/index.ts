@@ -23,9 +23,14 @@ export {
   conversationWorkspacesRoot,
   resolveConversationWorkspacePath,
   ensureConversationWorkspace,
+  touchConversationWorkspace,
   reapConversationWorkspace,
+  reapIdleConversationWorkspaces,
 } from './conversation-workspace.js';
-export type { ConversationWorkspaceKey } from './conversation-workspace.js';
+export type {
+  ConversationWorkspaceKey,
+  IdleConversationReapResult,
+} from './conversation-workspace.js';
 export { ClaudeCodeAdapter, CLAUDE_CODE_DESCRIPTOR } from './claude-code-adapter.js';
 export type { ClaudeCodeConfig } from './claude-code-adapter.js';
 export { ChecklistAccumulator } from './checklist-accumulator.js';

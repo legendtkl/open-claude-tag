@@ -16,18 +16,26 @@ vi.mock('@open-tag/observability', () => ({
   createLogger: () => loggerMock,
 }));
 
+vi.mock('@open-tag/runtime-adapters', () => ({
+  reapIdleConversationWorkspaces: vi.fn(),
+}));
+
 import type { Database } from '@open-tag/storage';
 import { cleanStaleWorktrees } from '../worktree-cleanup.js';
+import { reapIdleConversationWorkspaces } from '@open-tag/runtime-adapters';
 import {
+  DEFAULT_CONVERSATION_WORKSPACE_IDLE_MS,
   DEFAULT_WORKTREE_CLEANUP_INTERVAL_MS,
   DEFAULT_WORKTREE_RETENTION_MS,
   WorktreeRetentionCleanupService,
+  parseConversationWorkspaceIdleMs,
   parseWorktreeCleanupIntervalMs,
   parseWorktreeRetentionMs,
   shouldRunWorktreeRetentionCleanup,
 } from '../worktree-retention-cleanup-service.js';
 
 const mockCleanStaleWorktrees = vi.mocked(cleanStaleWorktrees);
+const mockReapIdle = vi.mocked(reapIdleConversationWorkspaces);
 
 describe('worktree-retention-cleanup-service', () => {
   beforeEach(() => {
@@ -40,6 +48,12 @@ describe('worktree-retention-cleanup-service', () => {
       orphanDiskCleaned: [],
       targetCleaned: [],
       staleSkipped: [],
+      errors: [],
+    });
+    mockReapIdle.mockResolvedValue({
+      reaped: [],
+      skippedRecent: [],
+      skippedForeign: [],
       errors: [],
     });
   });
@@ -114,6 +128,73 @@ describe('worktree-retention-cleanup-service', () => {
       '/repo',
       2000,
       expect.any(Date),
+    );
+  });
+
+  it('falls back to the default conversation idle window when config is invalid', () => {
+    expect(parseConversationWorkspaceIdleMs({ CONVERSATION_WORKSPACE_IDLE_MS: 'nope' })).toBe(
+      DEFAULT_CONVERSATION_WORKSPACE_IDLE_MS,
+    );
+    expect(parseConversationWorkspaceIdleMs({ CONVERSATION_WORKSPACE_IDLE_MS: '0' })).toBe(
+      DEFAULT_CONVERSATION_WORKSPACE_IDLE_MS,
+    );
+    expect(parseConversationWorkspaceIdleMs({ CONVERSATION_WORKSPACE_IDLE_MS: '3600000' })).toBe(
+      3600000,
+    );
+  });
+
+  it('runs both worktree retention and the conversation idle scan on each tick', async () => {
+    const service = new WorktreeRetentionCleanupService({} as Database, '/repo', {
+      intervalMs: 1000,
+      retentionMs: 2000,
+      conversationIdleMs: 5000,
+    });
+
+    service.start();
+    await vi.advanceTimersByTimeAsync(1000);
+
+    expect(mockCleanStaleWorktrees).toHaveBeenCalledTimes(1);
+    expect(mockReapIdle).toHaveBeenCalledTimes(1);
+    expect(mockReapIdle).toHaveBeenCalledWith({ idleMs: 5000 });
+  });
+
+  it('isolates a conversation scan failure: worktree retention still runs and the tick survives', async () => {
+    mockReapIdle.mockRejectedValueOnce(new Error('scan boom'));
+    const service = new WorktreeRetentionCleanupService({} as Database, '/repo', {
+      intervalMs: 1000,
+      retentionMs: 2000,
+      conversationIdleMs: 5000,
+    });
+
+    service.start();
+    await vi.advanceTimersByTimeAsync(1000);
+
+    expect(mockCleanStaleWorktrees).toHaveBeenCalledTimes(1);
+    expect(loggerMock.error).toHaveBeenCalledWith(
+      expect.objectContaining({ err: expect.any(Error) }),
+      'Conversation workspace idle scan tick failed',
+    );
+
+    // The service is still alive: the next tick runs both tasks again.
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(mockReapIdle).toHaveBeenCalledTimes(2);
+  });
+
+  it('isolates a worktree retention failure: the conversation scan still runs', async () => {
+    mockCleanStaleWorktrees.mockRejectedValueOnce(new Error('worktree boom'));
+    const service = new WorktreeRetentionCleanupService({} as Database, '/repo', {
+      intervalMs: 1000,
+      retentionMs: 2000,
+      conversationIdleMs: 5000,
+    });
+
+    service.start();
+    await vi.advanceTimersByTimeAsync(1000);
+
+    expect(mockReapIdle).toHaveBeenCalledTimes(1);
+    expect(loggerMock.error).toHaveBeenCalledWith(
+      expect.objectContaining({ err: expect.any(Error) }),
+      'Worktree retention cleanup tick failed',
     );
   });
 });
