@@ -8,12 +8,15 @@ import {
   createLarkChannelSender,
   createWorkerChannelSenderResolver,
   reconstructAckDeliveryRef,
+  reconstructLarkReactionRef,
+  removeAckReactionViaChannel,
   resolveTaskChannelSender,
   updateRunningFeedbackCard,
   type ChannelSender,
   type ConversationRef as WorkerConversationRef,
   type DeliveryRef,
   type OutboundMessage,
+  type ReactionRef,
 } from '../channel-sender.js';
 
 interface FakeFeishuClient {
@@ -78,6 +81,95 @@ describe('LarkChannelSender', () => {
 
     expect(fake.updateMessage).toHaveBeenCalledTimes(1);
     expect(fake.updateMessage).toHaveBeenCalledWith('ack-1', card);
+  });
+
+  it('removes a reaction via FeishuClient.removeReaction verbatim (byte-identical path)', async () => {
+    const removeReaction = vi.fn(async () => undefined);
+    const fake = { ...makeFakeClient(), removeReaction };
+    const sender = createLarkChannelSender(asClient(fake as unknown as FakeFeishuClient));
+
+    await sender.removeReaction!(reconstructLarkReactionRef('om_user_1', 'reaction_1'));
+
+    expect(removeReaction).toHaveBeenCalledTimes(1);
+    expect(removeReaction).toHaveBeenCalledWith('om_user_1', 'reaction_1');
+  });
+});
+
+describe('reconstructLarkReactionRef', () => {
+  it('carries the reaction id first-class and the owning message id under native', () => {
+    expect(reconstructLarkReactionRef('om_user_1', 'reaction_1')).toEqual({
+      kind: 'lark',
+      reactionId: 'reaction_1',
+      native: { messageId: 'om_user_1' },
+    });
+  });
+});
+
+describe('removeAckReactionViaChannel', () => {
+  function makeReactionSender() {
+    const removed: ReactionRef[] = [];
+    const sender = {
+      send: vi.fn(),
+      update: vi.fn(),
+      removeReaction: vi.fn(async (ref: ReactionRef) => {
+        removed.push(ref);
+      }),
+    } as unknown as ChannelSender;
+    return { sender, removed };
+  }
+
+  it('routes removal through the sender with the reconstructed lark ReactionRef', async () => {
+    const { sender, removed } = makeReactionSender();
+
+    await removeAckReactionViaChannel(
+      sender,
+      { messageId: 'om_user_1', reactionId: 'reaction_1', reason: 'after task completion' },
+    );
+
+    expect(sender.removeReaction).toHaveBeenCalledTimes(1);
+    expect(removed[0]).toEqual({
+      kind: 'lark',
+      reactionId: 'reaction_1',
+      native: { messageId: 'om_user_1' },
+    });
+  });
+
+  it('skips when the sender is null, lacks removeReaction, or an id is missing', async () => {
+    const { sender } = makeReactionSender();
+
+    await removeAckReactionViaChannel(null, {
+      messageId: 'om_user_1',
+      reactionId: 'reaction_1',
+      reason: 'x',
+    });
+    await removeAckReactionViaChannel(
+      { send: vi.fn(), update: vi.fn() } as unknown as ChannelSender,
+      { messageId: 'om_user_1', reactionId: 'reaction_1', reason: 'x' },
+    );
+    await removeAckReactionViaChannel(sender, { reactionId: 'reaction_1', reason: 'x' });
+    await removeAckReactionViaChannel(sender, { messageId: 'om_user_1', reason: 'x' });
+
+    expect(sender.removeReaction).not.toHaveBeenCalled();
+  });
+
+  it('swallows a removal error and warns instead of throwing', async () => {
+    const sender = {
+      send: vi.fn(),
+      update: vi.fn(),
+      removeReaction: vi.fn(async () => {
+        throw new Error('boom');
+      }),
+    } as unknown as ChannelSender;
+    const warn = vi.fn();
+
+    await expect(
+      removeAckReactionViaChannel(
+        sender,
+        { messageId: 'om_user_1', reactionId: 'reaction_1', reason: 'after task error' },
+        { warn } as unknown as Logger,
+      ),
+    ).resolves.toBeUndefined();
+    expect(warn).toHaveBeenCalledTimes(1);
   });
 });
 

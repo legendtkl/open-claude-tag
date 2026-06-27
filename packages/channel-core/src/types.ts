@@ -185,11 +185,17 @@ export interface DeliveryRef {
 
 /**
  * A handle over a reaction a channel placed on a message — mirrors
- * {@link DeliveryRef}/{@link RemoteAttachmentRef}. It carries the provider
- * reaction id a later removal needs (Lark's `reaction_id`); channels whose
- * reactions have no removable per-reaction id (Slack identifies a reaction by
- * the `{channel, timestamp, name}` tuple) return an empty `reactionId` and keep
- * that identity behind the typed `native` escape hatch.
+ * {@link DeliveryRef}/{@link RemoteAttachmentRef}. It is the removable handle a
+ * later {@link Channel.removeReaction} consumes, so it must carry that channel's
+ * full reaction identity.
+ *
+ * Lark identifies a reaction by `{messageId, reaction_id}`: the provider
+ * `reaction_id` is the first-class `reactionId` and the owning message id rides
+ * the typed `native` escape hatch (`native.messageId`), since the neutral type
+ * stays free of Feishu's message shape. Slack has no per-reaction id — a reaction
+ * is the `{channel, timestamp, name}` tuple — so it returns an empty `reactionId`
+ * and keeps that whole tuple under `native`. Either way, the {@link ReactionRef}
+ * a channel's {@link Channel.react} returns is self-sufficient to remove.
  */
 export interface ReactionRef {
   kind: ChannelKind;
@@ -235,6 +241,18 @@ export interface Channel {
    * without reaction support omits it.
    */
   react?(ref: DeliveryRef, emoji: string): Promise<ReactionRef>;
+  /**
+   * Remove a reaction this channel placed on a message, identified by the
+   * {@link ReactionRef} {@link Channel.react} returned (Lark: `reactionId` plus
+   * the owning message id on `native.messageId`; Slack: the
+   * `{channel, timestamp, name}` tuple on `native`). Mirrors {@link Channel.react}.
+   * Optional: a channel without removable reactions omits it. An implementor
+   * no-ops on a foreign-kind ref (`ref.kind !== this.kind`) or one missing its
+   * removable identity. Like {@link Channel.react}, a provider error THROWS — the
+   * caller isolates removal best-effort (the worker routes it through a seam that
+   * skips + warns), keeping the contract uniform across kinds.
+   */
+  removeReaction?(ref: ReactionRef): Promise<void>;
   uploadArtifact(file: LocalFile): Promise<RemoteAttachmentRef>;
   fetchAttachment(att: AttachmentRef, destDir: string): Promise<LocalFile>;
   resolveScope(msg: InboundMessage): ChannelScope;

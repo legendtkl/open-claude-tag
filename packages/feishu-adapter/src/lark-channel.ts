@@ -259,7 +259,27 @@ export class LarkChannel implements Channel {
     // returned `reaction_id` is the handle a later removal (the worker's
     // FeishuClient.removeReaction) needs, so it surfaces as ReactionRef.reactionId.
     const result = await this.client.addReaction(physicalId, emoji);
-    return { kind: this.kind, reactionId: result.reactionId, native: result };
+    // Lark removal needs BOTH ids; carry the owning message id on `native` so the
+    // returned ReactionRef is self-sufficient for removeReaction (round-trippable).
+    return {
+      kind: this.kind,
+      reactionId: result.reactionId,
+      native: { ...result, messageId: physicalId },
+    };
+  }
+
+  async removeReaction(ref: ReactionRef): Promise<void> {
+    // Skip a foreign-kind ref: a registry could route a non-lark ReactionRef here,
+    // and its native fields must never be misread as a Feishu message id.
+    if (ref.kind !== this.kind) return;
+    const messageId = (ref.native as { messageId?: string } | undefined)?.messageId;
+    // Best-effort: a ref missing either half of Lark's `{messageId, reactionId}`
+    // identity has nothing removable, so no-op rather than calling with a blank id.
+    if (!messageId || !ref.reactionId) return;
+    // Byte-identical to a direct `client.removeReaction(messageId, reactionId)`.
+    // Like `react`/`send`/`update`, a provider error throws here; the caller (the
+    // worker's removeAckReactionViaChannel seam) isolates it best-effort.
+    await this.client.removeReaction(messageId, ref.reactionId);
   }
 
   async uploadArtifact(_file: LocalFile): Promise<RemoteAttachmentRef> {

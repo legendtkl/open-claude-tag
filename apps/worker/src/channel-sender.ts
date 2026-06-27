@@ -28,6 +28,8 @@ export type DeliveryRef = Awaited<ReturnType<LarkChannel['send']>>;
 /** Optional send controls; carries the exactly-once `idempotencyKey`. */
 export type SendOptions = Parameters<LarkChannel['send']>[2];
 type UpdateOptions = Parameters<LarkChannel['update']>[2];
+/** The removable reaction handle a {@link ChannelSender.removeReaction} consumes. */
+export type ReactionRef = Parameters<NonNullable<LarkChannel['removeReaction']>>[0];
 
 /** The neutral conversation handle a fresh send targets. */
 export type { ConversationRef };
@@ -55,6 +57,13 @@ export function buildTaskConversationRef(
 export interface ChannelSender {
   send(to: ConversationRef, msg: OutboundMessage, opts?: SendOptions): Promise<DeliveryRef>;
   update(ref: DeliveryRef, msg: OutboundMessage, opts?: UpdateOptions): Promise<DeliveryRef>;
+  /**
+   * Remove a reaction the channel placed on a message, identified by the
+   * {@link ReactionRef}. Optional so send/update-only senders stay conformant;
+   * {@link LarkChannelSender} implements it. Best-effort — see
+   * {@link removeAckReactionViaChannel}.
+   */
+  removeReaction?(ref: ReactionRef): Promise<void>;
 }
 
 /** A {@link ChannelSender} backed by a {@link LarkChannel}. */
@@ -68,6 +77,10 @@ export class LarkChannelSender implements ChannelSender {
   update(ref: DeliveryRef, msg: OutboundMessage, opts?: UpdateOptions): Promise<DeliveryRef> {
     return this.channel.update(ref, msg, opts);
   }
+
+  removeReaction(ref: ReactionRef): Promise<void> {
+    return this.channel.removeReaction(ref);
+  }
 }
 
 // LarkChannel.normalize() is the only consumer of NormalizerConfig; send/update
@@ -79,6 +92,51 @@ export function createLarkChannelSender(
   normalizerConfig: NormalizerConfig = SEND_ONLY_NORMALIZER_CONFIG,
 ): LarkChannelSender {
   return new LarkChannelSender(new LarkChannel(client, normalizerConfig));
+}
+
+/**
+ * Rebuild the {@link ReactionRef} the worker needs to REMOVE the inbound-dispatch
+ * ack reaction from the ids it stored on the task (`constraints.userMessageId`,
+ * `constraints.userMessageReactionId`). Lark removal needs BOTH the owning message
+ * id and the provider reaction id; the reaction id is the first-class `reactionId`
+ * field and the message id rides the `native` escape hatch, exactly what
+ * {@link LarkChannel.removeReaction} reads to call
+ * `FeishuClient.removeReaction(messageId, reactionId)` — byte-identical to the
+ * worker's prior direct client call. This mirrors {@link reconstructAckDeliveryRef}
+ * for the ack-update handle.
+ */
+export function reconstructLarkReactionRef(messageId: string, reactionId: string): ReactionRef {
+  return { kind: LARK_KIND, reactionId, native: { messageId } };
+}
+
+/**
+ * Remove a task's ack reaction through the neutral {@link ChannelSender}, the
+ * mirror of the API's add side (`addDispatchReactionViaChannel`). Best-effort: a
+ * sender without `removeReaction`, a missing id, or a send error is skipped (a
+ * send error is warned), never crashing the already-finished task. For a Lark task
+ * this resolves to exactly today's
+ * `client.removeReaction(userMessageId, userMessageReactionId)`.
+ *
+ * The worker still triggers this only under its lark-shaped id guard (the ack
+ * reaction is Feishu-only today); a non-lark kind with no reaction id simply never
+ * reaches here. Routing it through the neutral contract makes a future Slack
+ * reaction-removal (reconstructing a slack-shaped ref) a drop-in.
+ */
+export async function removeAckReactionViaChannel(
+  sender: ChannelSender | null,
+  args: { messageId?: string; reactionId?: string; reason: string },
+  logger?: Logger,
+): Promise<void> {
+  const { messageId, reactionId, reason } = args;
+  if (!sender?.removeReaction || !messageId || !reactionId) return;
+  try {
+    await sender.removeReaction(reconstructLarkReactionRef(messageId, reactionId));
+  } catch (err) {
+    logger?.warn(
+      { err, userMessageId: messageId, userMessageReactionId: reactionId },
+      `Failed to remove reaction ${reason}`,
+    );
+  }
 }
 
 /** Resolves a {@link ChannelSender} for a task's Feishu app, reusing the registry. */

@@ -242,6 +242,46 @@ describe('SlackChannel', () => {
     });
   });
 
+  it('removes a reaction via reactions.remove using the tuple under native', async () => {
+    fetchMock = mockFetch({ ok: true });
+    channel = new SlackChannel({ token: 'xoxb-test', fetch: fetchMock.fetch });
+
+    await channel.removeReaction({
+      kind: 'slack',
+      reactionId: '',
+      native: { channel: 'C123', timestamp: '1710000000.000999', name: 'white_check_mark' },
+    });
+
+    const [url, init] = fetchMock.calls.mock.calls[0];
+    expect(url).toBe('https://slack.com/api/reactions.remove');
+    const body = JSON.parse((init as RequestInit).body as string);
+    expect(body).toEqual({ channel: 'C123', timestamp: '1710000000.000999', name: 'white_check_mark' });
+  });
+
+  it('removeReaction is a no-op when native lacks the removable tuple', async () => {
+    fetchMock = mockFetch({ ok: true });
+    channel = new SlackChannel({ token: 'xoxb-test', fetch: fetchMock.fetch });
+
+    // A Lark-shaped ref carries no Slack tuple, so there is nothing to remove.
+    await channel.removeReaction({ kind: 'slack', reactionId: '', native: { messageId: 'om_1' } });
+    await channel.removeReaction({ kind: 'slack', reactionId: '' });
+
+    expect(fetchMock.calls).not.toHaveBeenCalled();
+  });
+
+  it('removeReaction skips a foreign-kind ref even if its native looks like a tuple', async () => {
+    fetchMock = mockFetch({ ok: true });
+    channel = new SlackChannel({ token: 'xoxb-test', fetch: fetchMock.fetch });
+
+    await channel.removeReaction({
+      kind: 'lark',
+      reactionId: 'r1',
+      native: { channel: 'C123', timestamp: '1710000000.000999', name: 'white_check_mark' },
+    });
+
+    expect(fetchMock.calls).not.toHaveBeenCalled();
+  });
+
   it('resolves the neutral scope from an inbound message', () => {
     const inbound = channel.normalize(makeRawEvent());
     expect(channel.resolveScope(inbound!)).toBe(inbound!.scope);

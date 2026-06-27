@@ -45,6 +45,7 @@ function makeClient() {
     sendMessage: vi.fn().mockResolvedValue({ messageId: 'msg_out_1' }),
     updateMessage: vi.fn().mockResolvedValue(undefined),
     addReaction: vi.fn().mockResolvedValue({ reactionId: 'r1' }),
+    removeReaction: vi.fn().mockResolvedValue(undefined),
     createDocumentComment: vi.fn().mockResolvedValue({ commentId: 'cmt_1' }),
     downloadImage: vi.fn(),
     downloadFile: vi.fn(),
@@ -171,7 +172,13 @@ describe('LarkChannel', () => {
 
     expect(stub.addReaction).toHaveBeenCalledTimes(1);
     expect(stub.addReaction).toHaveBeenCalledWith('msg_user_1', 'OK');
-    expect(reaction).toEqual({ kind: 'lark', reactionId: 'r1', native: { reactionId: 'r1' } });
+    // The owning message id rides `native.messageId` so the ReactionRef is
+    // self-sufficient for a later removeReaction (round-trippable).
+    expect(reaction).toEqual({
+      kind: 'lark',
+      reactionId: 'r1',
+      native: { reactionId: 'r1', messageId: 'msg_user_1' },
+    });
   });
 
   it('reacting on a ref with no physical id is a no-op with an empty reaction id', async () => {
@@ -186,6 +193,45 @@ describe('LarkChannel', () => {
 
     expect(stub.addReaction).not.toHaveBeenCalled();
     expect(reaction).toEqual({ kind: 'lark', reactionId: '' });
+  });
+
+  it('removes a reaction via the client using the message id on native and the reaction id', async () => {
+    await channel.removeReaction({
+      kind: 'lark',
+      reactionId: 'r1',
+      native: { messageId: 'msg_user_1' },
+    });
+
+    expect(stub.removeReaction).toHaveBeenCalledTimes(1);
+    expect(stub.removeReaction).toHaveBeenCalledWith('msg_user_1', 'r1');
+  });
+
+  it('round-trips: the ReactionRef from react is removable as-is', async () => {
+    const reaction = await channel.react(
+      { kind: 'lark', logicalMessageId: 'msg_user_1', revision: 0, physicalIds: ['msg_user_1'] },
+      'OK',
+    );
+
+    await channel.removeReaction(reaction);
+
+    expect(stub.removeReaction).toHaveBeenCalledWith('msg_user_1', 'r1');
+  });
+
+  it('removeReaction is a no-op when the ref is missing its message id or reaction id', async () => {
+    await channel.removeReaction({ kind: 'lark', reactionId: 'r1' });
+    await channel.removeReaction({ kind: 'lark', reactionId: '', native: { messageId: 'msg_user_1' } });
+
+    expect(stub.removeReaction).not.toHaveBeenCalled();
+  });
+
+  it('removeReaction skips a foreign-kind ref even if its native looks removable', async () => {
+    await channel.removeReaction({
+      kind: 'slack',
+      reactionId: 'r1',
+      native: { messageId: 'msg_user_1' },
+    });
+
+    expect(stub.removeReaction).not.toHaveBeenCalled();
   });
 
   it('resolves the neutral scope from an inbound message', () => {

@@ -417,6 +417,27 @@ export class SlackChannel implements Channel {
     return { kind: SLACK, reactionId: '', native: { channel, timestamp: ts, name, response: res } };
   }
 
+  async removeReaction(ref: ReactionRef): Promise<void> {
+    // Skip a foreign-kind ref: a registry could route a non-slack ReactionRef
+    // here, and its native fields must never be misread as a Slack tuple.
+    if (ref.kind !== SLACK) return;
+    // Slack identifies a reaction by the `{channel, timestamp, name}` tuple the
+    // matching `react` stashed under `native`; reactions.remove takes the same
+    // tuple. A ref without that tuple has nothing Slack can remove, so no-op.
+    const native = ref.native as
+      | { channel?: string; timestamp?: string; name?: string }
+      | undefined;
+    if (!native?.channel || !native.timestamp || !native.name) return;
+    // Symmetric with `react`: a provider error throws and the caller isolates it
+    // best-effort (the worker's removeAckReactionViaChannel seam), so the contract
+    // stays uniform across kinds rather than swallowing only on Slack.
+    await this.callJson('reactions.remove', {
+      channel: native.channel,
+      timestamp: native.timestamp,
+      name: native.name,
+    });
+  }
+
   async uploadArtifact(file: LocalFile): Promise<RemoteAttachmentRef> {
     // The modern Slack upload is a three-step external flow; `files.upload` was
     // sunset (2025-11-12). TODO(stage-6): set `channels`/`thread_ts` on

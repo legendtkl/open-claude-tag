@@ -168,6 +168,7 @@ import {
   buildTaskConversationRef,
   createLarkChannelSender,
   reconstructAckDeliveryRef,
+  removeAckReactionViaChannel,
   resolveTaskChannelSender,
   updateRunningFeedbackCard,
   NeutralChannelFeedback,
@@ -1418,14 +1419,11 @@ async function processTask(job: { id: string; data: TaskJobData }): Promise<void
       });
 
       if (taskFeishuClient && userMessageId && userMessageReactionId) {
-        try {
-          await taskFeishuClient.removeReaction(userMessageId, userMessageReactionId);
-        } catch (err) {
-          logger.warn(
-            { err, userMessageId, userMessageReactionId },
-            'Failed to remove reaction after debug task skip',
-          );
-        }
+        await removeAckReactionViaChannel(
+          taskChannelSender ?? createLarkChannelSender(taskFeishuClient),
+          { messageId: userMessageId, reactionId: userMessageReactionId, reason: 'after debug task skip' },
+          logger,
+        );
       }
 
       logger.info({ taskId, sessionId }, 'Skipped runtime execution for debug test task');
@@ -2849,14 +2847,11 @@ async function processTask(job: { id: string; data: TaskJobData }): Promise<void
       }
       await updateFeedbackState('failed');
       if (taskFeishuClient && userMessageId && userMessageReactionId) {
-        try {
-          await taskFeishuClient.removeReaction(userMessageId, userMessageReactionId);
-        } catch (err) {
-          logger.warn(
-            { err, userMessageId, userMessageReactionId },
-            'Failed to remove reaction after task failure',
-          );
-        }
+        await removeAckReactionViaChannel(
+          taskChannelSender ?? createLarkChannelSender(taskFeishuClient),
+          { messageId: userMessageId, reactionId: userMessageReactionId, reason: 'after task failure' },
+          logger,
+        );
       }
       logger.error({ taskId, error: errorMessage }, 'Task failed');
     } else {
@@ -3044,14 +3039,11 @@ async function processTask(job: { id: string; data: TaskJobData }): Promise<void
       }
       await updateFeedbackState('completed');
       if (taskFeishuClient && userMessageId && userMessageReactionId) {
-        try {
-          await taskFeishuClient.removeReaction(userMessageId, userMessageReactionId);
-        } catch (err) {
-          logger.warn(
-            { err, userMessageId, userMessageReactionId },
-            'Failed to remove reaction after task completion',
-          );
-        }
+        await removeAckReactionViaChannel(
+          taskChannelSender ?? createLarkChannelSender(taskFeishuClient),
+          { messageId: userMessageId, reactionId: userMessageReactionId, reason: 'after task completion' },
+          logger,
+        );
       }
 
       // Capture PR URL from dev task output.
@@ -3196,14 +3188,11 @@ async function processTask(job: { id: string; data: TaskJobData }): Promise<void
       logger.warn({ taskId, feedbackStateErr }, 'Failed to persist feedback failure state');
     }
     if (taskFeishuClient && userMessageId && userMessageReactionId) {
-      try {
-        await taskFeishuClient.removeReaction(userMessageId, userMessageReactionId);
-      } catch (reactionErr) {
-        logger.warn(
-          { reactionErr, userMessageId, userMessageReactionId },
-          'Failed to remove reaction after task error',
-        );
-      }
+      await removeAckReactionViaChannel(
+        taskChannelSender ?? createLarkChannelSender(taskFeishuClient),
+        { messageId: userMessageId, reactionId: userMessageReactionId, reason: 'after task error' },
+        logger,
+      );
     }
   } finally {
     runtimeWatchdog?.unregister(taskId);
