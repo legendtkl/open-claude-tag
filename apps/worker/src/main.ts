@@ -99,6 +99,7 @@ import {
   CodexAdapter,
   CocoAdapter,
   createWorkspace,
+  ensureConversationWorkspace,
   openClaudeTagHome,
   ensureAgentHomeDir,
   collectArtifactsFromDir,
@@ -150,6 +151,7 @@ import {
   buildAgentIdentityPrompt,
   buildAgentSystemPrompt,
   buildWorkerWorkspaceKey,
+  deriveConversationThreadId,
   mergeAgentProfileSystemPrompt,
   normalizeRuntimeEnv,
   resolveEffectiveRuntimeState,
@@ -313,6 +315,10 @@ const WORKER_CONCURRENCY = parseInt(process.env.WORKER_CONCURRENCY ?? '5', 10);
 // Layer A agent workspace memory (local file store). Enabled by default for
 // agent-owned tasks; set OPEN_TAG_AGENT_MEMORY=disabled to turn off.
 const AGENT_MEMORY_ENABLED = process.env.OPEN_TAG_AGENT_MEMORY !== 'disabled';
+// Channel kind baked into the conversation-workspace key. Today every session
+// originates from the Lark/Feishu channel; it is a stable constant (not parsed)
+// so a thread's path stays identical across turns.
+const CONVERSATION_CHANNEL_KIND = 'lark';
 // Write side of the verified shared context (DeLM): externalize each successful
 // turn as a compact verified gist so `@`-driven handoffs gain cross-kind /
 // cross-machine shared memory. Read/hydration is already wired in context-builders.
@@ -1767,6 +1773,7 @@ async function processTask(job: { id: string; data: TaskJobData }): Promise<void
     // Detect task type: passthrough (ad-hoc workdir), external-project, self-dev, or generic
     const [sessionInfo] = await db
       .select({
+        sessionKey: sessions.sessionKey,
         worktreePath: sessions.worktreePath,
         worktreeBranch: sessions.worktreeBranch,
         projectId: sessions.projectId,
@@ -2063,18 +2070,40 @@ async function processTask(job: { id: string; data: TaskJobData }): Promise<void
           'Generic agent run deferred to remote daemon',
         );
       } else {
-        // No bound workdir (session/chat/env all empty): give the agent a stable
-        // home under ~/.open-claude-tag/agents/<agentId> instead of the /tmp scratch.
-        // Set `workspace.cwd` (not `workspacePath`) so adapter scratch files
-        // (TASK.md, image.png) stay in the temp dir. The home is NOT persisted as
-        // a worktree/adhoc binding, so the next turn resolves the same home.
-        const home = await ensureAgentHomeDir(taskAgentId);
-        workspace.cwd = home;
-        runningWorkDir = home;
-        logger.info(
-          { taskId, agentId: taskAgentId, cwd: home },
-          'Generic agent run resolved to per-agent home',
-        );
+        // No bound workdir (session/chat/env all empty). Prefer a
+        // conversation-scoped workspace so a thread's successive turns share
+        // working state (clones, edits, scratch) without crossing into other
+        // conversations. The path is a pure function of the conversation key, so
+        // a later turn — even on another worker process — re-derives the same
+        // dir with no persisted binding. Non-thread sessions (group-main /
+        // manual / bootstrap / no thread) fall back to the stable per-agent home
+        // under ~/.open-claude-tag/agents/<agentId>, unchanged. Either way set
+        // `workspace.cwd` (not `workspacePath`) so adapter scratch files
+        // (TASK.md, image.png) stay in the temp dir, and do NOT persist a
+        // worktree/adhoc binding so the next turn re-resolves the same dir.
+        const conversationThreadId = deriveConversationThreadId(sessionInfo?.sessionKey);
+        const conversationWorkspace = await ensureConversationWorkspace({
+          channelKind: CONVERSATION_CHANNEL_KIND,
+          installationId: tenantKey ?? 'default',
+          scopeId: chatId ?? sessionId,
+          threadId: conversationThreadId,
+        });
+        if (conversationWorkspace) {
+          workspace.cwd = conversationWorkspace;
+          runningWorkDir = conversationWorkspace;
+          logger.info(
+            { taskId, agentId: taskAgentId, cwd: conversationWorkspace },
+            'Generic agent run resolved to conversation workspace',
+          );
+        } else {
+          const home = await ensureAgentHomeDir(taskAgentId);
+          workspace.cwd = home;
+          runningWorkDir = home;
+          logger.info(
+            { taskId, agentId: taskAgentId, cwd: home },
+            'Generic agent run resolved to per-agent home',
+          );
+        }
       }
     }
     const agentProfileSystemPrompt = mergeAgentProfileSystemPrompt({

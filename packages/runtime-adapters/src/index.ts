@@ -18,6 +18,14 @@ export {
   ensureAgentHomeDir,
   workspacesRoot,
 } from './workspace.js';
+export {
+  CONVERSATION_WORKSPACES_SUBDIR,
+  conversationWorkspacesRoot,
+  resolveConversationWorkspacePath,
+  ensureConversationWorkspace,
+  reapConversationWorkspace,
+} from './conversation-workspace.js';
+export type { ConversationWorkspaceKey } from './conversation-workspace.js';
 export { ClaudeCodeAdapter, CLAUDE_CODE_DESCRIPTOR } from './claude-code-adapter.js';
 export type { ClaudeCodeConfig } from './claude-code-adapter.js';
 export { ChecklistAccumulator } from './checklist-accumulator.js';

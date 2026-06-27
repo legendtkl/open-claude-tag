@@ -107,6 +107,24 @@ export function buildWorkerWorkspaceKey(sessionId: string, agentId?: string): st
   return `${agentPart}${sessionPart}-${sessionId}`;
 }
 
+/**
+ * Extract the conversation thread discriminator from a session key.
+ *
+ * Only thread-scoped sessions (`feishu:{tenant}:{chatId}:thread:{threadId}`)
+ * identify a reusable conversation thread; group-main, manual (`/new`), and
+ * bootstrap sessions deliberately return `null` so they keep their per-task
+ * workspace behavior. The match is anchored to the end of the key (a strict
+ * `:thread:<id>` suffix), not a loose substring scan, and a malformed or empty
+ * thread component falls back to `null`.
+ */
+export function deriveConversationThreadId(sessionKey: string | null | undefined): string | null {
+  if (!sessionKey) return null;
+  const match = /:thread:([^:]+)$/.exec(sessionKey);
+  if (!match) return null;
+  const threadId = match[1].trim();
+  return threadId.length > 0 ? threadId : null;
+}
+
 export function mergeAgentProfileSystemPrompt(input: {
   systemPrompt?: string | null;
   legacyStylePrompt?: string | null;

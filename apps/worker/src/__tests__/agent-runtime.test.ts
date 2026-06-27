@@ -6,6 +6,7 @@ import {
   buildAgentIdentityPrompt,
   buildAgentSystemPrompt,
   buildWorkerWorkspaceKey,
+  deriveConversationThreadId,
   mergeAgentProfileSystemPrompt,
   normalizeRuntimeEnv,
   resolveEffectiveRuntimeState,
@@ -154,6 +155,29 @@ describe('runtime switch and workspace locality', () => {
     expect(buildWorkerWorkspaceKey(sessionId, 'aaaaaaaa-1111-2222-3333-444444444444')).not.toBe(
       buildWorkerWorkspaceKey(sessionId, 'bbbbbbbb-1111-2222-3333-444444444444'),
     );
+  });
+});
+
+describe('deriveConversationThreadId', () => {
+  it('extracts the thread id from a thread-scoped session key', () => {
+    expect(deriveConversationThreadId('feishu:default:oc_chat_1:thread:omt_root_99')).toBe(
+      'omt_root_99',
+    );
+  });
+
+  it('returns null for non-thread sessions (group-main / manual / bootstrap)', () => {
+    expect(deriveConversationThreadId('feishu:default:oc_chat_1:group:main')).toBeNull();
+    expect(deriveConversationThreadId('feishu:default:oc_chat_1:manual:abc-uuid')).toBeNull();
+    expect(deriveConversationThreadId('feishu:default:oc_chat_1:bootstrap:om_msg_1')).toBeNull();
+  });
+
+  it('returns null for empty, missing, or malformed thread components', () => {
+    expect(deriveConversationThreadId(null)).toBeNull();
+    expect(deriveConversationThreadId(undefined)).toBeNull();
+    expect(deriveConversationThreadId('')).toBeNull();
+    expect(deriveConversationThreadId('feishu:default:oc_chat_1:thread:')).toBeNull();
+    // `:thread:` must be the anchored suffix, not a loose substring mid-key.
+    expect(deriveConversationThreadId('feishu:default:oc_chat_1:thread:t1:extra')).toBeNull();
   });
 });
 
