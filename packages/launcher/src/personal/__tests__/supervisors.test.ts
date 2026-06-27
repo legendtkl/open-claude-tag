@@ -1,0 +1,78 @@
+import { describe, expect, it } from 'vitest';
+import { missingBuildSentinels, buildServiceEnv } from '../supervisors.js';
+import type { PersonalConfig } from '../config.js';
+
+describe('buildServiceEnv', () => {
+  it('overlays the personal knobs on the effective env', () => {
+    const config = {
+      apiPort: 3210,
+      apiUrl: 'http://127.0.0.1:3210',
+      feishuAccess: 'disabled',
+    } as unknown as PersonalConfig;
+    const env = buildServiceEnv(config, { EXISTING: 'keep' }, 'postgres://db');
+    expect(env.EXISTING).toBe('keep');
+    expect(env.DATABASE_URL).toBe('postgres://db');
+    expect(env.PORT).toBe('3210');
+    expect(env.API_PORT).toBe('3210');
+    expect(env.API_URL).toBe('http://127.0.0.1:3210');
+    expect(env.OPEN_TAG_FEISHU_ACCESS).toBe('disabled');
+  });
+});
+
+describe('missingBuildSentinels', () => {
+  const repo = '/repo';
+
+  function deps(present: Set<string>, packages: Record<string, unknown>) {
+    return {
+      exists: (p: string) => present.has(p),
+      readDir: () => Object.keys(packages),
+      readFile: (p: string) => {
+        const name = p.split('/').slice(-2)[0];
+        return JSON.stringify(packages[name] ?? {});
+      },
+    };
+  }
+
+  it('returns empty when console + package dists are present', () => {
+    const present = new Set([
+      '/repo/apps/console/dist/index.html',
+      '/repo/packages/storage/package.json',
+      '/repo/packages/storage/dist/index.js',
+    ]);
+    const missing = missingBuildSentinels(
+      repo,
+      deps(present, { storage: { scripts: { build: 'tsc' }, main: './dist/index.js' } }),
+    );
+    expect(missing).toEqual([]);
+  });
+
+  it('flags a missing console dist', () => {
+    const present = new Set(['/repo/packages/storage/package.json', '/repo/packages/storage/dist/index.js']);
+    const missing = missingBuildSentinels(
+      repo,
+      deps(present, { storage: { scripts: { build: 'tsc' }, main: './dist/index.js' } }),
+    );
+    expect(missing).toContain('/repo/apps/console/dist/index.html');
+  });
+
+  it('flags a package whose dist main is missing', () => {
+    const present = new Set([
+      '/repo/apps/console/dist/index.html',
+      '/repo/packages/storage/package.json',
+    ]);
+    const missing = missingBuildSentinels(
+      repo,
+      deps(present, { storage: { scripts: { build: 'tsc' }, main: './dist/index.js' } }),
+    );
+    expect(missing).toContain('/repo/packages/storage/dist/index.js');
+  });
+
+  it('ignores packages without a build script or main', () => {
+    const present = new Set(['/repo/apps/console/dist/index.html', '/repo/packages/types/package.json']);
+    const missing = missingBuildSentinels(
+      repo,
+      deps(present, { types: { main: './dist/index.js' } }), // no build script
+    );
+    expect(missing).toEqual([]);
+  });
+});

@@ -45,6 +45,14 @@ function canAccessFile(filePath) {
   }
 }
 
+function resolveDbMode(raw) {
+  const value = (raw ?? '').trim();
+  if (value === 'docker' || value === 'external' || value === 'embedded') return value;
+  // Unknown/unset ⇒ embedded (the launcher default). `up` itself fail-closes on
+  // a genuinely invalid value; doctor stays informational and never crashes.
+  return 'embedded';
+}
+
 function statusLabel(kind) {
   if (kind === 'ok') return 'OK';
   if (kind === 'warn') return 'WARN';
@@ -56,6 +64,15 @@ function printResult(kind, title, detail) {
 }
 
 const env = readEnvFile(envPath);
+const dbMode = resolveDbMode(process.env.OPEN_TAG_DB_MODE ?? env.OPEN_TAG_DB_MODE);
+const dockerAvailable = hasCommand('docker') && dockerComposeAvailable();
+const pgPort = process.env.OPEN_TAG_PG_PORT ?? env.OPEN_TAG_PG_PORT ?? '5432';
+const pgDataDir =
+  process.env.OPEN_TAG_PG_DATA_DIR ??
+  env.OPEN_TAG_PG_DATA_DIR ??
+  path.join(homedir(), '.open-claude-tag', 'pgdata');
+const embeddedInitialized = existsSync(path.join(pgDataDir, 'PG_VERSION'));
+
 const checks = [
   {
     kind: process.version.startsWith('v20.') || parseInt(process.versions.node.split('.')[0], 10) > 20 ? 'ok' : 'warn',
@@ -77,13 +94,38 @@ const checks = [
       : 'Dependencies are not installed. Run `pnpm install` before bootstrap commands.',
   },
   {
-    kind: hasCommand('docker') && dockerComposeAvailable() ? 'ok' : 'fail',
-    title: 'Docker',
+    kind: 'ok',
+    title: 'Database mode',
     detail:
-      hasCommand('docker') && dockerComposeAvailable()
-        ? 'Docker and `docker compose` are available.'
-        : 'Docker or `docker compose` is missing.',
+      `OPEN_TAG_DB_MODE=${dbMode}.` +
+      (dbMode === 'embedded'
+        ? ' Zero-Docker: the launcher provisions an embedded Postgres.'
+        : dbMode === 'external'
+          ? ' Bring-your-own Postgres via DATABASE_URL.'
+          : ' Docker Compose Postgres.'),
   },
+  {
+    // Docker is a hard requirement ONLY for OPEN_TAG_DB_MODE=docker. In embedded
+    // or external mode it is a non-blocking note, never a FAIL.
+    kind: dbMode === 'docker' ? (dockerAvailable ? 'ok' : 'fail') : dockerAvailable ? 'ok' : 'warn',
+    title: 'Docker',
+    detail: dockerAvailable
+      ? 'Docker and `docker compose` are available.'
+      : dbMode === 'docker'
+        ? 'Docker or `docker compose` is missing (required for OPEN_TAG_DB_MODE=docker).'
+        : `Docker not detected — not required for OPEN_TAG_DB_MODE=${dbMode}.`,
+  },
+  ...(dbMode === 'embedded'
+    ? [
+        {
+          kind: embeddedInitialized ? 'ok' : 'warn',
+          title: 'Embedded Postgres',
+          detail: embeddedInitialized
+            ? `Initialized data dir ${pgDataDir} (port ${pgPort}).`
+            : `Not initialized yet; the first \`up\` will create ${pgDataDir} (port ${pgPort}). No Docker required.`,
+        },
+      ]
+    : []),
   {
     kind: existsSync(envPath) ? 'ok' : 'warn',
     title: '.env',
@@ -166,10 +208,17 @@ if (missingRequired.length > 0 && existsSync(envPath)) {
 if (!env.ANTHROPIC_AUTH_TOKEN && !canAccessFile(codexConfigPath)) {
   process.stdout.write('- Configure at least one runtime: set `ANTHROPIC_AUTH_TOKEN` in `.env` or create `~/.codex/config.toml`.\n');
 }
-if (failedChecks === 0) {
-  process.stdout.write('- Run `pnpm setup:local` to bootstrap Postgres, migrations, seed data, and build artifacts.\n');
+if (dbMode === 'docker') {
+  if (failedChecks === 0) {
+    process.stdout.write('- Run `pnpm setup:local` to bootstrap Postgres, migrations, seed data, and build artifacts.\n');
+  }
+  process.stdout.write('- Start the services with `pnpm start:local`.\n');
+} else {
+  process.stdout.write(
+    `- Boot the whole stack with one command (no Docker): \`node packages/launcher/dist/cli.js up\`.\n`,
+  );
+  process.stdout.write('- Stop it with `node packages/launcher/dist/cli.js down`.\n');
 }
-process.stdout.write('- Start the services with `pnpm start:local`.\n');
 process.stdout.write('- Verify the API with `curl http://localhost:3000/health`.\n');
 
 process.exit(failedChecks > 0 ? 1 : warningChecks > 0 ? 0 : 0);

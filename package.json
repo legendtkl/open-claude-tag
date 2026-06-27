@@ -7,6 +7,10 @@
   "engines": {
     "node": ">=20.0.0"
   },
+  "bin": {
+    "open-claude-tag": "packages/launcher/dist/cli.js",
+    "oct": "packages/launcher/dist/cli.js"
+  },
   "scripts": {
     "build": "pnpm -r run build",
     "dev": "pnpm -r --parallel run dev",
@@ -55,6 +59,9 @@
     "isolated:purge": "node tools/instance/run.mjs isolated-purge",
     "setup:local": "node tools/setup/local.mjs",
     "doctor:local": "node tools/setup/doctor.mjs",
+    "personal:up": "node packages/launcher/dist/cli.js up",
+    "personal:down": "node packages/launcher/dist/cli.js down",
+    "personal:status": "node packages/launcher/dist/cli.js status",
     "clean": "pnpm -r run clean && rm -rf node_modules",
     "lark:doctor": "lark-cli doctor",
     "lark:send": "lark-cli im +messages-send",

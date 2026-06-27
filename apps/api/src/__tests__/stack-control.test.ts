@@ -186,6 +186,73 @@ describe('stack-control', () => {
     expect(env.OPEN_TAG_WORKER_PID_PATH).toBe(config.workerPidPath);
   });
 
+  it('builds personal managed service env with a forced personal instance id', () => {
+    const env = buildManagedServiceEnv(
+      { ...config, instanceRole: 'personal' as InstanceRole },
+      {
+        OPEN_TAG_INSTANCE_ID: 'ambient-should-be-ignored',
+        DATABASE_URL: 'postgresql://u:p@127.0.0.1:5599/db',
+        PORT: '3210',
+        OPEN_TAG_FEISHU_ACCESS: 'disabled',
+      },
+    );
+
+    // Forced to "personal" — never inherits the ambient OPEN_TAG_INSTANCE_ID.
+    expect(env.OPEN_TAG_INSTANCE_ID).toBe('personal');
+    expect(env.OPEN_TAG_INSTANCE_ROLE).toBe('primary');
+    expect(env.OPEN_TAG_API_PID_PATH).toBe(config.apiPidPath);
+    expect(env.OPEN_TAG_WORKER_PID_PATH).toBe(config.workerPidPath);
+    // Launcher-supplied env is passed through unchanged.
+    expect(env.DATABASE_URL).toBe('postgresql://u:p@127.0.0.1:5599/db');
+    expect(env.PORT).toBe('3210');
+    expect(env.OPEN_TAG_FEISHU_ACCESS).toBe('disabled');
+  });
+
+  it('does not rogue-kill when starting the personal stack', async () => {
+    const personalConfig = { ...config, instanceRole: 'personal' as InstanceRole };
+    const alivePids = new Set<number>();
+    const execSyncMock = vi.fn(() => {
+      throw new Error('ps must not be consulted for personal');
+    });
+
+    const spawnMock = vi.fn((_command: string, args: string[]) => {
+      const service: ManagedService = args.includes('@open-tag/api') ? 'api' : 'worker';
+      const pid = service === 'api' ? 9301 : 9302;
+      const pidPath = service === 'api' ? personalConfig.apiPidPath : personalConfig.workerPidPath;
+      alivePids.add(pid);
+      mkdirSync(join(tempDir, 'runtime'), { recursive: true });
+      writeFileSync(
+        pidPath,
+        JSON.stringify({
+          service,
+          pid,
+          startedAt: Date.now(),
+          lastHeartbeatAt: Date.now(),
+          cwd: repoRoot,
+          instanceRole: 'primary',
+          instanceId: 'personal',
+        }),
+      );
+      return { pid, unref: vi.fn() };
+    });
+
+    await startStack({
+      config: personalConfig,
+      env: { API_URL: personalConfig.apiUrl },
+      deps: {
+        spawn: spawnMock,
+        execSync: execSyncMock,
+        isProcessAlive: (pid) => alivePids.has(pid),
+        fetch: async () => ({ ok: true }),
+      },
+      timeoutMs: 50,
+    });
+
+    expect(spawnMock).toHaveBeenCalledTimes(2);
+    // Rogue detection (ps) is skipped entirely for the personal role.
+    expect(execSyncMock).not.toHaveBeenCalled();
+  });
+
   it('rolls back a newly started api when worker registration fails', async () => {
     const alivePids = new Set<number>();
     const killMock = vi.fn((pid: number, signal?: NodeJS.Signals | number) => {

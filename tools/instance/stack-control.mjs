@@ -90,6 +90,22 @@ export function buildManagedServiceEnv(config, env = process.env) {
     return buildIsolatedEnv({ cwd: config.cwd, env });
   }
 
+  if (config.instanceRole === 'personal') {
+    // The personal launcher (packages/launcher) supplies a fully-formed env
+    // (DATABASE_URL, PORT, OPEN_TAG_FEISHU_ACCESS, …). The API has no dedicated
+    // "personal" role, so the spawned process runs as the user's primary stack,
+    // but the instance id is forced to "personal" — never inherited from the
+    // ambient env — so /health and pid registration are namespaced and can be
+    // verified by the launcher, and never collide with a `start:local` primary.
+    return {
+      ...env,
+      OPEN_TAG_INSTANCE_ROLE: 'primary',
+      OPEN_TAG_INSTANCE_ID: 'personal',
+      OPEN_TAG_API_PID_PATH: config.apiPidPath,
+      OPEN_TAG_WORKER_PID_PATH: config.workerPidPath,
+    };
+  }
+
   return {
     ...env,
     OPEN_TAG_INSTANCE_ROLE: 'primary',
@@ -391,10 +407,16 @@ export async function startStack(options) {
       cleanupPidFile(state.pidPath, ops);
     }
 
-    // Kill unmanaged (rogue) processes for this service before spawning
-    const excludePids = new Set([process.pid]);
-    if (state.record?.pid) excludePids.add(state.record.pid);
-    await killRogueProcesses(config, service, excludePids, ops);
+    // Kill unmanaged (rogue) processes for this service before spawning. The
+    // personal launcher opts out: its cwd is the shared repo root, so the
+    // cwd-scoped matcher could reap an unrelated isolated/primary worker. The
+    // personal stack relies on its own pid files + the already-running
+    // short-circuit instead, keeping the blast radius to processes it owns.
+    if (config.instanceRole !== 'personal') {
+      const excludePids = new Set([process.pid]);
+      if (state.record?.pid) excludePids.add(state.record.pid);
+      await killRogueProcesses(config, service, excludePids, ops);
+    }
 
     const launched = spawnService(config, service, env, ops);
 

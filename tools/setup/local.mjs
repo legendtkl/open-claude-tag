@@ -74,6 +74,15 @@ function dockerComposeAvailable() {
   return result.status === 0;
 }
 
+function resolveDbMode(raw) {
+  const value = (raw ?? '').trim();
+  // Unset defaults to docker HERE (not embedded): `setup:local` is the existing
+  // Docker bootstrap, kept backward-compatible. embedded/external defer to the
+  // launcher below. (doctor:local, by contrast, treats unset as embedded.)
+  if (value === 'embedded' || value === 'external') return value;
+  return 'docker';
+}
+
 function canAccessFile(filePath) {
   try {
     accessSync(filePath, constants.R_OK);
@@ -96,6 +105,16 @@ if (!hasCommand('pnpm')) {
 if (!existsSync(nodeModulesPath)) {
   process.stderr.write('Dependencies are not installed. Run `pnpm install` before `pnpm setup:local`.\n');
   process.exit(1);
+}
+
+const dbMode = resolveDbMode(process.env.OPEN_TAG_DB_MODE ?? envFromFile.OPEN_TAG_DB_MODE);
+if (dbMode === 'embedded' || dbMode === 'external') {
+  process.stdout.write(`OPEN_TAG_DB_MODE=${dbMode}: this mode does not use Docker.\n`);
+  process.stdout.write('Boot and manage the personal stack with the launcher instead:\n');
+  process.stdout.write('  node packages/launcher/dist/cli.js up      # provision DB, migrate + seed, build, start API + Worker + Console\n');
+  process.stdout.write('  node packages/launcher/dist/cli.js status\n');
+  process.stdout.write('  node packages/launcher/dist/cli.js down\n');
+  process.exit(0);
 }
 
 if (!hasCommand('docker') || !dockerComposeAvailable()) {
