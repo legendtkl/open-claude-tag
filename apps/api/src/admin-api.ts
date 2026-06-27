@@ -4284,22 +4284,51 @@ function tokenAdminMe(): MeDto {
 }
 
 /**
- * Loopback grants break-glass superadmin, so it must mean "the CLIENT is on
- * this machine" — not "the last hop was local". A same-host reverse proxy
- * (e.g. apps/console/serve-console.mjs) makes every external request arrive
- * from 127.0.0.1 at the socket level; such proxies set `x-forwarded-for`, and
- * we must honor it (found live: console visitors became superadmin).
- * Trust boundary: XFF is only consulted when the socket peer IS loopback
- * (set by a local proxy); a remote client connecting directly can forge XFF
- * but its socket address already fails the check, so the header never grants
- * anything it would not have had.
+ * Decide whether a request truly originates from the local host. This is the
+ * unspoofable trust anchor for break-glass superadmin (this guard) and the debug
+ * surface gate (server.ts), so both import this single implementation. The
+ * decision uses only values a remote client CANNOT forge:
+ *
+ *  1. The real TCP peer (`request.socket.remoteAddress`) must be loopback. With
+ *     Fastify `trustProxy` disabled this equals `request.ip`; reading the raw
+ *     socket keeps the gate correct even if `trustProxy` is ever enabled (which
+ *     would make `request.ip` itself header-derived and therefore spoofable).
+ *  2. A same-host reverse proxy (apps/console/serve-console.mjs) connects over
+ *     loopback, so the peer is loopback for EVERY external caller (found live:
+ *     console visitors became superadmin). We therefore additionally require the
+ *     proxy-appended `X-Forwarded-For` hop to be loopback. A standards-compliant
+ *     proxy APPENDS the immediate client it observed to the END of the chain (or
+ *     overwrites the whole header), so only the LAST hop is trustworthy; the
+ *     leftmost entries are client-supplied and forgeable (`X-Forwarded-For:
+ *     127.0.0.1, <real-client>` on an append-style proxy). Reading the FIRST hop
+ *     let a remote attacker spoof loopback and escalate.
+ *
+ * Contract: assumes a SINGLE trusted same-host proxy that appends or overwrites
+ * XFF. With multiple untrusted forwarding hops "last hop" is no longer
+ * unambiguous — such a topology must overwrite XFF at the edge or rely on
+ * `OPEN_TAG_ADMIN_TOKEN` instead. No XFF means a direct loopback connection (the
+ * documented local-curl workflow) and is trusted on the peer check alone. A
+ * malformed chain (any empty segment) or a non-loopback / hostname last hop is
+ * rejected fail-closed.
  */
-function isEffectivelyLoopback(request: FastifyRequest): boolean {
-  if (!isLoopbackAddress(request.ip)) return false;
+export function isEffectivelyLoopback(request: FastifyRequest): boolean {
+  if (!isLoopbackAddress(request.socket?.remoteAddress ?? undefined)) return false;
   const xff = request.headers['x-forwarded-for'];
   if (!xff) return true;
-  const first = (Array.isArray(xff) ? xff[0] : xff).split(',')[0]?.trim();
-  return isLoopbackAddress(first || undefined);
+  const hops = (Array.isArray(xff) ? xff.join(',') : xff).split(',').map((hop) => hop.trim());
+  // A genuine proxy never emits empty hops; treat a malformed chain as untrusted.
+  if (hops.some((hop) => hop.length === 0)) return false;
+  return isLoopbackForwardedHop(hops[hops.length - 1]);
+}
+
+/**
+ * Whether a single `X-Forwarded-For` hop is a loopback IP literal. Unlike
+ * `isLoopbackAddress`, the hostname `localhost` is intentionally rejected: a real
+ * proxy forwards an IP, never a name, and `localhost` is a value an attacker
+ * could inject into the header.
+ */
+function isLoopbackForwardedHop(hop: string): boolean {
+  return hop === '127.0.0.1' || hop === '::1' || hop === '::ffff:127.0.0.1';
 }
 
 export function isLoopbackAddress(ip: string | undefined): boolean {

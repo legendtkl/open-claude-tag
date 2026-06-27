@@ -138,7 +138,7 @@ import {
   shouldRunWorktreeRetentionCleanup,
 } from './worktree-retention-cleanup-service.js';
 import { MultiFeishuAppRuntime, type FeishuAppRuntimeContext } from './feishu-app-runtime.js';
-import { registerAdminApiRoutes, isLoopbackAddress } from './admin-api.js';
+import { registerAdminApiRoutes, isEffectivelyLoopback } from './admin-api.js';
 import { classifyFeishuTrackingIntent } from './feishu-tracking-intent.js';
 import { enrichEventWithCurrentMessageThread } from './current-message-thread-enrichment.js';
 import { enrichEventWithReferencedMessage } from './referenced-message-enrichment.js';
@@ -2817,21 +2817,14 @@ function isGatedDebugPath(url: string): boolean {
   return path === '/api/audit' || path.startsWith('/debug/');
 }
 
-// Effective loopback: the socket peer must be loopback AND, behind a same-host
-// reverse proxy (where request.ip is 127.0.0.1 for every caller), the first
-// X-Forwarded-For hop must also be loopback. Without the XFF check a proxied
-// remote attacker would read as loopback and the gate would be bypassable.
-function isEffectivelyLoopbackRequest(request: FastifyRequest): boolean {
-  if (!isLoopbackAddress(request.ip)) return false;
-  const xff = request.headers['x-forwarded-for'];
-  if (!xff) return true;
-  const first = (Array.isArray(xff) ? xff[0] : xff).split(',')[0]?.trim();
-  return isLoopbackAddress(first || undefined);
-}
-
+// The debug surface shares the admin guard's unspoofable loopback predicate
+// (`isEffectivelyLoopback`): the real TCP peer must be loopback and, behind a
+// same-host reverse proxy, the proxy-appended (last) X-Forwarded-For hop too.
+// Reading the first/client-controlled hop would let a proxied remote attacker
+// spoof loopback and reach this surface.
 app.addHook('onRequest', async (request, reply) => {
   if (!isGatedDebugPath(request.url)) return;
-  if (DEBUG_SURFACE_INSTANCE_ENABLED || isEffectivelyLoopbackRequest(request)) return;
+  if (DEBUG_SURFACE_INSTANCE_ENABLED || isEffectivelyLoopback(request)) return;
   reply.code(404).send({ error: 'not found' });
 });
 

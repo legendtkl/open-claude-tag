@@ -2728,6 +2728,82 @@ describe('admin guard identity resolution', () => {
 
     expect(response.statusCode).toBe(403);
   });
+
+  // The escalation this fix closes: an append-style same-host proxy keeps the
+  // attacker-supplied leftmost XFF hop, so forging `X-Forwarded-For: 127.0.0.1`
+  // must NOT grant break-glass superadmin. The trustworthy hop is the LAST one
+  // (the real client the proxy appended).
+  it('rejects an append-proxy spoof that forges a loopback first hop', async () => {
+    const app = Fastify({ logger: false });
+    registerAdminApiRoutes(app, { store: makeStore() });
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/admin/summary',
+      remoteAddress: '127.0.0.1',
+      headers: { 'x-forwarded-for': '127.0.0.1, 203.0.113.7' },
+    });
+
+    expect(response.statusCode).toBe(403);
+  });
+
+  it('rejects a multi-forged loopback prefix (only the appended last hop counts)', async () => {
+    const app = Fastify({ logger: false });
+    registerAdminApiRoutes(app, { store: makeStore() });
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/admin/summary',
+      remoteAddress: '127.0.0.1',
+      headers: { 'x-forwarded-for': '127.0.0.1, 127.0.0.1, 203.0.113.7' },
+    });
+
+    expect(response.statusCode).toBe(403);
+  });
+
+  it('grants loopback break-glass when the proxy-appended last hop is loopback', async () => {
+    // A genuinely local client behind the same-host proxy: the forged/earlier
+    // prefix is ignored, the proxy-observed immediate peer (last hop) is loopback.
+    const app = Fastify({ logger: false });
+    registerAdminApiRoutes(app, { store: makeStore() });
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/admin/summary',
+      remoteAddress: '127.0.0.1',
+      headers: { 'x-forwarded-for': '203.0.113.7, 127.0.0.1' },
+    });
+
+    expect(response.statusCode).toBe(200);
+  });
+
+  it('rejects a malformed XFF chain with empty segments (fail closed)', async () => {
+    const app = Fastify({ logger: false });
+    registerAdminApiRoutes(app, { store: makeStore() });
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/admin/summary',
+      remoteAddress: '127.0.0.1',
+      headers: { 'x-forwarded-for': '127.0.0.1, ' },
+    });
+
+    expect(response.statusCode).toBe(403);
+  });
+
+  it('rejects a "localhost" hostname in XFF (proxies forward IP literals, not names)', async () => {
+    const app = Fastify({ logger: false });
+    registerAdminApiRoutes(app, { store: makeStore() });
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/admin/summary',
+      remoteAddress: '127.0.0.1',
+      headers: { 'x-forwarded-for': 'localhost' },
+    });
+
+    expect(response.statusCode).toBe(403);
+  });
 });
 
 // In-memory platform_users fake supporting the calls the dev-auth guard makes:
