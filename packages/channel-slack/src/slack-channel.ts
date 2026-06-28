@@ -249,10 +249,15 @@ export class SlackChannel implements Channel {
       supportsStreamingEdit: true, // chat.update
       supportsThreads: true,
       supportsReactions: true,
-      supportsForms: true,
-      supportsApprovalButtons: true,
+      // Honest until the stage-6 Slack interactive work lands: form render is a
+      // read-only summary, not a submittable modal; there is no
+      // block_actions/view_submission endpoint, so buttons receive no callbacks;
+      // and uploadArtifact does not yet reach the thread, so result artifacts are
+      // not delivered as files.
+      supportsForms: false,
+      supportsApprovalButtons: false,
       supportsAttachmentsIn: ['image', 'file', 'audio'],
-      supportsAttachmentsOut: ['image', 'file'],
+      supportsAttachmentsOut: [],
       maxOutboundChars: 40000, // chat.postMessage text ~40k chars
       maxOutboundElements: 50, // Block Kit caps ~50 blocks per message
       maxUpdateRateHz: 1, // Slack chat.update ~1/s

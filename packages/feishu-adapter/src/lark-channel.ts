@@ -173,10 +173,14 @@ export class LarkChannel implements Channel {
       supportsStreamingEdit: true,
       supportsThreads: true,
       supportsReactions: true,
-      supportsForms: true,
+      // Honest: renderForm summarizes as plain text (no submittable form yet),
+      // and uploadArtifact throws "not implemented yet", so no files reach the
+      // thread. Approval buttons ARE genuinely wired (card.action.trigger
+      // callbacks), so that flag stays true.
+      supportsForms: false,
       supportsApprovalButtons: true,
       supportsAttachmentsIn: ['image', 'file', 'audio'],
-      supportsAttachmentsOut: ['image', 'file'],
+      supportsAttachmentsOut: [],
       maxOutboundChars: 30000,
       maxOutboundElements: 200,
       maxUpdateRateHz: 5,
