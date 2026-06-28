@@ -30,8 +30,8 @@ axis means implementing one contract, not forking the core:
   multi-workspace install, and Socket Mode still in progress. New channels implement the
   `Channel` contract in `packages/channel-core`.
 - **Runtime** — what executes the task. Claude Code (the default) and Codex are full
-  runtimes; Coco (TRAE CLI) auto-registers when its binary is present. New runtimes plug
-  into the descriptor-driven registry in `packages/runtime-adapters`.
+  runtimes. New runtimes plug into the descriptor-driven registry in
+  `packages/runtime-adapters`.
 
 It receives a chat message, routes work through an async task pipeline, executes the task
 through a runtime adapter, and reports progress back to the chat.
