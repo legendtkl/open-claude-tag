@@ -12,6 +12,7 @@ import {
   removeWorktree,
   removeWorktreeAtPath,
   resolveExternalProjectWorkspace,
+  resolveBaseBranch,
 } from '../worktree-manager.js';
 
 const execAsync = promisify(execCb);
@@ -25,8 +26,9 @@ describe('WorktreeManager', () => {
       'git init && git config user.email "test@test.com" && git config user.name "Test" && git commit --allow-empty -m "init"',
       { cwd: tempRepo },
     );
-    // Ensure we're on a branch called main
-    await execAsync('git branch -M main', { cwd: tempRepo });
+    // This repo's default branch is `master` — exercise that case so a
+    // hardcoded `main` base ref is caught (regression for #6).
+    await execAsync('git branch -M master', { cwd: tempRepo });
   });
 
   afterEach(async () => {
@@ -108,6 +110,71 @@ describe('WorktreeManager', () => {
     await removeWorktree('session-abc12345-rest', tempRepo);
     expect(existsSync(wt.worktreePath)).toBe(false);
   });
+});
+
+// ── resolveBaseBranch (regression for #6) ──
+
+describe('resolveBaseBranch', () => {
+  let repo: string;
+  let nonGit: string;
+
+  afterEach(async () => {
+    if (repo) await rm(repo, { recursive: true, force: true });
+    if (nonGit) await rm(nonGit, { recursive: true, force: true });
+  });
+
+  it('returns the current branch when origin/HEAD is unset', async () => {
+    repo = await mkdtemp(join(tmpdir(), 'rbb-cur-'));
+    await execAsync(
+      'git init && git config user.email "t@t.com" && git config user.name "T" && git commit --allow-empty -m init && git branch -M trunk',
+      { cwd: repo },
+    );
+    expect(await resolveBaseBranch(repo)).toBe('trunk');
+  });
+
+  it('prefers origin/HEAD and strips the origin/ prefix', async () => {
+    const originRepo = await mkdtemp(join(tmpdir(), 'rbb-origin-'));
+    repo = await mkdtemp(join(tmpdir(), 'rbb-clone-'));
+    try {
+      await execAsync(
+        'git init && git config user.email "t@t.com" && git config user.name "T" && git commit --allow-empty -m init && git branch -M develop',
+        { cwd: originRepo },
+      );
+      // Clone so origin/HEAD is populated, then verify detection.
+      await execAsync(`git clone "${originRepo}" "${repo}"`, { cwd: tmpdir() });
+      await execAsync('git remote set-head origin develop', { cwd: repo });
+      expect(await resolveBaseBranch(repo)).toBe('develop');
+    } finally {
+      await rm(originRepo, { recursive: true, force: true });
+    }
+  });
+
+  it('falls back to HEAD for a non-git directory', async () => {
+    nonGit = await mkdtemp(join(tmpdir(), 'rbb-nongit-'));
+    expect(await resolveBaseBranch(nonGit)).toBe('HEAD');
+  });
+});
+
+// ── createWorktree base branch matrix (regression for #6) ──
+
+describe('createWorktree base branch detection', () => {
+  for (const base of ['master', 'main', 'develop', 'trunk']) {
+    it(`creates a worktree when the default branch is ${base}`, async () => {
+      const repo = await mkdtemp(join(tmpdir(), `cw-${base}-`));
+      try {
+        await execAsync(
+          `git init && git config user.email "t@t.com" && git config user.name "T" && git commit --allow-empty -m init && git branch -M ${base}`,
+          { cwd: repo },
+        );
+        const wt = await createWorktree('session-base1234-x', repo);
+        expect(existsSync(wt.worktreePath)).toBe(true);
+        expect(wt.branchName).toBe('dev/base1234');
+      } finally {
+        await execAsync('git worktree prune', { cwd: repo }).catch(() => {});
+        await rm(repo, { recursive: true, force: true });
+      }
+    });
+  }
 });
 
 // ── removeWorktreeAtPath ──

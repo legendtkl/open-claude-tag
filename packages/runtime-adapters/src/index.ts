@@ -57,6 +57,7 @@ export {
   removeWorktreeAtPath,
   bootstrapWorktree,
   resolveExternalProjectWorkspace,
+  resolveBaseBranch,
 } from './worktree-manager.js';
 export type { WorktreeInfo, PersistWorkspaceFn } from './worktree-manager.js';
 export { runWorktreeHook } from './worktree-hooks.js';
