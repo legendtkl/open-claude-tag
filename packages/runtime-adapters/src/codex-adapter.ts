@@ -119,8 +119,7 @@ export class CodexAdapter implements RuntimeAdapter {
     const taskMdPath = join(workspace.workspacePath, 'TASK.md');
     await writeFile(
       taskMdPath,
-      `# Task: ${spec.goal}\n\nType: ${spec.taskType}\nSession: ${spec.sessionId}\n` +
-        `\nPlace any deliverable files you want surfaced as task artifacts under: ${workspace.artifactsDir}\n`,
+      `# Task: ${spec.goal}\n\nType: ${spec.taskType}\nSession: ${spec.sessionId}\n`,
     );
     const imagePaths = await downloadImageAttachmentsToWorkspace({
       spec,
