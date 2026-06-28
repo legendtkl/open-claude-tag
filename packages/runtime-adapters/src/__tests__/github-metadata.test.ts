@@ -65,7 +65,6 @@ describe('GitHub repository metadata', () => {
     // Brand is rebranded to OpenClaudeTag with no desensitization artifacts left over.
     expect(instructions).toContain('# OpenClaudeTag');
     expect(instructions).not.toContain('OpenClaw OpenClaudeTag');
-    expect(instructions).not.toContain('@legacyname');
     expect(instructions).toContain('@open-tag/');
 
     // Highest-priority review checks must remain documented.

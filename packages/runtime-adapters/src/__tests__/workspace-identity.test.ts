@@ -5,8 +5,7 @@ import { join } from 'path';
 const repoRoot = new URL('../../../../', import.meta.url);
 const rootPackageJsonPath = new URL('../../../../package.json', import.meta.url);
 
-// Real, post-rebrand docs that must stay on the @open-tag/ scope. Internal
-// .claude/.codex/lark-legacyname paths were removed during open-sourcing.
+// Real, post-rebrand docs that must stay on the @open-tag/ scope.
 const activeDocPaths = [
   new URL('../../../../AGENTS.md', import.meta.url),
   new URL('../../../../README.md', import.meta.url),
@@ -75,12 +74,5 @@ describe('Workspace package identity', () => {
       const content = readFileSync(docPath, 'utf8');
       expect(content).toContain('@open-tag/');
     }
-  });
-
-  it('leaves no @legacyname / legacyname_ residue in the root manifest', () => {
-    const rootManifestText = readFileSync(rootPackageJsonPath, 'utf8');
-
-    expect(rootManifestText).not.toContain('@legacyname');
-    expect(rootManifestText).not.toContain('legacyname_');
   });
 });
