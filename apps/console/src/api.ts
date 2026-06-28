@@ -611,41 +611,6 @@ export async function disconnectMachine(id: string): Promise<Machine> {
   });
 }
 
-export async function createProfile(input: {
-  name: string;
-  displayName: string;
-  description?: string | null;
-  systemPrompt?: string | null;
-  stylePrompt?: string | null;
-  skillRefs?: string[];
-  defaultRuntime?: string | null;
-  defaultModel?: string | null;
-}): Promise<Profile> {
-  return requestJson<Profile>('/admin/profiles', {
-    method: 'POST',
-    body: JSON.stringify(input),
-  });
-}
-
-export async function updateProfile(
-  id: string,
-  input: {
-    displayName?: string;
-    description?: string | null;
-    systemPrompt?: string | null;
-    stylePrompt?: string | null;
-    skillRefs?: string[];
-    defaultRuntime?: string | null;
-    defaultModel?: string | null;
-    status?: string;
-  },
-): Promise<Profile> {
-  return requestJson<Profile>(`/admin/profiles/${encodeURIComponent(id)}`, {
-    method: 'PATCH',
-    body: JSON.stringify(input),
-  });
-}
-
 export async function createAgent(input: {
   // The internal handle is derived from displayName server-side; the console
   // only collects a single user-facing name.
