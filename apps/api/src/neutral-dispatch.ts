@@ -223,9 +223,14 @@ async function sendNeutralAck(
 
 /**
  * Dispatch a neutral inbound message: resolve the session, create the task with a
- * deterministic id, move it to QUEUED, enqueue (the durable boundary), then ACK
- * best-effort. Returns the orchestrator outcome so the caller can observe whether
- * a task was created. See the module header for the failure contract.
+ * deterministic id, move it to QUEUED, send a best-effort ACK (only on
+ * `task_created`, capturing its message handle), then enqueue the durable job with
+ * that handle. The ACK precedes the enqueue — see the module header (ADR-0008) —
+ * so its handle rides in the job payload (`constraints.ackDelivery`) for the
+ * worker's in-place terminal update; an enqueue failure after the ACK propagates
+ * so the caller keeps the dedup claim open, and the recovery redelivery
+ * re-enqueues idempotently without re-ACKing. Returns the orchestrator outcome so
+ * the caller can observe whether a task was created.
  */
 export async function dispatchNeutralMessage(
   message: InboundMessage,
