@@ -1388,14 +1388,13 @@ describe('ClaudeCodeAdapter', () => {
         const events: RuntimeEvent[] = [];
         for await (const event of adapter.execute(handle, spec)) events.push(event);
 
-        const artifactNames = events
-          .filter((e) => e.type === 'artifact')
-          .map((e) => (e as any).ref.name);
-        expect(artifactNames).toEqual(['deliverable.txt']);
-        const artifactPaths = events
-          .filter((e) => e.type === 'artifact')
-          .map((e) => (e as any).ref.path);
-        expect(artifactPaths).toEqual([join(workspace.artifactsDir, 'deliverable.txt')]);
+        const artifactRefs = events
+          .filter((e): e is Extract<RuntimeEvent, { type: 'artifact' }> => e.type === 'artifact')
+          .map((e) => e.ref);
+        expect(artifactRefs.map((r) => r.name)).toEqual(['deliverable.txt']);
+        expect(artifactRefs.map((r) => r.path)).toEqual([
+          join(workspace.artifactsDir, 'deliverable.txt'),
+        ]);
       } finally {
         await cleanupWorkspace(runId).catch(() => {});
       }
