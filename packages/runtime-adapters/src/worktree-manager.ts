@@ -3,7 +3,7 @@ import { copyFile, stat, unlink } from 'fs/promises';
 import { createHash } from 'crypto';
 import { promisify } from 'util';
 import { existsSync } from 'fs';
-import { join } from 'path';
+import { basename, join } from 'path';
 import { createLogger } from '@open-tag/observability';
 import { runWorktreeHook } from './worktree-hooks.js';
 
@@ -215,7 +215,7 @@ export async function removeWorktreeAtPath(
   if (existsSync(worktreePath)) {
     // Derive a session hint from the worktree dir name (`dev-<slug>`) so
     // hook scripts get a stable SESSION_ID env var without changing the API.
-    const baseName = worktreePath.split('/').pop() ?? '';
+    const baseName = basename(worktreePath);
     const sessionHint = baseName.replace(/^dev-/, '');
     await runWorktreeHook('post', {
       sourceRoot: projectRoot,

@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mkdtemp, rm, writeFile, readFile, mkdir } from 'fs/promises';
 import { existsSync } from 'fs';
-import { join } from 'path';
+import { basename, join } from 'path';
 import { tmpdir } from 'os';
 import { exec as execCb } from 'child_process';
 import { promisify } from 'util';
@@ -61,7 +61,7 @@ describe('WorktreeManager', () => {
     expect(wt.worktreePath).toContain('dev-abc12345-');
     // Invariant the cleanup orphan branch-guess relies on: branch === 'dev/' +
     // worktree dir basename with the leading 'dev-' stripped.
-    const dir = wt.worktreePath.split('/').pop()!;
+    const dir = basename(wt.worktreePath);
     expect(wt.branchName).toBe(`dev/${dir.replace(/^dev-/, '')}`);
 
     const { stdout } = await execAsync('git worktree list', {
@@ -132,7 +132,7 @@ describe('WorktreeManager', () => {
     // The sibling worktree and its branch survive the removal.
     expect(existsSync(b.worktreePath)).toBe(true);
     const { stdout } = await execAsync('git branch', { cwd: tempRepo });
-    expect(stdout).toContain(b.branchName.replace(/^dev\//, 'dev/'));
+    expect(stdout).toContain(b.branchName);
   });
 
   it('derives a deterministic, idempotent slug from the full id', async () => {
