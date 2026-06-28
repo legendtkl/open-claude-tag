@@ -5,6 +5,7 @@ import {
   TaskSpecSchema,
   TaskResultSchema,
   RuntimeEventSchema,
+  RuntimeBackendSchema,
   MemoryItemSchema,
   AgentProfileSchema,
   AgentSchema,
@@ -14,7 +15,7 @@ import {
   AgentDelegationSchema,
   DelegationTreeSchema,
 } from '../schemas.js';
-import { TaskStatus } from '../enums.js';
+import { TaskStatus, RuntimeBackend, KNOWN_RUNTIME_NAMES } from '../enums.js';
 import { randomUUID } from 'crypto';
 
 describe('NormalizedEventSchema', () => {
@@ -406,6 +407,26 @@ describe('RuntimeEventSchema', () => {
     });
 
     expect((event as any).reason).toBe('cancelled');
+  });
+});
+
+describe('Runtime name single source of truth (#16)', () => {
+  it('RuntimeBackendSchema enumerates exactly KNOWN_RUNTIME_NAMES, in order', () => {
+    expect(RuntimeBackendSchema.options).toEqual([...KNOWN_RUNTIME_NAMES]);
+  });
+
+  it('RuntimeBackend enum values stay in lockstep with KNOWN_RUNTIME_NAMES', () => {
+    expect(Object.values(RuntimeBackend)).toEqual([...KNOWN_RUNTIME_NAMES]);
+  });
+
+  it('TaskSpecSchema.runtimeHint accepts every known name plus auto', () => {
+    for (const name of [...KNOWN_RUNTIME_NAMES, 'auto']) {
+      expect(TaskSpecSchema.shape.runtimeHint.parse(name)).toBe(name);
+    }
+  });
+
+  it('TaskSpecSchema.runtimeHint rejects an unknown runtime', () => {
+    expect(() => TaskSpecSchema.shape.runtimeHint.parse('foo')).toThrow();
   });
 });
 

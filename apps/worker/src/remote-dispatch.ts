@@ -2,7 +2,7 @@ import { and, eq, inArray } from 'drizzle-orm';
 import type { Database } from '@open-tag/storage';
 import { agents, machines, sessions, chatConfigs, agentSessionStates } from '@open-tag/storage';
 import type { Logger } from '@open-tag/observability';
-import type { TaskSpec } from '@open-tag/core-types';
+import type { TaskSpec, RuntimeName } from '@open-tag/core-types';
 import { collectTaskImageAttachments } from '@open-tag/runtime-adapters';
 import {
   DAEMON_FEATURE_AGENT_HOME,
@@ -247,7 +247,7 @@ export function isMachineSwitch(
 export interface BuildRemoteAdapterInput {
   gateway: GatewayDispatchPort;
   machine: MachineRow;
-  runtime: 'claude_code' | 'codex';
+  runtime: RuntimeName;
   workdirHints: WorkdirHints;
   runtimeEnv?: Record<string, string>;
   taskSpec: TaskSpec;

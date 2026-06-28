@@ -8,6 +8,7 @@ import {
   PROTOCOL_VERSION,
   type Capabilities,
 } from '@open-tag/daemon-protocol';
+import type { RuntimeName } from '@open-tag/core-types';
 import { DAEMON_VERSION } from './version.js';
 
 /**
@@ -275,7 +276,10 @@ export function detectCodexBinary(
  */
 export function probeCapabilities(options: CapabilitiesProbeOptions = {}): Capabilities {
   const env = options.env ?? process.env;
-  const runtimes: Capabilities['runtimes'] = [];
+  // Typed against the runtime-name SoT (issue #16): renaming/removing a runtime
+  // there breaks this probe at compile time so the daemon can never advertise a
+  // name the platform no longer recognizes.
+  const runtimes: RuntimeName[] = [];
 
   // claude_code is always available on the daemon: the Agent SDK ships with the
   // daemon, and local `claude` login state or per-agent BASE_URL/API_KEY are

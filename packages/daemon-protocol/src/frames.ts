@@ -1,5 +1,11 @@
 import { z } from 'zod';
-import { TaskSpecSchema, RuntimeEventSchema, ArtifactRefSchema } from '@open-tag/core-types';
+import {
+  TaskSpecSchema,
+  RuntimeEventSchema,
+  ArtifactRefSchema,
+  KNOWN_RUNTIME_NAMES,
+  type RuntimeName,
+} from '@open-tag/core-types';
 
 /**
  * Wire protocol frame schemas (design §6, decision D4).
@@ -45,8 +51,11 @@ export const DaemonFeatureSchema = z.enum([
   DAEMON_FEATURE_AGENT_HOME,
 ]);
 
-/** Runtimes this server recognizes when validating a daemon's advertisement. */
-const KNOWN_RUNTIMES = ['claude_code', 'codex'] as const;
+/**
+ * Runtimes this server recognizes when validating a daemon's advertisement.
+ * Sourced from the single runtime-name SoT in core-types (issue #16).
+ */
+const KNOWN_RUNTIMES = KNOWN_RUNTIME_NAMES;
 
 /** Machine capabilities advertised on `hello` and at pairing. */
 export const CapabilitiesSchema = z.object({
@@ -58,7 +67,7 @@ export const CapabilitiesSchema = z.object({
     .array(z.string())
     .default([])
     .transform((rs) =>
-      rs.filter((r): r is (typeof KNOWN_RUNTIMES)[number] =>
+      rs.filter((r): r is RuntimeName =>
         (KNOWN_RUNTIMES as readonly string[]).includes(r),
       ),
     ),
@@ -96,7 +105,7 @@ export const InlineImageSchema = z.object({
   base64: z.string(),
 });
 
-const RuntimeBackendSchema = z.enum(['claude_code', 'codex']);
+const RuntimeBackendSchema = z.enum(KNOWN_RUNTIME_NAMES);
 const DispatchModeSchema = z.enum(['prepare_execute', 'resume']);
 
 /** Reasons a server may reject a daemon at `hello` time. */

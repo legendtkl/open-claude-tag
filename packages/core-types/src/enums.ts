@@ -9,6 +9,28 @@ export enum TaskStatus {
   CANCELLED = 'cancelled',
 }
 
+/**
+ * Single source of truth for the set of runtime backend NAMES the platform
+ * recognizes. Every schema/enum/type that enumerates runtimes derives from this
+ * const, so adding a runtime is centralized here instead of editing the same
+ * literal across ~10 files (issue #16). (The `RuntimeBackend` enum mirror below
+ * must also be updated to stay in lockstep — a unit test enforces that.)
+ *
+ * Zod-free on purpose: this is the lowest layer every package can import without
+ * pulling in zod. NOTE: these are the PERSISTED runtime NAMES (underscore form,
+ * e.g. `claude_code`). A runtime descriptor's `id` (hyphen form, e.g.
+ * `claude-code`) is a SEPARATE concept and must NOT be conflated with a name.
+ */
+export const KNOWN_RUNTIME_NAMES = ['claude_code', 'codex'] as const;
+
+/** A recognized runtime backend name (member of {@link KNOWN_RUNTIME_NAMES}). */
+export type RuntimeName = (typeof KNOWN_RUNTIME_NAMES)[number];
+
+/**
+ * Enum mirror of {@link KNOWN_RUNTIME_NAMES} retained for existing consumers.
+ * Its values MUST stay in lockstep with `KNOWN_RUNTIME_NAMES` — a unit test
+ * asserts `Object.values(RuntimeBackend)` deep-equals `[...KNOWN_RUNTIME_NAMES]`.
+ */
 export enum RuntimeBackend {
   CLAUDE_CODE = 'claude_code',
   CODEX = 'codex',

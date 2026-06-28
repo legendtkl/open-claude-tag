@@ -7,6 +7,7 @@ import {
 } from '../runtime-descriptors.js';
 import { buildRuntimeManager } from '../runtime-manager.js';
 import type { RuntimeAdapter, RuntimeDescriptor } from '../types.js';
+import { KNOWN_RUNTIME_NAMES } from '@open-tag/core-types';
 
 describe('RuntimeDescriptor — per-adapter capabilities', () => {
   it('Claude Code: full-capability descriptor', () => {
@@ -83,6 +84,24 @@ describe('persisted name() vs open descriptor().id are deliberately distinct', (
     expect(getRuntimeDescriptor('constructor')).toBeUndefined();
     expect(getRuntimeDescriptor('hasOwnProperty')).toBeUndefined();
     expect(Object.keys(RUNTIME_DESCRIPTORS_BY_NAME)).toEqual(['claude_code', 'codex']);
+  });
+});
+
+describe('descriptor registry ↔ runtime-name SoT lockstep (#16)', () => {
+  it('RUNTIME_DESCRIPTORS_BY_NAME keys deep-equal KNOWN_RUNTIME_NAMES', () => {
+    // The SoT is the NAME list (underscore form). A descriptor must exist for
+    // every known name and no extra descriptors may leak in. This guards against
+    // a runtime being added to core-types' KNOWN_RUNTIME_NAMES without a matching
+    // descriptor (or vice versa).
+    expect(Object.keys(RUNTIME_DESCRIPTORS_BY_NAME)).toEqual([...KNOWN_RUNTIME_NAMES]);
+  });
+
+  it('keeps descriptor id (open, hyphen form) distinct from the persisted name', () => {
+    // The SoT is the name list, NOT the descriptor id — they must not be
+    // conflated. claude_code (name) ↔ claude-code (id) is the canonical example.
+    expect(RUNTIME_DESCRIPTORS_BY_NAME.claude_code.id).toBe('claude-code');
+    expect(RUNTIME_DESCRIPTORS_BY_NAME.claude_code.id).not.toBe('claude_code');
+    expect((KNOWN_RUNTIME_NAMES as readonly string[]).includes('claude-code')).toBe(false);
   });
 });
 

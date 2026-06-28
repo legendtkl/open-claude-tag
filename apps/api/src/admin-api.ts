@@ -8,7 +8,7 @@ import { and, asc, desc, eq, inArray, or, sql, type SQL } from 'drizzle-orm';
 import { z } from 'zod';
 import { registerApp as registerOneClickFeishuApp } from '@larksuiteoapi/node-sdk';
 import { FeishuClient, type FeishuApplicationScopeGrant } from '@open-tag/feishu-adapter';
-import { errorMessage } from '@open-tag/core-types';
+import { errorMessage, KNOWN_RUNTIME_NAMES } from '@open-tag/core-types';
 import {
   agentBotBindings,
   agentProfiles,
@@ -74,7 +74,10 @@ export const SUPERADMIN_SCOPE: OwnerScope = {
   computerAccessEnabled: true,
 };
 
-const RuntimeSchema = z.enum(['codex', 'claude_code']);
+// Membership sourced from the single runtime-name SoT (issue #16). This is a
+// pure validator for the optional `defaultRuntime` field, so enum order is not
+// behaviorally significant.
+const RuntimeSchema = z.enum(KNOWN_RUNTIME_NAMES);
 const NullableRuntimeSchema = RuntimeSchema.nullable();
 const RuntimeEnvKeySchema = z
   .string()

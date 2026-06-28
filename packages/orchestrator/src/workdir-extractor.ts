@@ -1,8 +1,11 @@
 import type { LlmClient } from '@open-tag/llm-client';
+import type { RuntimeName } from '@open-tag/core-types';
 import { resolve } from 'path';
 import { homedir } from 'os';
 
-export type RuntimeName = 'claude_code' | 'codex';
+// Re-export the single runtime-name SoT (issue #16) so existing consumers that
+// import `RuntimeName` from this module / `@open-tag/orchestrator` keep working.
+export type { RuntimeName };
 
 export interface WorkDirExtraction {
   /** Absolute or relative path, null if not detected */

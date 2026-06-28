@@ -2,6 +2,7 @@
 export {
   TaskStatus,
   RuntimeBackend,
+  KNOWN_RUNTIME_NAMES,
   SessionStatus,
   SessionScope,
   MessageRole,
@@ -18,6 +19,7 @@ export {
   InboundEventStatus,
   RuntimeMode,
 } from './enums.js';
+export type { RuntimeName } from './enums.js';
 
 // Utilities
 export { errorMessage } from './errors.js';
@@ -44,6 +46,7 @@ export {
   TaskSpecSchema,
   TaskResultSchema,
   TaskConstraintsSchema,
+  RuntimeBackendSchema,
   ArtifactRefSchema,
   RuntimeEventSchema,
   PlanStepSchema,
