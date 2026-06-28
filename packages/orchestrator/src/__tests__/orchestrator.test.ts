@@ -285,6 +285,42 @@ describe('handleEvent: task creation metadata', () => {
     expect(db._getMocks().mockSelect).toHaveBeenCalled();
   });
 
+  // Regression for #12: a row created before the auto->null normalization stored
+  // the legacy literal 'auto'. A redelivery after the change recomputes
+  // runtimeHint=null; the duplicate match must normalize both sides so recovery
+  // still yields task_duplicate instead of throwing Task id conflict.
+  it('treats a legacy auto runtimeHint row as a duplicate of the now-null hint', async () => {
+    const event = makeEvent({ content: { type: 'text', text: 'hello legacy auto', raw: {} } });
+    const db = createMockDb({
+      createdRows: [],
+      existingRows: [
+        {
+          id: 'task_legacy_auto',
+          sessionId: 'session_1',
+          agentId: null,
+          feishuAppId: null,
+          taskType: IntentType.CHAT_REPLY,
+          goal: 'hello legacy auto',
+          runtimeHint: 'auto', // legacy encoding persisted before #12
+          status: TaskStatus.PENDING,
+          constraints: {
+            timeoutSec: 1800,
+            approvalRequired: false,
+            tenantKey: 'tenant_1',
+            chatId: 'chat_1',
+            userMessageId: 'msg_1',
+            requesterOpenId: 'user_1',
+          },
+        },
+      ],
+    });
+
+    const result = await dispatch(db, event, 'session_1', { taskId: 'task_legacy_auto' });
+
+    expect(result.type).toBe('task_duplicate');
+    expect(result.taskId).toBe('task_legacy_auto');
+  });
+
   it('matches duplicate explicit task constraints regardless of JSON object key order', async () => {
     const event = makeEvent({
       content: {
