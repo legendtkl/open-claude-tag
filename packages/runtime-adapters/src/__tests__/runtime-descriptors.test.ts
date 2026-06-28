@@ -1,7 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { ClaudeCodeAdapter, CLAUDE_CODE_DESCRIPTOR } from '../claude-code-adapter.js';
 import { CodexAdapter, CODEX_DESCRIPTOR } from '../codex-adapter.js';
-import { CocoAdapter, COCO_DESCRIPTOR } from '../coco-adapter.js';
 import {
   RUNTIME_DESCRIPTORS_BY_NAME,
   getRuntimeDescriptor,
@@ -53,20 +52,6 @@ describe('RuntimeDescriptor — per-adapter capabilities', () => {
     expect(d.credentialEnv).toEqual(['CODEX_API_KEY', 'OPENAI_API_KEY']);
     expect(d.workflowPrompts?.selfDev).toBe('self-dev-codex');
   });
-
-  it('Coco: full-access --yolo, no credential env', () => {
-    const adapter = new CocoAdapter();
-    const d = adapter.descriptor();
-    expect(d).toBe(COCO_DESCRIPTOR);
-    expect(d.id).toBe('coco');
-    expect(d.capabilities.resume).toBe(true);
-    expect(d.capabilities.enforcesReadOnly).toBe(false);
-    expect(d.capabilities.interactivePermission).toBe(false);
-    expect(d.capabilities.sandboxModes).toEqual(['danger-full-access']);
-    expect(d.capabilities.imageInput).toBe('local-path');
-    expect(d.credentialEnv).toEqual([]);
-    expect(d.workflowPrompts?.selfDev).toBe('self-dev-coco');
-  });
 });
 
 describe('persisted name() vs open descriptor().id are deliberately distinct', () => {
@@ -81,17 +66,14 @@ describe('persisted name() vs open descriptor().id are deliberately distinct', (
     expect(adapter.name()).not.toBe(adapter.descriptor().id);
   });
 
-  it('Codex / Coco: name() and id coincide (no underscore to translate)', () => {
+  it('Codex: name() and id coincide (no underscore to translate)', () => {
     expect(new CodexAdapter().name()).toBe('codex');
     expect(new CodexAdapter().descriptor().id).toBe('codex');
-    expect(new CocoAdapter().name()).toBe('coco');
-    expect(new CocoAdapter().descriptor().id).toBe('coco');
   });
 
   it('descriptor lookup is keyed by the persisted name, not the open id', () => {
     expect(getRuntimeDescriptor('claude_code')).toBe(CLAUDE_CODE_DESCRIPTOR);
     expect(getRuntimeDescriptor('codex')).toBe(CODEX_DESCRIPTOR);
-    expect(getRuntimeDescriptor('coco')).toBe(COCO_DESCRIPTOR);
     // The open id is NOT a valid lookup key — only the persisted name resolves.
     expect(getRuntimeDescriptor('claude-code')).toBeUndefined();
     expect(getRuntimeDescriptor('unknown')).toBeUndefined();
@@ -100,7 +82,7 @@ describe('persisted name() vs open descriptor().id are deliberately distinct', (
     expect(getRuntimeDescriptor('toString')).toBeUndefined();
     expect(getRuntimeDescriptor('constructor')).toBeUndefined();
     expect(getRuntimeDescriptor('hasOwnProperty')).toBeUndefined();
-    expect(Object.keys(RUNTIME_DESCRIPTORS_BY_NAME)).toEqual(['claude_code', 'codex', 'coco']);
+    expect(Object.keys(RUNTIME_DESCRIPTORS_BY_NAME)).toEqual(['claude_code', 'codex']);
   });
 });
 
@@ -160,8 +142,7 @@ describe('buildRuntimeManager — data-driven registration', () => {
     const manager = buildRuntimeManager([
       { isAvailable: () => true, create: () => fakeAdapter('claude_code') },
       { isAvailable: () => true, create: () => fakeAdapter('codex') },
-      { isAvailable: () => true, create: () => fakeAdapter('coco') },
     ]);
-    expect(manager.listAdapters()).toEqual(['claude_code', 'codex', 'coco']);
+    expect(manager.listAdapters()).toEqual(['claude_code', 'codex']);
   });
 });

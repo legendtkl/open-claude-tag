@@ -22,7 +22,7 @@ export interface PromptMetadataDecision {
 // Validate against the data-driven runtime registry (the `name()` keys) rather
 // than a hardcoded literal list, so a runtime added to the registry is accepted
 // as a hint/backend/default with no change here. The persisted `name()` keys
-// (`claude_code` underscore, `codex`, `coco`) ARE the registry keys, so this is
+// (`claude_code` underscore, `codex`) ARE the registry keys, so this is
 // behavior-equivalent to the previous explicit set.
 function isRuntimeName(value: string | null | undefined): value is RuntimeName {
   return value != null && getRuntimeDescriptor(value) !== undefined;

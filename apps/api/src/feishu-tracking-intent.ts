@@ -20,9 +20,15 @@ const MAX_MESSAGE_CHARS = 1000;
 const MAX_RECENT_MESSAGES = 5;
 const MAX_TITLE_CHARS = 120;
 
+// Work/deliverable verbs used by the no-LLM tracking fallback. The
+// analysis/explanation/research vocabulary (explain/why/architecture/design/
+// review/performance/原理/文档/…) is retained here on purpose: messages that the
+// removed keyword intent classifier used to force-track as ANALYSIS/RESEARCH now
+// flow through this fallback, so the fallback must still recognize them when no
+// LLM is available.
 const WORK_KEYWORD_PATTERNS = [
-  /创建|新建|写入|写一个|实现|修复|解决|排查|调试|改造|修改|更新|增加|添加|删除|移除|重构|迁移|部署|运行|执行|测试|验证|生成|整理|总结|分析|调研|调查|研究|对比|评估|查找|搜索|提交/,
-  /\b(create|write|implement|fix|solve|debug|investigate|modify|update|add|remove|delete|refactor|migrate|deploy|run|execute|test|verify|generate|organize|summarize|analyze|research|compare|evaluate|find|search|submit)\b/i,
+  /创建|新建|写入|写一个|实现|修复|解决|排查|调试|改造|修改|更新|增加|添加|删除|移除|重构|迁移|部署|运行|执行|测试|验证|生成|整理|总结|分析|调研|调查|研究|对比|评估|查找|搜索|提交|解释|架构|设计|为什么|原理|性能|瓶颈|代码审查|审查|文档/,
+  /\b(create|write|implement|fix|solve|debug|investigate|modify|update|add|remove|delete|refactor|migrate|deploy|run|execute|test|verify|generate|organize|summarize|analyze|research|compare|evaluate|find|search|submit|explain|why|architecture|design|rationale|performance|bottleneck|review|document)\b/i,
 ];
 
 const CHAT_ONLY_PATTERNS = [

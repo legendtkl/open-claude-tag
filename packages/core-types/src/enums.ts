@@ -12,7 +12,6 @@ export enum TaskStatus {
 export enum RuntimeBackend {
   CLAUDE_CODE = 'claude_code',
   CODEX = 'codex',
-  COCO = 'coco',
 }
 
 export enum SessionStatus {

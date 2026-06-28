@@ -100,7 +100,7 @@ function makeEvent(overrides: Partial<NormalizedEvent> = {}): NormalizedEvent {
 // Representative inbound matrix at the NormalizedEvent layer the seam recovers.
 const CASES: Array<{ name: string; event: NormalizedEvent }> = [
   {
-    name: '@mention dispatching an analysis task',
+    name: '@mention dispatching a chat_reply task',
     event: makeEvent({
       content: {
         type: 'text',
@@ -217,7 +217,9 @@ describe('inbound dispatch seam — dispatch outcome is identical for original v
 });
 
 describe('inbound dispatch seam — pinned dispatch shapes (today\'s behavior)', () => {
-  it('@mention analysis task: pins task type, auto runtime, and goal', async () => {
+  it('@mention task: pins chat_reply task type, auto runtime, and goal', async () => {
+    // After the keyword intent classifier was removed, every non-ops inbound
+    // message pins `chat_reply` (the runtime decides its own approach).
     const event = CASES[0].event;
     const db = createMockDb();
     const result = await dispatch(db, event, 'session-seam', {
@@ -231,7 +233,7 @@ describe('inbound dispatch seam — pinned dispatch shapes (today\'s behavior)',
       sessionId: 'session-seam',
       agentId: 'agent_seam',
       feishuAppId: 'app_seam',
-      taskType: IntentType.ANALYSIS,
+      taskType: IntentType.CHAT_REPLY,
       goal: '写一个排序函数并解释思路设计取舍',
       runtimeHint: null,
       constraints: {

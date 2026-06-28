@@ -81,10 +81,8 @@ import {
   incrementMessageCount,
 } from '@open-tag/session';
 import {
-  classifyIntent,
   createMentionRoutingMemo,
   handleEvent,
-  selectRuntime,
   TaskLifecycleService,
   transitionTask,
 } from '@open-tag/orchestrator';
@@ -1889,8 +1887,10 @@ async function handleDocumentCommentEvent(
       },
     });
 
-    const taskType = classifyIntent(event.text);
-    const runtime = selectRuntime(taskType);
+    // Document comments are never slash commands, so they always create a
+    // CHAT_REPLY task; 'auto' preserves the session runtime downstream.
+    const taskType = IntentType.CHAT_REPLY;
+    const runtime = 'auto';
     const goal = buildDocumentCommentTaskGoal(event);
     const taskValues = {
       id: ids.taskId,
@@ -1903,7 +1903,7 @@ async function handleDocumentCommentEvent(
       status: TaskStatus.PENDING,
       constraints: {
         timeoutSec: 1800,
-        approvalRequired: taskType === IntentType.SELF_IMPROVEMENT,
+        approvalRequired: false,
         tenantKey: event.tenantKey,
         agentId: agentContext.agentId,
         feishuAppId: agentContext.feishuAppId,

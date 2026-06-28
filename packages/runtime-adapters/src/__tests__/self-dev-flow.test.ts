@@ -228,13 +228,12 @@ describe('Self-dev task flow', () => {
     expect(prompt).not.toContain('codex --full-auto');
   });
 
-  it('Coco self-dev prompt selects the Coco runtime appendix', () => {
+  it('an unknown runtime falls through to the Claude self-dev appendix', () => {
+    // After the coco runtime was removed, any non-codex runtime (including a
+    // legacy persisted value) resolves to the Claude appendix, never throwing.
     const prompt = getSelfDevSystemPrompt('coco');
-    expect(prompt).toContain('Coco Runtime Appendix');
-    expect(prompt).toContain('spawn an independent review agent');
-    expect(prompt).toContain('coco -p /builtin:review');
-    expect(prompt).toContain('critical / major / minor');
-    expect(prompt).not.toContain('codex --full-auto');
+    expect(prompt).toBe(getSelfDevSystemPrompt('claude_code'));
+    expect(prompt).not.toContain('Coco Runtime Appendix');
     // Still carries the shared self-dev workflow.
     expect(prompt).toContain('expected files, modules, or workflow layers to update');
   });

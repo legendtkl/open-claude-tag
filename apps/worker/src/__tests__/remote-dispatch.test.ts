@@ -210,6 +210,21 @@ describe('buildRemoteAdapter — capability check + image inlining (D11)', () =>
     if (!result.ok) expect(result.reason).toMatch(/cannot run the "claude_code" runtime/);
   });
 
+  it('fails closed when the machine advertises no known runtime (empty after filtering)', async () => {
+    // A daemon advertising only unknown/legacy runtimes (e.g. a pre-removal `coco`)
+    // normalizes to an empty known-runtime list; that must NOT read as unrestricted.
+    const result = await buildRemoteAdapter({
+      gateway,
+      machine: machineRow({ capabilities: { runtimes: [] } }),
+      runtime: 'claude_code',
+      workdirHints: {},
+      taskSpec: specWithImage(),
+      logger: loggerArg,
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.reason).toMatch(/supported: none/);
+  });
+
   it('fails fast when runtime env is configured but the daemon lacks runtime_env support', async () => {
     const result = await buildRemoteAdapter({
       gateway,

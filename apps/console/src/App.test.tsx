@@ -1820,7 +1820,6 @@ describe('OpenClaudeTag Console', () => {
       '',
       'codex',
       'claude_code',
-      'coco',
     ]);
     // The option is surfaced with its proper-noun brand name, not the raw value.
     expect(Array.from(runtimeSelect.options).map((option) => option.textContent)).toContain(

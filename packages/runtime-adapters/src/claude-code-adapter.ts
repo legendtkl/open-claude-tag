@@ -42,7 +42,7 @@ export const CLAUDE_CODE_DESCRIPTOR: RuntimeDescriptor = {
     resume: true,
     // Read-only turns hard-deny the file-mutating tools (Edit/Write/MultiEdit/
     // NotebookEdit) via the SDK's disallowedTools — a real tool-level denial,
-    // unlike Codex/Coco which leave read-only purely advisory. Bash itself stays
+    // unlike Codex which leaves read-only purely advisory. Bash itself stays
     // available for non-mutating inspection (the workflow prompt forbids
     // mutating shell commands).
     enforcesReadOnly: true,

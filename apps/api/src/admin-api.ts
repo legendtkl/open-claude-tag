@@ -74,7 +74,7 @@ export const SUPERADMIN_SCOPE: OwnerScope = {
   computerAccessEnabled: true,
 };
 
-const RuntimeSchema = z.enum(['codex', 'claude_code', 'coco']);
+const RuntimeSchema = z.enum(['codex', 'claude_code']);
 const NullableRuntimeSchema = RuntimeSchema.nullable();
 const RuntimeEnvKeySchema = z
   .string()

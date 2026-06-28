@@ -66,7 +66,7 @@ export const NormalizedEventSchema = z.object({
   timestamp: z.number(),
 });
 
-const RuntimeBackendSchema = z.enum(['claude_code', 'codex', 'coco']);
+const RuntimeBackendSchema = z.enum(['claude_code', 'codex']);
 const AgentLifecycleStatusSchema = z.enum(['active', 'inactive', 'archived']);
 
 // ── Agent Identity ──
@@ -217,10 +217,10 @@ export const TaskSpecSchema = z.object({
   ]),
   goal: z.string(),
   agentProfile: z.string().optional(),
-  runtimeHint: z.enum(['claude_code', 'codex', 'coco', 'auto']).default('auto'),
+  runtimeHint: z.enum(['claude_code', 'codex', 'auto']).default('auto'),
   /**
    * Effective model for this task (resolved from the agent profile's
-   * `defaultModel`). Drives codex `--model` and coco `-c model.name=`. When
+   * `defaultModel`). Drives codex `--model`. When
    * unset the runtime uses its own host default. Flows to remote daemons
    * verbatim because the dispatch frame embeds the full TaskSpec.
    */

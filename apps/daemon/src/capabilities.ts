@@ -24,7 +24,6 @@ interface CapabilitiesProbeEnv {
   ANTHROPIC_API_KEY?: string;
   ANTHROPIC_AUTH_TOKEN?: string;
   CODEX_BINARY_PATH?: string;
-  COCO_BINARY_PATH?: string;
   PATH?: string;
   SHELL?: string;
 }
@@ -34,8 +33,6 @@ export interface CapabilitiesProbeOptions {
   env?: CapabilitiesProbeEnv;
   /** Predicate for whether a codex binary is resolvable. Injectable for tests. */
   hasCodexBinary?: (env: CapabilitiesProbeEnv) => boolean;
-  /** Predicate for whether a coco binary is resolvable. Injectable for tests. */
-  hasCocoBinary?: (env: CapabilitiesProbeEnv) => boolean;
   /** Predicate for whether a file path is executable. Injectable for tests. */
   isExecutable?: (filePath: string) => boolean;
   /** Host platform override (tests). */
@@ -271,103 +268,6 @@ export function detectCodexBinary(
   return resolveCodexBinary(env, isExecutable) !== undefined;
 }
 
-// ── Coco (TRAE CLI) binary detection ──────────────────────────────────────────
-// Coco is a standalone CLI installed to `~/.local/bin` and is NOT an npm
-// dependency, so the npx-shim shadowing that complicates codex resolution does
-// not apply. We still prefer the user's interactive login shell so a daemon
-// launched without their `~/.zshrc` PATH still finds the `coco` they run.
-
-const COCO_PROBE_SCRIPT =
-  'printf "CC_COCO_BEGIN\\n%s\\nCC_COCO_END\\n" "$(command -v coco 2>/dev/null)"';
-
-function parseCocoProbeOutput(out: string): string | undefined {
-  const lines = out.split('\n');
-  const begin = lines.indexOf('CC_COCO_BEGIN');
-  if (begin === -1) return undefined;
-  const end = lines.indexOf('CC_COCO_END', begin + 1);
-  if (end === -1) return undefined;
-  const value = lines.slice(begin + 1, end).join('\n').trim();
-  return value || undefined;
-}
-
-function defaultCocoLoginShellExec(shell: string): string {
-  return execFileSync(shell, ['-ilc', COCO_PROBE_SCRIPT], {
-    encoding: 'utf8',
-    timeout: 5000,
-    killSignal: 'SIGKILL',
-    stdio: ['ignore', 'pipe', 'ignore'],
-  });
-}
-
-export function resolveCocoViaLoginShell(
-  env: CapabilitiesProbeEnv,
-  deps: LoginShellResolveDeps = {},
-): string | undefined {
-  const hostPlatform = deps.platform ?? process.platform;
-  if (hostPlatform === 'win32') return undefined;
-  const isExecutable = deps.isExecutable ?? defaultIsExecutable;
-  const exec = deps.exec ?? defaultCocoLoginShellExec;
-  const candidates = (deps.shellCandidates ?? [env.SHELL?.trim(), '/bin/zsh', '/bin/bash']).filter(
-    (s): s is string => Boolean(s),
-  );
-  for (const shell of candidates) {
-    if (!isExecutable(shell)) continue;
-    let out: string;
-    try {
-      out = exec(shell);
-    } catch {
-      continue;
-    }
-    const resolved = parseCocoProbeOutput(out);
-    if (resolved && resolved.startsWith('/') && isExecutable(resolved)) {
-      return resolved;
-    }
-  }
-  return undefined;
-}
-
-/**
- * Resolves the coco binary path: `COCO_BINARY_PATH` override → user login shell
- * → plain `PATH` walk.
- */
-export function resolveCocoBinary(
-  env: CapabilitiesProbeEnv = process.env,
-  isExecutable: (filePath: string) => boolean = defaultIsExecutable,
-  resolveViaShell: (
-    env: CapabilitiesProbeEnv,
-    isExecutable: (filePath: string) => boolean,
-  ) => string | undefined = (e, x) => resolveCocoViaLoginShell(e, { isExecutable: x }),
-): string | undefined {
-  // Honor the operator override only when it points at an executable. A
-  // directory / non-exec / typo'd `COCO_BINARY_PATH` must not mask the
-  // shell+PATH fallback — otherwise coco reads as "resolved" here and the
-  // failure is deferred to spawn time instead of surfacing at resolution.
-  const configured = env.COCO_BINARY_PATH?.trim();
-  if (configured && isExecutable(configured)) return configured;
-
-  const fromShell = resolveViaShell(env, isExecutable);
-  if (fromShell) return fromShell;
-
-  const isWindows = process.platform === 'win32';
-  const executableNames = isWindows ? ['coco.cmd', 'coco.exe', 'coco'] : ['coco'];
-  for (const dir of (env.PATH ?? '').split(delimiter)) {
-    if (!dir) continue;
-    for (const name of executableNames) {
-      const candidate = join(dir, name);
-      if (isExecutable(candidate)) return candidate;
-    }
-  }
-  return undefined;
-}
-
-/** Boolean convenience over {@link resolveCocoBinary}. */
-export function detectCocoBinary(
-  env: CapabilitiesProbeEnv = process.env,
-  isExecutable: (filePath: string) => boolean = defaultIsExecutable,
-): boolean {
-  return resolveCocoBinary(env, isExecutable) !== undefined;
-}
-
 /**
  * Builds the capability descriptor advertised at pairing and on `hello`
  * (design §6, D9). Detects available runtimes, platform/hostname, and the
@@ -390,13 +290,6 @@ export function probeCapabilities(options: CapabilitiesProbeOptions = {}): Capab
     : detectCodexBinary(env, options.isExecutable);
   if (codexAvailable) {
     runtimes.push('codex');
-  }
-
-  const cocoAvailable = options.hasCocoBinary
-    ? options.hasCocoBinary(env)
-    : detectCocoBinary(env, options.isExecutable);
-  if (cocoAvailable) {
-    runtimes.push('coco');
   }
 
   return {

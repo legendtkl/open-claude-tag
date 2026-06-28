@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { randomUUID } from 'crypto';
 import {
+  CapabilitiesSchema,
   ENVELOPE_VERSION,
   MAX_FRAME_BYTES,
   parseFrame,
@@ -340,5 +341,21 @@ describe('frame size cap', () => {
   it('honors a custom maxBytes override', () => {
     expect(validateFrameSize('abcdef', 3)).toBe(false);
     expect(validateFrameSize('ab', 3)).toBe(true);
+  });
+});
+
+describe('CapabilitiesSchema runtime tolerance', () => {
+  it('filters unknown/legacy runtimes (e.g. a not-yet-upgraded daemon advertising coco)', () => {
+    // A rolling daemon upgrade must never fail hello/pairing validation just
+    // because it still advertises a runtime this server has removed.
+    const caps = CapabilitiesSchema.parse({
+      runtimes: ['claude_code', 'codex', 'coco', 'future-runtime'],
+    });
+    expect(caps.runtimes).toEqual(['claude_code', 'codex']);
+  });
+
+  it('keeps known runtimes and defaults to an empty list', () => {
+    expect(CapabilitiesSchema.parse({ runtimes: ['claude_code'] }).runtimes).toEqual(['claude_code']);
+    expect(CapabilitiesSchema.parse({}).runtimes).toEqual([]);
   });
 });

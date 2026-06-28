@@ -45,9 +45,23 @@ export const DaemonFeatureSchema = z.enum([
   DAEMON_FEATURE_AGENT_HOME,
 ]);
 
+/** Runtimes this server recognizes when validating a daemon's advertisement. */
+const KNOWN_RUNTIMES = ['claude_code', 'codex'] as const;
+
 /** Machine capabilities advertised on `hello` and at pairing. */
 export const CapabilitiesSchema = z.object({
-  runtimes: z.array(z.enum(['claude_code', 'codex', 'coco'])).default([]),
+  // Tolerate unknown/legacy runtime strings (e.g. a not-yet-upgraded daemon still
+  // advertising 'coco') and filter them out, so a rolling daemon upgrade never
+  // fails `hello`/pairing capability validation. New runtimes are forward-compatible
+  // the same way.
+  runtimes: z
+    .array(z.string())
+    .default([])
+    .transform((rs) =>
+      rs.filter((r): r is (typeof KNOWN_RUNTIMES)[number] =>
+        (KNOWN_RUNTIMES as readonly string[]).includes(r),
+      ),
+    ),
   features: z.array(DaemonFeatureSchema).default([]),
   platform: z.string().optional(),
   hostname: z.string().optional(),
@@ -82,7 +96,7 @@ export const InlineImageSchema = z.object({
   base64: z.string(),
 });
 
-const RuntimeBackendSchema = z.enum(['claude_code', 'codex', 'coco']);
+const RuntimeBackendSchema = z.enum(['claude_code', 'codex']);
 const DispatchModeSchema = z.enum(['prepare_execute', 'resume']);
 
 /** Reasons a server may reject a daemon at `hello` time. */

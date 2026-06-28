@@ -44,14 +44,6 @@ export {
 export { CodexAdapter, CODEX_DESCRIPTOR } from './codex-adapter.js';
 export type { CodexConfig } from './codex-adapter.js';
 export {
-  CocoAdapter,
-  COCO_DESCRIPTOR,
-  buildCocoArgs,
-  createCocoStreamState,
-  processCocoEvent,
-} from './coco-adapter.js';
-export type { CocoConfig, CocoStreamState } from './coco-adapter.js';
-export {
   RUNTIME_DESCRIPTORS_BY_NAME,
   getRuntimeDescriptor,
 } from './runtime-descriptors.js';

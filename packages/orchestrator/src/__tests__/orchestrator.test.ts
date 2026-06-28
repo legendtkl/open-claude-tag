@@ -86,6 +86,50 @@ describe('handleEvent: runtime selection without per-message override', () => {
   });
 });
 
+describe('handleEvent: dispatch contract (no keyword intent classifier)', () => {
+  let db: ReturnType<typeof createMockDb>;
+
+  beforeEach(() => {
+    db = createMockDb();
+  });
+
+  it('labels analysis-style text as CHAT_REPLY (the keyword classifier is gone)', async () => {
+    // The removed classifier would have called this ANALYSIS; every non-ops
+    // message is now a chat_reply and the runtime decides its own approach.
+    const event = makeEvent({
+      content: { type: 'text', text: '分析这个仓库的整体架构并解释为什么这样设计', raw: {} },
+    });
+    const result = await dispatch(db, event, 'session_1');
+
+    expect(result.type).toBe('task_created');
+    expect(result.intent).toBe(IntentType.CHAT_REPLY);
+    const inserted = db._getInsertedValues();
+    expect(inserted.taskType).toBe(IntentType.CHAT_REPLY);
+    expect(inserted.runtimeHint).toBeNull();
+  });
+
+  it('short-circuits an ops slash command to a direct reply (OPS_TASK), no task row', async () => {
+    const event = makeEvent({
+      content: { type: 'command', command: '/status', text: '/status', raw: {} },
+    });
+    const result = await dispatch(db, event, 'session_1');
+
+    expect(result.type).toBe('direct_reply');
+    expect(result.intent).toBe(IntentType.OPS_TASK);
+    expect(db._getInsertedValues()).toBeUndefined();
+  });
+
+  it('treats a non-ops command reaching handleEvent as a CHAT_REPLY task', async () => {
+    const event = makeEvent({
+      content: { type: 'command', command: '/unknown', text: '/unknown do work', raw: {} },
+    });
+    const result = await dispatch(db, event, 'session_1');
+
+    expect(result.type).toBe('task_created');
+    expect(result.intent).toBe(IntentType.CHAT_REPLY);
+  });
+});
+
 describe('handleEvent: task creation metadata', () => {
   let db: ReturnType<typeof createMockDb>;
 

@@ -18,7 +18,7 @@ export const WORKDIR_FORM_CANCEL = 'workdir_form_cancel';
 export interface TaskCardActionValue {
   action: typeof TASK_CARD_ACTION_RETRY | typeof TASK_CARD_ACTION_RETRY_RUNTIME;
   task_id: string;
-  runtime?: 'codex' | 'coco';
+  runtime?: 'codex';
 }
 
 interface JsonV2HeaderTag {
@@ -723,7 +723,7 @@ export function buildFailedCardsFromSegments(
 export interface WorkDirConfirmCardParams {
   workDir?: string;
   goal: string;
-  defaultRuntime: 'claude_code' | 'codex' | 'coco';
+  defaultRuntime: 'claude_code' | 'codex';
   sessionId: string;
   chatId: string;
   replyLanguage: string;
@@ -809,10 +809,6 @@ export function buildWorkDirConfirmCard(params: WorkDirConfirmCardParams): Inter
                 {
                   text: { tag: 'plain_text', content: 'Codex' },
                   value: 'codex',
-                },
-                {
-                  text: { tag: 'plain_text', content: 'Coco' },
-                  value: 'coco',
                 },
               ],
             },

@@ -81,14 +81,14 @@ export type RuntimeSandboxMode = 'readonly' | 'workspace-write' | 'danger-full-a
  * Open, data-driven description of a runtime backend. Lets the platform select,
  * gate, and render a runtime from data instead of branching on name strings.
  *
- * `id` is the OPEN display/registry id (`claude-code` | `codex` | `coco`, hyphen
- * form). It is deliberately distinct from {@link RuntimeAdapter.name}, which is
- * the PERSISTED key written to `sessions.runtimeBackend` (`claude_code`
- * underscore, `codex`, `coco`) and must never change. `workflowPrompts` carries
- * workflow *refs* (basenames loadable via `loadWorkflow`), never inline prompts.
+ * `id` is the OPEN display/registry id (`claude-code` | `codex`, hyphen form). It
+ * is deliberately distinct from {@link RuntimeAdapter.name}, which is the
+ * PERSISTED key written to `sessions.runtimeBackend` (`claude_code` underscore,
+ * `codex`) and must never change. `workflowPrompts` carries workflow *refs*
+ * (basenames loadable via `loadWorkflow`), never inline prompts.
  */
 export interface RuntimeDescriptor {
-  /** Open display/registry id (`claude-code` | `codex` | `coco`). NOT the persisted `name()`. */
+  /** Open display/registry id (`claude-code` | `codex`). NOT the persisted `name()`. */
   id: string;
   displayName: string;
   capabilities: {

@@ -73,3 +73,5 @@ history of decisions stays auditable.
 | [0007](0007-stale-thread-nudge-scanner.md) | Stale-thread nudge scanner: audit-log idempotency + same-channel private nudge | Accepted |
 | [0008](0008-neutral-ack-in-place-terminal-update.md) | Thread the neutral ACK handle so the worker updates it in place | Accepted |
 | [0009](0009-embedded-postgres-db-provider.md) | DB-provider abstraction with an embedded-Postgres (zero-Docker) provider | Accepted |
+| [0010](0010-remove-coco-runtime.md) | Remove the Coco (TRAE CLI) runtime adapter | Accepted |
+| [0011](0011-remove-keyword-intent-classifier.md) | Remove the keyword intent classifier | Accepted |

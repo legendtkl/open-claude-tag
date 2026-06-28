@@ -37,8 +37,8 @@ hard-locks two axes — runtime = Claude, channel = Slack. OpenClaudeTag turns
 - **Channel** (`Channel` contract, `packages/channel-core`) — Lark/Feishu is the
   first implementation; Slack is the second proof.
 - **Runtime** (`RuntimeAdapter` contract, `packages/runtime-adapters`) — Claude
-  Code, Codex, and Coco are the implementations; a remote daemon is a fourth,
-  proxy implementation.
+  Code and Codex are the implementations; a remote daemon is a third, proxy
+  implementation.
 
 **The orchestrator core names neither a vendor nor a runtime.** The intent
 classifier, task state machine, and task-creation logic in
@@ -99,8 +99,8 @@ A pnpm monorepo (`pnpm-workspace.yaml`) of **5 apps** and **19 packages**.
 | `channel-core` | Vendor-neutral channel contracts: `InboundMessage`, `OutboundMessage`, `ChannelScope`, `ConversationRef`, `DeliveryRef`, `ChannelCapabilities`, `Channel`, `ChannelRegistry`. |
 | `feishu-adapter` | Lark/Feishu REST client, event normalizer, card builder, `LarkChannel` (implements `Channel`), `ThreePhaseFeedback`, `createFeishuChannelSender` / `FeedbackChannelSender`. |
 | `channel-slack` | `SlackChannel` (implements `Channel`), Slack events handler, signature verification. |
-| `orchestrator` | Channel/runtime-agnostic brain: keyword intent classifier, `handleEvent` (task creation), `transitionTask`, and the task state machine. |
-| `runtime-adapters` | `RuntimeAdapter` contract, `RuntimeManager`, `buildRuntimeManager`, runtime descriptors, and the Claude Code / Codex / Coco adapters; workflow + soul loaders; worktree manager. |
+| `orchestrator` | Channel/runtime-agnostic brain: `handleEvent` (ops-command short-circuit / task creation), `transitionTask`, and the task state machine. |
+| `runtime-adapters` | `RuntimeAdapter` contract, `RuntimeManager`, `buildRuntimeManager`, runtime descriptors, and the Claude Code / Codex adapters; workflow + soul loaders; worktree manager. |
 | `storage` | Drizzle ORM schema, migrations, DB connection. The leaf everything composes over. |
 | `session` | Session resolution (`resolveSession`), context building/strategy, lifecycle, slash-command helpers, reply-language. |
 | `memory` | Always-on `channel_observations` ingestion; verified `shared_context_entries` (DeLM); scope-typed `memory_entries`; workspace agent memory; the shared sensitive-info filter. |
@@ -243,7 +243,6 @@ vendor:
 | --- | --- | --- |
 | Claude Code | `claude_code` | `claude-code` |
 | Codex | `codex` | `codex` |
-| Coco | `coco` | `coco` |
 
 `name()` is written to `sessions.runtimeBackend` and compared on resume, so it
 must never change; `descriptor().id` is the open/hyphen id used for display and
@@ -266,8 +265,6 @@ capability differences are real and encoded in data:
 - **Codex** — read-only is advisory only (`enforcesReadOnly: false`), no
   interactive permission, hard-pins `danger-full-access`,
   `imageInput: 'local-path'`, `credentialEnv: ['CODEX_API_KEY','OPENAI_API_KEY']`.
-- **Coco** — same advisory/headless profile, **no credential env** (authenticates
-  via host git credentials).
 
 `buildRuntimeManager(registrations)` (`runtime-manager.ts`) is the single
 data-driven place that builds a `RuntimeManager`: each app hands it a list of
@@ -276,7 +273,7 @@ adapter lazily), so an unavailable runtime never constructs.
 `RuntimeManager.getHealthy(preferred)` returns the preferred adapter when
 healthy, else falls back to any other healthy adapter. The registration **list is
 per-app** (both apps use the same `buildRuntimeManager` factory): Claude always
-registers; the **daemon** gates Codex/Coco on binary resolution
+registers; the **daemon** gates Codex on binary resolution
 (`apps/daemon/src/runtime-registry.ts`), while the **worker** registers Codex
 eagerly (`isAvailable: () => true`) and relies on the healthcheck to mark it
 unhealthy if absent (`apps/worker/src/main.ts`).

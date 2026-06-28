@@ -27,6 +27,19 @@ describe('classifyFeishuTrackingIntent', () => {
     expect(llmClient.chat).not.toHaveBeenCalled();
   });
 
+  it('keyword fallback tracks analysis/explanation requests with no LLM', () => {
+    // The removed intent classifier force-tracked ANALYSIS/RESEARCH; those verbs
+    // now live in the keyword fallback so no-LLM tracking does not regress.
+    expect(
+      classifyFeishuTrackingIntentByKeywords({ currentMessage: '为什么这段代码会崩溃？' }).track,
+    ).toBe(true);
+    expect(
+      classifyFeishuTrackingIntentByKeywords({
+        currentMessage: 'explain the architecture of this service',
+      }).track,
+    ).toBe(true);
+  });
+
   it('uses LLM output to track a chat reply task', async () => {
     const llmClient = makeLlm('{"track": true, "title": "创建 2.txt 并写入 hello world"}');
 

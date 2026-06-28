@@ -247,7 +247,7 @@ export function isMachineSwitch(
 export interface BuildRemoteAdapterInput {
   gateway: GatewayDispatchPort;
   machine: MachineRow;
-  runtime: 'claude_code' | 'codex' | 'coco';
+  runtime: 'claude_code' | 'codex';
   workdirHints: WorkdirHints;
   runtimeEnv?: Record<string, string>;
   taskSpec: TaskSpec;
@@ -271,7 +271,13 @@ export async function buildRemoteAdapter(
   input: BuildRemoteAdapterInput,
 ): Promise<BuildRemoteAdapterResult> {
   const supported = input.machine.capabilities?.runtimes ?? [];
-  if (supported.length > 0 && !supported.includes(input.runtime)) {
+  // Dispatch only a runtime the machine actually advertised. An empty advertised
+  // list means "no runtime this server supports" and must fail closed rather than
+  // read as unrestricted — a real online daemon always advertises at least
+  // claude_code, and the hello capability schema filters out unknown/legacy
+  // runtimes (e.g. a not-yet-upgraded daemon's `coco`), which could otherwise
+  // normalize a non-empty advertisement down to `[]`.
+  if (!supported.includes(input.runtime)) {
     return {
       ok: false,
       reason: unsupportedRuntimeMessage(input.machine, input.runtime, supported),

@@ -117,7 +117,7 @@ const desktopConsoleBuild =
     ?.VITE_OPEN_TAG_DESKTOP === '1';
 const SYSTEM_PROMPT_PLACEHOLDER = 'You are a strict code reviewer, be concise and focus on bugs.';
 const HIDDEN_CONSOLE_RUNTIMES = new Set<string>([]);
-const AGENT_RUNTIME_OPTIONS = ['', 'codex', 'claude_code', 'coco'];
+const AGENT_RUNTIME_OPTIONS = ['', 'codex', 'claude_code'];
 const CLAUDE_BASE_URL_ENV_KEY = 'ANTHROPIC_BASE_URL';
 const CLAUDE_API_KEY_ENV_KEY = 'ANTHROPIC_API_KEY';
 type ClaudeAuthMode = 'subscription' | 'custom';
@@ -467,7 +467,12 @@ const initialData: ConsoleData = {
 };
 
 function visibleRuntimeValue(runtime: string | null | undefined): string {
-  if (!runtime || HIDDEN_CONSOLE_RUNTIMES.has(runtime)) return '';
+  // Normalize an empty, hidden, or no-longer-selectable runtime (e.g. a legacy
+  // `coco` default after that runtime was removed) to '' so the select can render
+  // it and editing a legacy agent isn't blocked by an option that no longer exists.
+  if (!runtime || HIDDEN_CONSOLE_RUNTIMES.has(runtime) || !AGENT_RUNTIME_OPTIONS.includes(runtime)) {
+    return '';
+  }
   return runtime;
 }
 
@@ -480,7 +485,6 @@ function visibleRuntimeValues(runtimes: string[]): string[] {
 const RUNTIME_DISPLAY_NAMES: Record<string, string> = {
   codex: 'Codex',
   claude_code: 'Claude Code',
-  coco: 'Coco',
 };
 
 function runtimeDisplayName(runtime: string): string {

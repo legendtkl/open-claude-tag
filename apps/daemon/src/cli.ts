@@ -101,7 +101,7 @@ async function connectAndPersist(opts: {
   const capabilities = probeCapabilities();
   out(`Detected runtimes: ${capabilities.runtimes.join(', ') || '(none)'}`);
   if (capabilities.runtimes.length === 0) {
-    err('Warning: no runtimes detected. Install codex or coco before starting.');
+    err('Warning: no runtimes detected. Install codex before starting.');
   }
 
   let response;
