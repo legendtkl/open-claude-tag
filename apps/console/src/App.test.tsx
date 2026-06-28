@@ -171,12 +171,10 @@ const fixtures = {
 
 let fetchMock: ReturnType<typeof vi.fn>;
 let oneClickRegistrationPollMode: 'completed' | 'missing';
-let syncMetadataMode: 'success' | 'fail';
 let feishuAppsState: typeof fixtures['/admin/feishu-apps'];
 
 beforeEach(() => {
   oneClickRegistrationPollMode = 'completed';
-  syncMetadataMode = 'success';
   feishuAppsState = JSON.parse(JSON.stringify(fixtures['/admin/feishu-apps']));
   fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === 'string' ? input : input.toString();
@@ -254,22 +252,6 @@ beforeEach(() => {
       const payload = JSON.parse(String(init.body));
       feishuAppsState = feishuAppsState.map((app) =>
         app.id === 'app-1' ? { ...app, botName: payload.botName ?? null } : app,
-      );
-      return new Response(JSON.stringify(feishuAppsState[0]), {
-        status: 200,
-        headers: { 'Content-Type': 'application/json' },
-      });
-    }
-
-    if (url === '/admin/feishu-apps/app-1/sync-metadata' && init?.method === 'POST') {
-      if (syncMetadataMode === 'fail') {
-        return new Response(JSON.stringify({ error: 'Feishu app metadata sync failed' }), {
-          status: 502,
-          headers: { 'Content-Type': 'application/json' },
-        });
-      }
-      feishuAppsState = feishuAppsState.map((app) =>
-        app.id === 'app-1' ? { ...app, botName: 'Synced Reviewer Bot' } : app,
       );
       return new Response(JSON.stringify(feishuAppsState[0]), {
         status: 200,
@@ -854,60 +836,47 @@ describe('OpenClaudeTag Console', () => {
     ).toBe(false);
   });
 
-  it('edits a Feishu bot display name from the bot row', async () => {
+  it('does not expose Feishu bot display-name maintenance actions', async () => {
     render(<App />);
 
     fireEvent.click(await screen.findByRole('button', { name: /Bots/i }));
     expect(await screen.findByText('Reviewer Bot')).toBeInTheDocument();
-    fireEvent.click(await screen.findByRole('button', { name: /Edit Reviewer Bot/i }));
-
-    const dialog = await screen.findByRole('dialog', { name: /Edit Bot Name/i });
-    fireEvent.change(within(dialog).getByLabelText('Bot Name'), {
-      target: { value: 'Reviewer Bot Local' },
-    });
-    fireEvent.click(within(dialog).getByRole('button', { name: /^Save$/i }));
-
-    await waitFor(() =>
-      expect(fetchMock).toHaveBeenCalledWith(
-        '/admin/feishu-apps/app-1',
-        expect.objectContaining({ method: 'PATCH' }),
+    expect(screen.queryByRole('button', { name: /Edit Reviewer Bot/i })).toBeNull();
+    expect(screen.queryByRole('button', { name: /Sync Reviewer Bot/i })).toBeNull();
+    expect(screen.queryByRole('dialog', { name: /Edit Bot Name/i })).toBeNull();
+    expect(
+      fetchMock.mock.calls.some(
+        ([input, init]) =>
+          input === '/admin/feishu-apps/app-1' &&
+          (init as RequestInit | undefined)?.method === 'PATCH',
       ),
-    );
-    const patchCall = fetchMock.mock.calls.find(
-      ([input, init]) =>
-        input === '/admin/feishu-apps/app-1' &&
-        (init as RequestInit | undefined)?.method === 'PATCH',
-    );
-    expect(JSON.parse(String((patchCall?.[1] as RequestInit | undefined)?.body))).toEqual({
-      botName: 'Reviewer Bot Local',
-    });
-    expect(await screen.findByText('Reviewer Bot Local')).toBeInTheDocument();
+    ).toBe(false);
+    expect(
+      fetchMock.mock.calls.some(([input]) => input === '/admin/feishu-apps/app-1/sync-metadata'),
+    ).toBe(false);
   });
 
-  it('syncs a Feishu bot display name from the bot row', async () => {
+  it('keeps core Feishu bot row actions visible', async () => {
     render(<App />);
 
     fireEvent.click(await screen.findByRole('button', { name: /Bots/i }));
-    fireEvent.click(await screen.findByRole('button', { name: /Sync Reviewer Bot/i }));
-
-    await waitFor(() =>
-      expect(fetchMock).toHaveBeenCalledWith(
-        '/admin/feishu-apps/app-1/sync-metadata',
-        expect.objectContaining({ method: 'POST' }),
-      ),
-    );
-    expect(await screen.findByText('Synced Reviewer Bot')).toBeInTheDocument();
+    expect(await screen.findByText('Reviewer Bot')).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: /Check permissions for Reviewer Bot/i }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^Bind$/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Delete Reviewer Bot/i })).toBeInTheDocument();
   });
 
-  it('shows Feishu bot display name sync errors in the row', async () => {
-    syncMetadataMode = 'fail';
+  it('keeps Feishu metadata sync failures out of the bot row', async () => {
     render(<App />);
 
     fireEvent.click(await screen.findByRole('button', { name: /Bots/i }));
-    fireEvent.click(await screen.findByRole('button', { name: /Sync Reviewer Bot/i }));
-
-    expect(await screen.findByText('Feishu app metadata sync failed')).toBeInTheDocument();
-    expect(screen.getByText('Reviewer Bot')).toBeInTheDocument();
+    expect(await screen.findByText('Reviewer Bot')).toBeInTheDocument();
+    expect(screen.queryByText('Feishu app metadata sync failed')).not.toBeInTheDocument();
+    expect(
+      fetchMock.mock.calls.some(([input]) => input === '/admin/feishu-apps/app-1/sync-metadata'),
+    ).toBe(false);
   });
 
   it('starts one-click Feishu bot setup from the Bots page', async () => {

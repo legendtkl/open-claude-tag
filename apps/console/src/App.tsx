@@ -58,11 +58,9 @@ import {
   saveDesktopApiUrl,
   setAdminToken,
   startFeishuAppRegistration,
-  syncFeishuAppMetadata,
   unbindBot,
   updateAgent,
   updateChat,
-  updateFeishuApp,
   updateComputerAccessUser,
   type Agent,
   type AuthConfig,
@@ -155,7 +153,6 @@ const uiText = {
       unbind: 'Unbind',
       edit: 'Edit',
       save: 'Save',
-      sync: 'Sync',
       delete: 'Delete',
       checkPermissions: 'Check permissions',
     },
@@ -164,8 +161,6 @@ const uiText = {
       agentUpdated: 'Agent updated',
       agentDeleted: 'Agent deleted',
       appRegistered: 'Feishu app registered',
-      appUpdated: 'Feishu app updated',
-      appSynced: 'Feishu app synced',
       appDeleted: 'Feishu app deleted',
       botBound: 'Bot bound',
       botUnbound: 'Bot unbound',
@@ -255,7 +250,6 @@ const uiText = {
       unbind: '解绑',
       edit: '编辑',
       save: '保存',
-      sync: '同步',
       delete: '删除',
       checkPermissions: '检测权限',
     },
@@ -264,8 +258,6 @@ const uiText = {
       agentUpdated: '已更新智能体',
       agentDeleted: '已删除智能体',
       appRegistered: '已注册飞书应用',
-      appUpdated: '已更新飞书应用',
-      appSynced: '已同步飞书应用',
       appDeleted: '已删除飞书应用',
       botBound: '已绑定机器人',
       botUnbound: '已解绑机器人',
@@ -3245,11 +3237,6 @@ type PermissionApplyEntry = {
   autoApplyKey?: string;
 };
 
-type MetadataSyncEntry = {
-  loading: boolean;
-  error?: string;
-};
-
 function BotsView({
   data,
   busy,
@@ -3274,9 +3261,6 @@ function BotsView({
   const [isRegisteringApp, setIsRegisteringApp] = useState(false);
   const [appCreateSubmitted, setAppCreateSubmitted] = useState(false);
   const [deletingAppId, setDeletingAppId] = useState<string | null>(null);
-  const [editingAppId, setEditingAppId] = useState<string | null>(null);
-  const [botNameEdit, setBotNameEdit] = useState('');
-  const [botNameEditSubmitted, setBotNameEditSubmitted] = useState(false);
   const [bindingAppId, setBindingAppId] = useState<string | null>(null);
   const [bindingAgentId, setBindingAgentId] = useState('');
   const [bindingSubmitted, setBindingSubmitted] = useState(false);
@@ -3286,7 +3270,6 @@ function BotsView({
   const [permissionApplies, setPermissionApplies] = useState<Record<string, PermissionApplyEntry>>(
     {},
   );
-  const [metadataSyncs, setMetadataSyncs] = useState<Record<string, MetadataSyncEntry>>({});
   const activeAgents = useMemo(
     () => data.agents.filter((agent) => agent.status === 'active'),
     [data.agents],
@@ -3299,17 +3282,8 @@ function BotsView({
     () => data.apps.find((app) => app.id === deletingAppId) ?? null,
     [data.apps, deletingAppId],
   );
-  const editingApp = useMemo(
-    () => data.apps.find((app) => app.id === editingAppId) ?? null,
-    [data.apps, editingAppId],
-  );
   const appCreateErrors = validateFeishuAppForm(appForm, locale);
   const canRegisterApp = !hasValidationErrors(appCreateErrors);
-  const botNameEditError = requiredError(
-    botNameEdit,
-    locale === 'zh' ? '机器人名称' : 'Bot Name',
-    locale,
-  );
   const bindingErrors: FieldErrors<'agentId'> = {
     agentId:
       requiredError(bindingAgentId, locale === 'zh' ? '智能体' : 'Agent', locale) ??
@@ -3351,38 +3325,6 @@ function BotsView({
     setBindingAppId(null);
     setBindingAgentId('');
     setBindingSubmitted(false);
-  }
-
-  function openBotNameEditor(app: FeishuApp) {
-    setEditingAppId(app.id);
-    setBotNameEdit(app.botName ?? '');
-    setBotNameEditSubmitted(false);
-  }
-
-  function closeBotNameEditor() {
-    setEditingAppId(null);
-    setBotNameEdit('');
-    setBotNameEditSubmitted(false);
-  }
-
-  async function runMetadataSync(app: FeishuApp) {
-    setMetadataSyncs((previous) => ({
-      ...previous,
-      [app.id]: { loading: true },
-    }));
-    try {
-      await syncFeishuAppMetadata(app.id);
-      setMetadataSyncs((previous) => ({
-        ...previous,
-        [app.id]: { loading: false },
-      }));
-      await refreshConsole({ showLoading: false });
-    } catch (err) {
-      setMetadataSyncs((previous) => ({
-        ...previous,
-        [app.id]: { loading: false, error: (err as Error).message },
-      }));
-    }
   }
 
   async function runPermissionCheck(app: FeishuApp) {
@@ -3481,7 +3423,6 @@ function BotsView({
           rows={data.apps.map((app) => {
             const permissionCheck = permissionChecks[app.id];
             const permissionApply = permissionApplies[app.id];
-            const metadataSync = metadataSyncs[app.id];
             const botLabel = app.botName ?? app.appId;
             const permissionValue = permissionCheck?.loading
               ? 'pending'
@@ -3548,9 +3489,6 @@ function BotsView({
               <strong key="bot">
                 {app.botName ?? t.common.unnamed}
                 <small>{app.botOpenId ?? t.common.botOpenIdPending}</small>
-                {metadataSync?.error ? (
-                  <small className="permission-error">{metadataSync.error}</small>
-                ) : null}
               </strong>,
               app.appId,
               secretLabel(app, locale),
@@ -3630,35 +3568,6 @@ function BotsView({
                 </button>
               </div>,
               <div className="inline-actions row-actions" key="actions">
-                <button
-                  aria-label={`${locale === 'zh' ? '编辑' : 'Edit'} ${botLabel}`}
-                  className="secondary tiny"
-                  disabled={busy}
-                  onClick={() => openBotNameEditor(app)}
-                  title={locale === 'zh' ? '编辑机器人名称' : 'Edit bot name'}
-                  type="button"
-                >
-                  <Pencil size={14} /> {t.actions.edit}
-                </button>
-                <button
-                  aria-label={`${locale === 'zh' ? '同步' : 'Sync'} ${botLabel}`}
-                  className="secondary tiny"
-                  disabled={busy || metadataSync?.loading}
-                  onClick={() => void runMetadataSync(app)}
-                  title={
-                    locale === 'zh'
-                      ? '从飞书开发者平台同步名称'
-                      : 'Sync name from Feishu Open Platform'
-                  }
-                  type="button"
-                >
-                  {metadataSync?.loading ? (
-                    <Loader2 className="spin" size={14} />
-                  ) : (
-                    <RefreshCcw size={14} />
-                  )}
-                  {t.actions.sync}
-                </button>
                 {app.binding ? (
                   <button
                     className="secondary tiny"
@@ -3698,59 +3607,6 @@ function BotsView({
         />
         </section>
       </div>
-
-      {editingApp ? (
-        <Modal open onClose={closeBotNameEditor} labelledBy="bot-name-edit-title">
-          <div className="modal-header">
-            <div className="panel-title" id="bot-name-edit-title">
-              <Pencil size={18} /> {locale === 'zh' ? '编辑机器人名称' : 'Edit Bot Name'}
-            </div>
-            <button
-              aria-label={locale === 'zh' ? '关闭编辑器' : 'Close editor'}
-              className="icon-button"
-              onClick={closeBotNameEditor}
-              title={locale === 'zh' ? '关闭' : 'Close'}
-              type="button"
-            >
-              <X size={16} />
-            </button>
-          </div>
-          <FormGrid>
-            <Input
-              label={locale === 'zh' ? '机器人名称' : 'Bot Name'}
-              value={botNameEdit}
-              onChange={setBotNameEdit}
-              required
-              error={botNameEditSubmitted ? botNameEditError ?? undefined : undefined}
-            />
-            <p className="form-note">
-              {locale === 'zh'
-                ? '此处只更新 OpenClaudeTag 本地展示名。使用同步按钮可从飞书开发者平台拉取当前应用名。'
-                : 'This updates the local OpenClaudeTag display name. Use Sync to pull the current app name from Feishu Open Platform.'}
-            </p>
-            <div className="inline-actions">
-              <button className="secondary" onClick={closeBotNameEditor} type="button">
-                {t.actions.cancel}
-              </button>
-              <button
-                className="primary"
-                disabled={busy || Boolean(botNameEditError)}
-                onClick={() => {
-                  setBotNameEditSubmitted(true);
-                  if (botNameEditError) return;
-                  void runAction(t.notices.appUpdated, async () => {
-                    await updateFeishuApp(editingApp.id, { botName: botNameEdit.trim() });
-                    closeBotNameEditor();
-                  });
-                }}
-                type="button"
-              >
-                <Save size={16} /> {t.actions.save}
-              </button>
-            </div>
-          </FormGrid>
-        </Modal>
-      ) : null}
 
       {deletingApp ? (
         <DeleteDialog
