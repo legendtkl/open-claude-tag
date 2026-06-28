@@ -59,8 +59,8 @@ export class RemoteDispatchError extends Error {
 export interface RemoteRuntimeAdapterOptions {
   gateway: GatewayDispatchPort;
   machine: MachineRow;
-  /** Underlying runtime name (claude_code/codex/coco) — what `name()` returns. */
-  runtime: 'claude_code' | 'codex' | 'coco';
+  /** Underlying runtime name (claude_code/codex) — what `name()` returns. */
+  runtime: 'claude_code' | 'codex';
   workdirHints: WorkdirHints;
   runtimeEnv?: Record<string, string>;
   /** Inline images (base64) materialized server-side for this dispatch (D11). */
@@ -86,7 +86,7 @@ export interface RemoteRuntimeAdapterOptions {
 export class RemoteRuntimeAdapter implements RuntimeAdapter {
   private readonly gateway: GatewayDispatchPort;
   private readonly machine: MachineRow;
-  private readonly runtime: 'claude_code' | 'codex' | 'coco';
+  private readonly runtime: 'claude_code' | 'codex';
   private readonly workdirHints: WorkdirHints;
   private readonly runtimeEnv?: Record<string, string>;
   private readonly images?: InlineImage[];
@@ -139,9 +139,9 @@ export class RemoteRuntimeAdapter implements RuntimeAdapter {
 
   /**
    * Proxy the underlying runtime's open descriptor: a remote dispatch runs the
-   * same runtime (claude_code/codex/coco) on another host, so its capabilities
-   * are identical. Resolved by persisted name; `this.runtime` is always one of
-   * the three known keys.
+   * same runtime (claude_code/codex) on another host, so its capabilities are
+   * identical. Resolved by persisted name; `this.runtime` is always one of the
+   * known keys.
    */
   descriptor(): RuntimeDescriptor {
     return RUNTIME_DESCRIPTORS_BY_NAME[this.runtime];

@@ -28,8 +28,8 @@ Monorepo using pnpm workspaces:
 - `apps/console` — admin console UI
 - `apps/daemon` — per-user execution daemon
 - `packages/feishu-adapter` — Feishu REST client, event normalizer, card builder
-- `packages/orchestrator` — intent classification, task state machine
-- `packages/runtime-adapters` — Claude Code, Codex, and coco adapters
+- `packages/orchestrator` — inbound dispatch, task state machine
+- `packages/runtime-adapters` — Claude Code and Codex adapters
 - `packages/storage` — Drizzle ORM schemas, migrations, DB connection
 - `packages/session`, `queue`, `core-types`, `approval`, `memory`, `registry`,
   `observability` — shared platform packages

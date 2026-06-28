@@ -5,7 +5,7 @@
  * `resume` + the shared working directory (unchanged from today). At a
  * cross-agent, cross-kind, or cross-machine boundary — where an SDK session may
  * carry another agent's identity/system prompt, a `claude_code` SDK session
- * cannot be resumed by `codex`/`coco`, and a session pinned to one machine
+ * cannot be resumed by `codex`, and a session pinned to one machine
  * cannot be resumed on another — the next agent instead hydrates from the
  * verified shared context.
  *
@@ -18,7 +18,7 @@ export interface StoredSessionState {
   sdkSessionId?: string | null;
   /** Agent that produced `sdkSessionId`; null/undefined = legacy unowned session. */
   agentId?: string | null;
-  /** Runtime backend that produced `sdkSessionId` (claude_code / codex / coco). */
+  /** Runtime backend that produced `sdkSessionId` (claude_code / codex). */
   runtimeBackend?: string | null;
   /** Machine that produced `sdkSessionId`; null/undefined = server-local. */
   machineId?: string | null;
@@ -74,7 +74,7 @@ export function selectContextStrategy(input: ContextStrategyInput): ContextStrat
     return { mode: 'hydrate', reason: 'agent changed' };
   }
   // Force hydrate on a kind change. Legacy-null stored kind is treated as
-  // claude_code so a codex/coco turn does not resume an incompatible SDK session.
+  // claude_code so a codex turn does not resume an incompatible SDK session.
   const storedKind = normalizeStoredKind(stored.runtimeBackend);
   const nextKind = normalizeKind(next.runtimeBackend);
   if (storedKind && nextKind && storedKind !== nextKind) {

@@ -323,14 +323,14 @@ function parseActionValue(value: unknown): TaskCardActionValue | null {
     return null;
   }
 
-  if (runtime !== undefined && runtime !== 'codex' && runtime !== 'coco') {
+  if (runtime !== undefined && runtime !== 'codex') {
     return null;
   }
 
   return {
     action,
     task_id: taskId,
-    ...(runtime === 'codex' || runtime === 'coco' ? { runtime } : {}),
+    ...(runtime === 'codex' ? { runtime } : {}),
   };
 }
 
@@ -344,12 +344,11 @@ function cloneTaskConstraints(value: unknown, originalTaskId: string, sourceActi
 }
 
 // A known persisted runtime is one present in the data-driven registry (its
-// `name()` keys). Behavior-equivalent to the prior `claude_code|codex|coco`
-// literal set, but a runtime added to the registry is recognized with no change
-// here.
+// `name()` keys). Behavior-equivalent to the prior `claude_code|codex` literal
+// set, but a runtime added to the registry is recognized with no change here.
 function isKnownRuntime(
   value: string | null | undefined,
-): value is 'claude_code' | 'codex' | 'coco' {
+): value is 'claude_code' | 'codex' {
   return value != null && getRuntimeDescriptor(value) !== undefined;
 }
 
@@ -357,7 +356,7 @@ function resolveRetryRuntime(
   actionValue: TaskCardActionValue,
   latestRuntime: string | null | undefined,
   originalRuntimeHint: string | null,
-): 'claude_code' | 'codex' | 'coco' | 'auto' {
+): 'claude_code' | 'codex' | 'auto' {
   if (actionValue.action === TASK_CARD_ACTION_RETRY_RUNTIME) {
     return actionValue.runtime ?? 'codex';
   }

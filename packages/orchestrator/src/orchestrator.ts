@@ -4,8 +4,21 @@ import type { InboundMessage, ReferencedMessage } from '@open-tag/channel-core';
 import type { Database } from '@open-tag/storage';
 import { tasks } from '@open-tag/storage';
 import { and, eq } from 'drizzle-orm';
-import { classifyIntent, selectRuntime } from './intent-classifier.js';
 import { assertTransition } from './task-state-machine.js';
+
+// Slash commands handled as a direct reply rather than a task. The server routes
+// most commands through `handleSlashCommand`; this gate is the orchestrator's own
+// short-circuit for any ops command that still reaches `handleEvent` (neutral
+// dispatch / debug paths).
+const OPS_COMMANDS = new Set([
+  '/new',
+  '/status',
+  '/session',
+  '/compact',
+  '/forget',
+  '/reset',
+  '/help',
+]);
 
 export interface OrchestratorResult {
   type: 'direct_reply' | 'task_created' | 'task_duplicate';
@@ -128,7 +141,15 @@ export async function handleEvent(
   const effectiveText =
     hasImageAttachment && !text ? '请分析这张图片' : hasFileAttachment && !text ? '请分析这个文件' : text;
 
-  const intent = classifyIntent(effectiveText, command);
+  // The keyword intent classifier was vestigial: it never drove execution
+  // (runtime is resolved downstream; `self_dev` is set by the `/dev` command and
+  // PR polling, never here). All that remains is the ops-command short-circuit —
+  // every other message becomes a CHAT_REPLY task and the runtime decides its own
+  // approach from the goal text.
+  const intent =
+    command !== undefined && OPS_COMMANDS.has(command)
+      ? IntentType.OPS_TASK
+      : IntentType.CHAT_REPLY;
   const taskGoal = appendReferencedContext(effectiveText, message.content.referenced ?? []);
 
   // Intake: ops_task → handle directly (slash commands are dispatched by server)
@@ -140,9 +161,11 @@ export async function handleEvent(
     };
   }
 
-  // All other intents (including chat) → create task for worker/AI processing
-  // Router: keep image handling separate from runtime selection.
-  const runtime = selectRuntime(intent);
+  // All other intents (including chat) → create task for worker/AI processing.
+  // No per-message runtime selection exists: 'auto' preserves the session's
+  // persisted runtimeBackend downstream (task-dispatch keeps the session runtime
+  // when result.runtime === 'auto').
+  const runtime = 'auto';
 
   // Create task
   const taskId = options.taskId ?? randomUUID();
@@ -157,7 +180,7 @@ export async function handleEvent(
     status: TaskStatus.PENDING,
     constraints: {
       timeoutSec: 1800,
-      approvalRequired: intent === IntentType.SELF_IMPROVEMENT,
+      approvalRequired: false,
       tenantKey: message.scope.installationId,
       chatId: message.scope.scopeId,
       agentId: options.agentId,

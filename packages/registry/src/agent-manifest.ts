@@ -3,7 +3,7 @@ import { join, relative } from 'node:path';
 import { load as loadYaml } from 'js-yaml';
 import { z } from 'zod';
 
-const RuntimeSchema = z.enum(['claude_code', 'codex', 'coco']);
+const RuntimeSchema = z.enum(['claude_code', 'codex']);
 
 export const AgentManifestSchema = z.object({
   version: z.union([z.literal(1), z.string()]).optional(),

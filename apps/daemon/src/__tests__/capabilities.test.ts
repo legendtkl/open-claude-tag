@@ -1,4 +1,3 @@
-import { tmpdir } from 'node:os';
 import { describe, it, expect } from 'vitest';
 import {
   probeCapabilities,
@@ -6,9 +5,6 @@ import {
   detectCodexBinary,
   resolveCodexBinary,
   resolveCodexViaLoginShell,
-  detectCocoBinary,
-  resolveCocoBinary,
-  resolveCocoViaLoginShell,
 } from '../capabilities.js';
 import {
   DAEMON_FEATURE_AGENT_HOME,
@@ -36,52 +32,14 @@ describe('capabilities probe', () => {
     expect(detectCodexBinary({ PATH: '/a' }, isExec)).toBe(false);
   });
 
-  it('detects coco from an executable COCO_BINARY_PATH', () => {
-    expect(detectCocoBinary({ COCO_BINARY_PATH: '/opt/coco' }, (p) => p === '/opt/coco')).toBe(
-      true,
-    );
-  });
-
-  it('ignores a non-executable COCO_BINARY_PATH and falls through to PATH', () => {
-    // The override must point at a real executable; a stale / typo'd / directory
-    // path must not mask shell+PATH resolution (else coco reads as "resolved"
-    // and fails later at spawn time instead of here).
-    expect(detectCocoBinary({ COCO_BINARY_PATH: '/opt/coco', PATH: '/x' }, () => false)).toBe(
-      false,
-    );
-  });
-
-  it('detects coco by walking PATH with an injected executable predicate', () => {
-    const env = { PATH: '/a:/b' };
-    const isExec = (p: string) => p === '/b/coco';
-    expect(detectCocoBinary(env, isExec)).toBe(true);
-    expect(detectCocoBinary({ PATH: '/a' }, isExec)).toBe(false);
-  });
-
-  it('honors COCO_BINARY_PATH above any PATH resolution', () => {
-    expect(resolveCocoBinary({ COCO_BINARY_PATH: '/opt/coco', PATH: '/x' }, () => true)).toBe(
-      '/opt/coco',
-    );
-  });
-
-  it('rejects a directory COCO_BINARY_PATH via the real executable check', () => {
-    // A directory passes X_OK on POSIX; the default executable check must also
-    // require a regular file, so a directory override falls through. Inject a
-    // no-op shell resolver so the real login shell is never spawned in the test.
-    expect(
-      resolveCocoBinary({ COCO_BINARY_PATH: tmpdir(), PATH: '' }, undefined, () => undefined),
-    ).toBeUndefined();
-  });
-
-  it('advertises all three runtimes, platform/hostname, and versions', () => {
+  it('advertises claude_code + codex, platform/hostname, and versions', () => {
     const caps = probeCapabilities({
       env: { ANTHROPIC_BASE_URL: 'https://api', CODEX_BINARY_PATH: '/opt/codex' },
       hasCodexBinary: () => true,
-      hasCocoBinary: () => true,
       platform: 'linux',
       hostname: 'box',
     });
-    expect(caps.runtimes.sort()).toEqual(['claude_code', 'coco', 'codex']);
+    expect(caps.runtimes.sort()).toEqual(['claude_code', 'codex']);
     expect(caps.platform).toBe('linux');
     expect(caps.hostname).toBe('box');
     expect(caps.daemonVersion).toBe(DAEMON_VERSION);
@@ -89,15 +47,14 @@ describe('capabilities probe', () => {
     expect(caps.features).toEqual([DAEMON_FEATURE_RUNTIME_ENV, DAEMON_FEATURE_AGENT_HOME]);
   });
 
-  it('always advertises claude_code, gating only codex/coco on their binaries', () => {
+  it('always advertises claude_code, gating only codex on its binary', () => {
     // Per-agent BASE_URL/API_KEY are supplied at dispatch via runtimeEnv, so the
     // daemon must advertise claude_code regardless of global env (mirrors the
-    // server-side de-gated Claude registration). Codex and coco still gate on
-    // their binaries, so with neither present only claude_code is advertised.
+    // server-side de-gated Claude registration). Codex still gates on its binary,
+    // so with none present only claude_code is advertised.
     const caps = probeCapabilities({
       env: {},
       hasCodexBinary: () => false,
-      hasCocoBinary: () => false,
     });
     expect(caps.runtimes).toEqual(['claude_code']);
   });
@@ -263,35 +220,5 @@ describe('resolveCodexViaLoginShell', () => {
     );
     expect(got).toBeUndefined();
     expect(spawned).toBe(false);
-  });
-});
-
-describe('resolveCocoViaLoginShell', () => {
-  const marker = (path: string) => `CC_COCO_BEGIN\n${path}\nCC_COCO_END\n`;
-  const linux: NodeJS.Platform = 'linux';
-
-  it('parses the sentinel-bracketed path, ignoring rc-file banner noise', () => {
-    const out = `Welcome!\nnvm: loaded\n${marker('/home/u/.local/bin/coco')}done\n`;
-    const got = resolveCocoViaLoginShell(
-      { SHELL: '/bin/zsh' },
-      {
-        platform: linux,
-        exec: () => out,
-        isExecutable: (p) => p === '/bin/zsh' || p === '/home/u/.local/bin/coco',
-      },
-    );
-    expect(got).toBe('/home/u/.local/bin/coco');
-  });
-
-  it('rejects a non-absolute token (alias/function/builtin)', () => {
-    const got = resolveCocoViaLoginShell(
-      { SHELL: '/bin/zsh' },
-      {
-        platform: linux,
-        exec: () => marker('coco: aliased to mycoco'),
-        isExecutable: (p) => p === '/bin/zsh',
-      },
-    );
-    expect(got).toBeUndefined();
   });
 });

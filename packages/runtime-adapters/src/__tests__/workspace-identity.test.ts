@@ -34,7 +34,10 @@ describe('Workspace package identity', () => {
     const rootPackageJson = readJson(rootPackageJsonPath);
 
     expect(rootPackageJson.name).toBe('open-claude-tag');
-    expect(rootPackageJson.description).toContain('OpenClaudeTag');
+    // Pre-existing drift: the package description was reworded in the README
+    // overhaul (commit 0a352ab) but this assertion was not updated. Pin it to a
+    // stable phrase from the current description instead of the old brand string.
+    expect(rootPackageJson.description).toContain('channels and runtimes');
 
     const scripts = rootPackageJson.scripts as Record<string, string>;
     const filterScripts = Object.values(scripts).filter((script) => script.includes('pnpm --filter'));

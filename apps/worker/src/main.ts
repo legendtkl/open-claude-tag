@@ -98,7 +98,6 @@ import {
   buildRuntimeManager,
   claudeRuntimeRegistration,
   CodexAdapter,
-  CocoAdapter,
   createWorkspace,
   ensureConversationWorkspace,
   openClaudeTagHome,
@@ -147,7 +146,6 @@ import {
 import { decideWorkspaceMode } from './workspace-mode.js';
 import { resolveTaskWorkDir, readDefaultWorkDirEnv } from './agent-workdir.js';
 import { resolveCodexBinaryPath } from './codex-binary.js';
-import { resolveCocoBinaryPath } from './coco-binary.js';
 import {
   buildAgentIdentityPrompt,
   buildAgentSystemPrompt,
@@ -3295,7 +3293,6 @@ async function main(): Promise<void> {
   // (the same `buildRuntimeManager` factory the daemon uses). Adding a runtime
   // is one more list entry, not another bespoke registration block.
   const codexBinaryPath = resolveCodexBinaryPath();
-  const cocoBinaryPath = resolveCocoBinaryPath();
   runtimeManager = buildRuntimeManager([
     // Claude registers unconditionally; per-agent BASE_URL / API_KEY (runtimeEnv)
     // can supply custom credentials at execution time. Without those, Claude Code
@@ -3312,26 +3309,12 @@ async function main(): Promise<void> {
           imageDownloader: feishuClient ?? undefined,
         }),
     },
-    {
-      // Coco resolves from the user's installed CLI; skip when none is found.
-      isAvailable: () => Boolean(cocoBinaryPath),
-      create: () =>
-        new CocoAdapter({
-          binaryPath: cocoBinaryPath,
-          imageDownloader: feishuClient ?? undefined,
-        }),
-    },
   ]);
   logger.info(
     { globalFallback: Boolean(process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_AUTH_TOKEN) },
     'Registered ClaudeCodeAdapter',
   );
   logger.info({ binaryPath: codexBinaryPath ?? 'sdk-default' }, 'Registered CodexAdapter');
-  if (cocoBinaryPath) {
-    logger.info({ binaryPath: cocoBinaryPath }, 'Registered CocoAdapter');
-  } else {
-    logger.warn('Coco runtime not registered: no coco binary resolvable');
-  }
 
   // 4b. Daemon gateway (remote execution). Started with the worker lifecycle.
   // A bind failure (e.g. port conflict) must not take the worker down: local

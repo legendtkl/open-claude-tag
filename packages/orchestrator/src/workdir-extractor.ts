@@ -2,7 +2,7 @@ import type { LlmClient } from '@open-tag/llm-client';
 import { resolve } from 'path';
 import { homedir } from 'os';
 
-export type RuntimeName = 'claude_code' | 'codex' | 'coco';
+export type RuntimeName = 'claude_code' | 'codex';
 
 export interface WorkDirExtraction {
   /** Absolute or relative path, null if not detected */
@@ -20,16 +20,15 @@ const EXTRACTION_SYSTEM_PROMPT = `You extract structured information from user m
 From the user message, extract:
 1. workDir: the working directory / project path the user specified (absolute or relative path). Return null if none specified.
 2. goal: the actual task description (without the working directory or runtime-control related text).
-3. runtime: the runtime backend the user explicitly wants this system to use. Return only "codex", "claude_code", "coco", or null.
+3. runtime: the runtime backend the user explicitly wants this system to use. Return only "codex", "claude_code", or null.
 
 Rules for runtime:
 - Only set runtime when the user is explicitly choosing the execution backend for this task.
 - Normalize Claude aliases such as "claude", "claude code", and "claudecode" to "claude_code".
-- Normalize Coco aliases such as "coco", "trae", and "trae cli" to "coco".
-- If the text merely mentions Codex, Claude, or Coco as the subject of the task, not as an execution request, return null.
+- If the text merely mentions Codex or Claude as the subject of the task, not as an execution request, return null.
 - If unclear, return null.
 
-Return ONLY valid JSON: {"workDir": "path or null", "goal": "task description", "runtime": "codex | claude_code | coco | null"}
+Return ONLY valid JSON: {"workDir": "path or null", "goal": "task description", "runtime": "codex | claude_code | null"}
 Do not wrap in markdown code blocks. Do not add any explanation.`;
 
 function normalizeRuntime(value: unknown): RuntimeName | null {
@@ -39,9 +38,6 @@ function normalizeRuntime(value: unknown): RuntimeName | null {
   if (normalized === 'codex') return 'codex';
   if (normalized === 'claude' || normalized === 'claudecode' || normalized === 'claude_code') {
     return 'claude_code';
-  }
-  if (normalized === 'coco' || normalized === 'trae' || normalized === 'traecli') {
-    return 'coco';
   }
 
   return null;

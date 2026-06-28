@@ -23,6 +23,13 @@ describe('resolveTaskRuntime', () => {
   it('falls back to claude_code when no runtime is available', () => {
     expect(resolveTaskRuntime('auto', null)).toBe('claude_code');
   });
+
+  it('degrades a legacy coco value to claude_code (coco runtime removed)', () => {
+    // 'coco' is no longer a registered descriptor, so it reads as unknown and
+    // falls through to the default — a legacy session/agent never crashes.
+    expect(resolveTaskRuntime('coco', 'coco', 'coco')).toBe('claude_code');
+    expect(resolveTaskRuntime('auto', 'coco')).toBe('claude_code');
+  });
 });
 
 describe('decidePromptMetadataConfirmation', () => {

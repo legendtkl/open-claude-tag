@@ -33,7 +33,7 @@ multi-workspace install, and Socket Mode still in progress.
 
 | Feature | Summary |
 | --- | --- |
-| Multi-runtime | Claude Code and Codex are full runtimes; Coco (TRAE CLI) registers automatically when its binary is present. Pick per agent or per task. |
+| Multi-runtime | Claude Code and Codex are full runtimes. Pick per agent or per task. |
 | Multi-channel | Lark/Feishu (full) and Slack (inbound dispatch + outbound send, experimental) behind one neutral `Channel` contract. |
 | Zero-Docker personal launcher | `pnpm personal:up` boots an embedded PostgreSQL plus API + Worker + Console with no Docker (ADR-0009). |
 | Onboarding wizard | A localhost setup wizard walks you through connecting Feishu, creating an agent, binding, and going live. |
@@ -63,7 +63,6 @@ vendor nor a runtime (see [`doc/decisions/0004`](./doc/decisions/0004-inbound-me
 | Channel | Slack | Inbound dispatch + outbound send (`packages/channel-slack`, `SlackChannel`). A signature-verified `POST /slack/events` route feeds channel-neutral observation memory and, when `SLACK_BOT_USER_ID` is set and the bot is @mentioned, dispatches a task through the neutral path (ADR-0005); when `SLACK_BOT_TOKEN` is also set, it ACKs through the Slack Web API. The worker also delivers the task's terminal completion as a neutral message (ADR-0008). OAuth / multi-workspace install, Socket Mode, richer running-card / Block Kit parity, and the Lark-only extras (slash-command tree, buffering, thread/reference enrichment, agent routing) are not built yet. |
 | Runtime | Claude Code | Full — the default runtime. |
 | Runtime | Codex | Full. |
-| Runtime | Coco (TRAE CLI) | Optional — registered only when a `coco` binary is resolvable on the worker host. |
 
 The Slack path is covered by unit and Postgres-backed integration tests that drive
 the real route end to end through the same vendor-clean core (with a stubbed Slack
@@ -89,7 +88,7 @@ flowchart LR
   Q[(pg-boss / PostgreSQL)]
 
   subgraph WK[apps/worker]
-    R[runtime adapter execute<br/>Claude Code · Codex · Coco]
+    R[runtime adapter execute<br/>Claude Code · Codex]
   end
 
   SND[ChannelSender<br/>ACK · running · done · failed]
@@ -132,8 +131,8 @@ This is a pnpm-workspace monorepo: 5 apps and 19 packages.
 | `packages/channel-core` | Vendor-neutral `Channel` contract: `InboundMessage` / `OutboundMessage` and the channel registry. |
 | `packages/feishu-adapter` | Lark / Feishu `Channel`: REST client, event normalizer, interactive card builder. |
 | `packages/channel-slack` | Slack `Channel`: signature verify, event normalize, send/update via the Slack Web API. |
-| `packages/orchestrator` | Intent classification, task state machine, agent delegation, and multi-agent discussion (channel- and runtime-agnostic). |
-| `packages/runtime-adapters` | Descriptor-driven runtime registry and adapters: Claude Code, Codex, and optional Coco. |
+| `packages/orchestrator` | Inbound dispatch, task state machine, agent delegation, and multi-agent discussion (channel- and runtime-agnostic). |
+| `packages/runtime-adapters` | Descriptor-driven runtime registry and adapters: Claude Code and Codex. |
 | `packages/storage` | Drizzle ORM schema, migrations, and PostgreSQL access. |
 | `packages/session` | Session routing and lifecycle, context builder/strategy, worktree context, reply-language handling. |
 | `packages/memory` | Observation / channel memory, sensitive-content filter, shared context, and workspace memory. |
@@ -308,7 +307,7 @@ marked **code-only**. Variables are read from `process.env`.
 | `ANTHROPIC_BASE_URL` | No | `https://api.anthropic.com` | Claude Code endpoint. |
 | `ANTHROPIC_API_KEY` | No | — | Claude Code key. Takes precedence over `ANTHROPIC_AUTH_TOKEN` if both are set. |
 | `ANTHROPIC_AUTH_TOKEN` | No | — | Claude Code OAuth/auth token. |
-| `OPEN_TAG_DEFAULT_RUNTIME` | No | `claude_code` | Default runtime for general tasks (`claude_code`, `codex`, or `coco`). |
+| `OPEN_TAG_DEFAULT_RUNTIME` | No | `claude_code` | Default runtime for general tasks (`claude_code` or `codex`). |
 | `OPEN_TAG_DEFAULT_MODEL` | No | — | Optional default model override. |
 | Codex | — | — | Codex auth and model are read from `~/.codex/config.toml`. |
 | `CODEX_STARTUP_TIMEOUT_MS` | No | `120000` | Max ms to wait for Codex to establish its API connection (`0` disables). |

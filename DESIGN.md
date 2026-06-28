@@ -55,7 +55,7 @@ Lark WS ─▶ apps/api (normalizeEvent) ─▶ NormalizedEvent ─▶ orchestra
 | Area | Responsibility | Axis maturity |
 |---|---|---|
 | `packages/core-types` | Zod models: `NormalizedEvent`, `TaskSpec`, `RuntimeEvent`, `MemoryItem` | — |
-| `packages/runtime-adapters` | `RuntimeAdapter` + `RuntimeManager` + registry + Claude Code / Codex / Coco adapters | **runtime ~80% abstracted** |
+| `packages/runtime-adapters` | `RuntimeAdapter` + `RuntimeManager` + registry + Claude Code / Codex adapters | **runtime ~80% abstracted** |
 | `packages/feishu-adapter` | Lark REST client, event normalization, card builder | **channel ~30% abstracted** (the work of §4.2) |
 | `packages/orchestrator` | Intent classification, runtime selection, FSM, delegation | channel/runtime-agnostic brain |
 | `packages/memory` | `sharedContextEntries` (multiplayer memory), `memoryEntries`, sensitive filter | centerpiece — needs always-on ingestion + channel scope |
@@ -144,7 +144,7 @@ interface RuntimeDescriptor {
 }
 ```
 
-`ClaudeCodeRuntime` and `CodexRuntime` both satisfy this; `CocoAdapter`/`RemoteRuntimeAdapter` prove a 3rd/remote runtime drops in. `WorkspaceContext` carries a `conversationKey` and `isolation: 'worktree' | 'inplace'` (configurable per channel/identity, default worktree).
+`ClaudeCodeRuntime` and `CodexRuntime` both satisfy this; the data-driven descriptor registry plus `RemoteRuntimeAdapter` show a new/remote runtime drops in without touching the core. `WorkspaceContext` carries a `conversationKey` and `isolation: 'worktree' | 'inplace'` (configurable per channel/identity, default worktree).
 
 ### 4.5 Memory model — per-channel, multiplayer, always-on following
 

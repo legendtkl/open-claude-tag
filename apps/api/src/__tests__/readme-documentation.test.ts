@@ -4,44 +4,57 @@ import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 // Keep the README guard in the API test suite because this package already owns the repo's
-// Vitest wiring for CI, even though the file under test lives at the repository root.
-const readmePath = fileURLToPath(new URL('../../../../README.md', import.meta.url));
-const readme = readFileSync(resolve(readmePath), 'utf8');
+// Vitest wiring for CI, even though the files under test live at the repository root.
+//
+// The README overhaul (commit 0a352ab) split the former monolingual monolith into an
+// English `README.md` plus a mirrored Chinese `README.zh-CN.md`; this guard validates
+// that two-file structure rather than the old single-file `## English` / `## 中文` layout.
+function readRepoFile(relativePath: string): string {
+  const path = fileURLToPath(new URL(`../../../../${relativePath}`, import.meta.url));
+  return readFileSync(resolve(path), 'utf8');
+}
+
+const readmeEn = readRepoFile('README.md');
+const readmeZh = readRepoFile('README.zh-CN.md');
 
 describe('README documentation', () => {
-  it('provides mirrored Chinese and English top-level sections', () => {
-    expect(readme).toContain('## English');
-    expect(readme).toContain('## 中文');
+  it('ships an English README that links to its mirrored Chinese counterpart', () => {
+    expect(readmeEn).toContain('## Features');
+    expect(readmeEn).toContain('## Architecture');
+    expect(readmeEn).toContain('./README.zh-CN.md');
+
+    expect(readmeZh).toContain('## 功能特性');
+    expect(readmeZh).toContain('## 架构');
   });
 
   it('covers complete contributor entry topics in both languages', () => {
     const englishSections = [
-      '### Overview',
-      '### Architecture',
-      '### Prerequisites',
-      '### Quick Start',
-      '### Feishu App Setup',
-      '### Development Workflow',
-      '### Testing',
-      '### Troubleshooting',
+      '## Features',
+      '## Architecture',
+      '## Prerequisites',
+      '## Quick Start',
+      '## Feishu App Setup',
+      '## Development Workflow',
+      '## Testing',
+      '## Troubleshooting',
     ];
     const chineseSections = [
-      '### 项目概览',
-      '### 架构概览',
-      '### 环境要求',
-      '### 快速开始',
-      '### 飞书应用配置',
-      '### 开发流程',
-      '### 测试与验证',
-      '### 故障排查',
+      '## 功能特性',
+      '## 架构',
+      '## 前置依赖',
+      '## 快速开始',
+      '## 飞书应用配置',
+      '## 开发流程',
+      '## 测试与验证',
+      '## 故障排查',
     ];
 
     for (const section of englishSections) {
-      expect(readme).toContain(section);
+      expect(readmeEn).toContain(section);
     }
 
     for (const section of chineseSections) {
-      expect(readme).toContain(section);
+      expect(readmeZh).toContain(section);
     }
   });
 
@@ -56,7 +69,7 @@ describe('README documentation', () => {
     ];
 
     for (const command of commands) {
-      expect(readme).toContain(command);
+      expect(readmeEn).toContain(command);
     }
   });
 
@@ -70,15 +83,19 @@ describe('README documentation', () => {
       '"tag": "form"',
       '"form_container"',
       'separate from Event Configuration',
-      '独立于 Event Configuration',
     ];
 
     for (const detail of requiredDetails) {
-      expect(readme).toContain(detail);
+      expect(readmeEn).toContain(detail);
     }
+
+    // The Chinese mirror carries the same operational permission/callback details.
+    expect(readmeZh).toContain('im.message.receive_v1');
+    expect(readmeZh).toContain('card.action.trigger');
   });
 
   it('links to deeper project guidance from the repository entry point', () => {
-    expect(readme).toContain('AGENTS.md');
+    expect(readmeEn).toContain('AGENTS.md');
+    expect(readmeZh).toContain('AGENTS.md');
   });
 });

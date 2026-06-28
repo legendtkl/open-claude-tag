@@ -1,4 +1,3 @@
-export { classifyIntent, selectRuntime } from './intent-classifier.js';
 export { canTransition, assertTransition, isTerminal } from './task-state-machine.js';
 export { handleEvent, transitionTask } from './orchestrator.js';
 export type { OrchestratorResult } from './orchestrator.js';

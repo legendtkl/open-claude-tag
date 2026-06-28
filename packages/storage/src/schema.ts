@@ -1096,7 +1096,7 @@ export const sharedContextEntries = pgTable(
     scopeType: varchar('scope_type', { length: 16 }).notNull().default('session'),
     scopeId: varchar('scope_id', { length: 256 }).notNull(),
     // Author identity (NULL = server/system-authored). `authorAgentKind` is the
-    // runtime backend (claude_code / codex / coco); `authorMachineId` NULL means
+    // runtime backend (claude_code / codex); `authorMachineId` NULL means
     // the authoring turn ran server-local.
     authorAgentId: uuid('author_agent_id').references(() => agents.id, { onDelete: 'set null' }),
     authorAgentKind: varchar('author_agent_kind', { length: 32 }),
