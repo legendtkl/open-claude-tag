@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { IntentType, TaskStatus, isObjectRecord as isRecord } from '@open-tag/core-types';
+import { IntentType, TaskStatus, isObjectRecord as isRecord, normalizeRuntimeHint } from '@open-tag/core-types';
 import type { Database } from '@open-tag/storage';
 import {
   admissionLeases,
@@ -363,7 +363,7 @@ export async function createDelegatedTaskFromLoaders(
     parentTaskId: parentTask.id,
     taskType: IntentType.ANALYSIS,
     goal,
-    runtimeHint: input.runtimeHint ?? null,
+    runtimeHint: normalizeRuntimeHint(input.runtimeHint),
     status: TaskStatus.QUEUED,
     constraints: childConstraints,
   });
@@ -391,7 +391,7 @@ export async function createDelegatedTaskFromLoaders(
     feishuAppId: input.calleeFeishuAppId ?? parentTask.feishuAppId ?? undefined,
     taskType: IntentType.ANALYSIS,
     goal,
-    runtimeHint: input.runtimeHint ?? null,
+    runtimeHint: normalizeRuntimeHint(input.runtimeHint),
     constraints: childConstraints,
   };
   await loaders.upsertAdmissionLease?.(job);

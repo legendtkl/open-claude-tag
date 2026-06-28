@@ -1,4 +1,5 @@
 import type { NormalizedEvent, ReplyLanguage } from '@open-tag/core-types';
+import { normalizeRuntimeHint } from '@open-tag/core-types';
 import type { NormalizedDocumentCommentEvent } from '@open-tag/feishu-adapter';
 import type { TaskJobData } from '@open-tag/queue';
 import { shouldSkipTaskExecutionForDebugEvent } from './debug-task-control.js';
@@ -174,7 +175,7 @@ export function buildDocumentCommentTaskInput(
       feishuAppId: input.feishuAppId,
       taskType: input.taskType,
       goal,
-      runtimeHint: input.runtime ?? null,
+      runtimeHint: normalizeRuntimeHint(input.runtime),
       constraints: {
         timeoutSec: 1800,
         approvalRequired: input.taskType === 'self_improvement',
@@ -229,7 +230,7 @@ export function buildQueuedTaskInput(input: BuildQueuedTaskInput): BuildQueuedTa
       feishuAppId: input.feishuAppId,
       taskType: result.intent,
       goal: result.goal ?? event.content.text ?? '',
-      runtimeHint: result.runtime ?? null,
+      runtimeHint: normalizeRuntimeHint(result.runtime),
       constraints: {
         tenantKey: event.tenantKey,
         chatId: event.chatId,

@@ -57,6 +57,7 @@ export {
   AgentSessionStateSchema,
   UserIdentitySchema,
   AgentDelegationSchema,
+  normalizeRuntimeHint,
 } from './schemas.js';
 export {
   ReplyLanguageSchema,

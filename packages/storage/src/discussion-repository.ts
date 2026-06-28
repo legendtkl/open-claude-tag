@@ -1,5 +1,5 @@
 import { and, asc, eq, inArray, sql } from 'drizzle-orm';
-import { isObjectRecord } from '@open-tag/core-types';
+import { isObjectRecord, normalizeRuntimeHint } from '@open-tag/core-types';
 import type { Database } from './db.js';
 import {
   admissionLeases,
@@ -878,7 +878,7 @@ async function advanceDiscussionInTransaction(
         feishuAppId: input.nextTurn.feishuAppId,
         taskType: input.nextTurn.taskType,
         goal: input.nextTurn.goal,
-        runtimeHint: input.nextTurn.runtimeHint,
+        runtimeHint: normalizeRuntimeHint(input.nextTurn.runtimeHint),
         status: 'queued',
         constraints: nextTurnConstraints,
       })
@@ -960,7 +960,7 @@ async function advanceDiscussionInTransaction(
       feishuAppId: input.nextTurn.feishuAppId,
       taskType: input.nextTurn.taskType,
       goal: input.nextTurn.goal,
-      runtimeHint: input.nextTurn.runtimeHint ?? null,
+      runtimeHint: normalizeRuntimeHint(input.nextTurn.runtimeHint),
       constraints: nextTurnConstraints,
     };
 

@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { stableUuidFromKey } from '@open-tag/core-types';
+import { stableUuidFromKey, normalizeRuntimeHint } from '@open-tag/core-types';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { dirname, isAbsolute, join } from 'node:path';
 import { Readable } from 'node:stream';
@@ -1639,7 +1639,7 @@ async function createInitialDiscussionTurnTask(input: {
       feishuAppId: input.participant.feishuAppId,
       taskType: 'chat_reply',
       goal,
-      runtimeHint: 'auto',
+      runtimeHint: null,
       status: TaskStatus.QUEUED,
       constraints,
     })
@@ -1657,7 +1657,7 @@ async function createInitialDiscussionTurnTask(input: {
     feishuAppId: input.participant.feishuAppId,
     taskType: 'chat_reply',
     goal,
-    runtimeHint: 'auto',
+    runtimeHint: null,
     constraints,
   };
   await enqueueDiscussionTurnTaskOrFail(
@@ -1900,7 +1900,7 @@ async function handleDocumentCommentEvent(
       feishuAppId: agentContext.feishuAppId,
       taskType,
       goal,
-      runtimeHint: runtime === 'auto' ? null : runtime,
+      runtimeHint: normalizeRuntimeHint(runtime),
       status: TaskStatus.PENDING,
       constraints: {
         timeoutSec: 1800,
