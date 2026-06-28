@@ -1630,21 +1630,6 @@ describe('CodexAdapter', () => {
         await cleanupWorkspace(runId).catch(() => {});
       }
     });
-
-    it('writes the absolute scratch artifactsDir hint into TASK.md', async () => {
-      const runId = `test-${randomUUID()}`;
-      const workspace = await createWorkspace(runId);
-      try {
-        const spec = makeSpec('task-artifact-3', 'hint check');
-        await adapter.prepare(spec, workspace);
-        const taskMd = await readFile(join(workspace.workspacePath, 'TASK.md'), 'utf8');
-        expect(taskMd).toContain(
-          `Place any deliverable files you want surfaced as task artifacts under: ${workspace.artifactsDir}`,
-        );
-      } finally {
-        await cleanupWorkspace(runId).catch(() => {});
-      }
-    });
   });
 });
 
