@@ -1,14 +1,10 @@
 import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
 import { resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
 // Keep the README guard in the API test suite because this package already owns the repo's
 // Vitest wiring for CI, even though the files under test live at the repository root.
-//
-// The README overhaul (commit 0a352ab) split the former monolingual monolith into an
-// English `README.md` plus a mirrored Chinese `README.zh-CN.md`; this guard validates
-// that two-file structure rather than the old single-file `## English` / `## 中文` layout.
 function readRepoFile(relativePath: string): string {
   const path = fileURLToPath(new URL(`../../../../${relativePath}`, import.meta.url));
   return readFileSync(resolve(path), 'utf8');
@@ -18,13 +14,9 @@ const readmeEn = readRepoFile('README.md');
 const readmeZh = readRepoFile('README.zh-CN.md');
 
 describe('README documentation', () => {
-  it('ships an English README that links to its mirrored Chinese counterpart', () => {
-    expect(readmeEn).toContain('## Features');
-    expect(readmeEn).toContain('## Architecture');
-    expect(readmeEn).toContain('./README.zh-CN.md');
-
-    expect(readmeZh).toContain('## 功能特性');
-    expect(readmeZh).toContain('## 架构');
+  it('links the English and Chinese repository entry points', () => {
+    expect(readmeEn).toContain('[简体中文 / Chinese](./README.zh-CN.md)');
+    expect(readmeZh).toContain('[English](./README.md)');
   });
 
   it('covers complete contributor entry topics in both languages', () => {
@@ -32,7 +24,7 @@ describe('README documentation', () => {
       '## Features',
       '## Architecture',
       '## Prerequisites',
-      '## Quick Start',
+      '## Quick Start (Docker or your own Postgres)',
       '## Feishu App Setup',
       '## Development Workflow',
       '## Testing',
@@ -42,7 +34,7 @@ describe('README documentation', () => {
       '## 功能特性',
       '## 架构',
       '## 前置依赖',
-      '## 快速开始',
+      '## 快速开始（Docker 或自带 Postgres）',
       '## 飞书应用配置',
       '## 开发流程',
       '## 测试与验证',
@@ -58,7 +50,7 @@ describe('README documentation', () => {
     }
   });
 
-  it('documents canonical development and verification commands', () => {
+  it('documents canonical development and verification commands in both languages', () => {
     const commands = [
       'pnpm install',
       'pnpm build',
@@ -70,11 +62,12 @@ describe('README documentation', () => {
 
     for (const command of commands) {
       expect(readmeEn).toContain(command);
+      expect(readmeZh).toContain(command);
     }
   });
 
   it('preserves critical Feishu setup and troubleshooting details', () => {
-    const requiredDetails = [
+    const sharedDetails = [
       'im.message.receive_v1',
       'card.action.trigger',
       'im:message:send_as_bot',
@@ -82,19 +75,18 @@ describe('README documentation', () => {
       '200621',
       '"tag": "form"',
       '"form_container"',
-      'separate from Event Configuration',
     ];
 
-    for (const detail of requiredDetails) {
+    for (const detail of sharedDetails) {
       expect(readmeEn).toContain(detail);
+      expect(readmeZh).toContain(detail);
     }
 
-    // The Chinese mirror carries the same operational permission/callback details.
-    expect(readmeZh).toContain('im.message.receive_v1');
-    expect(readmeZh).toContain('card.action.trigger');
+    expect(readmeEn).toContain('separate from Event Configuration');
+    expect(readmeZh).toContain('独立于事件配置');
   });
 
-  it('links to deeper project guidance from the repository entry point', () => {
+  it('links to deeper project guidance from both repository entry points', () => {
     expect(readmeEn).toContain('AGENTS.md');
     expect(readmeZh).toContain('AGENTS.md');
   });

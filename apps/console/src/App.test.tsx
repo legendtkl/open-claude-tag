@@ -573,7 +573,7 @@ afterEach(() => {
 });
 
 describe('OpenClaudeTag Console', () => {
-  it('integrates a project guide tab into the console navigation', async () => {
+  it('keeps the console navigation focused on operational sections', async () => {
     render(<App />);
 
     const navigation = await screen.findByRole('navigation', { name: 'Console sections' });
@@ -584,64 +584,12 @@ describe('OpenClaudeTag Console', () => {
       'Chats',
       'Machines',
       'Task Boards',
-      'Project Guide',
-      'Release Notes',
-      'Downloads',
       'Settings',
     ]);
 
-    fireEvent.click(await screen.findByRole('button', { name: /Project Guide/i }));
-
-    await screen.findByText('Collaborate with multiple agents from native Feishu workspaces.');
-    expect(screen.getAllByText('Project Guide').length).toBeGreaterThan(0);
-    expect(
-      screen.getByText('Collaborate with multiple agents from native Feishu workspaces.'),
-    ).toBeInTheDocument();
-    expect(screen.getByText('Parallel worktrees for faster development')).toBeInTheDocument();
-    expect(screen.getByText('Feishu task boards surface progress')).toBeInTheDocument();
-    expect(screen.getByText('Collaboration Flow')).toBeInTheDocument();
-    expect(screen.queryByText('Claude Code')).not.toBeInTheDocument();
-    expect(screen.queryByText('Core Modules')).not.toBeInTheDocument();
-    expect(screen.queryByText('Operating Boundary')).not.toBeInTheDocument();
-  });
-
-  it('surfaces the Mac app and daemon on a top-level Downloads page', async () => {
-    render(<App />);
-
-    fireEvent.click(await screen.findByRole('button', { name: 'Downloads' }));
-
-    // Page heading (topbar title from viewLabels).
-    expect(await screen.findByRole('heading', { name: 'Downloads' })).toBeInTheDocument();
-
-    // Experimental badge + notice on the Mac app surface.
-    expect(screen.getByText('Experimental')).toBeInTheDocument();
-    expect(screen.getByText(/The macOS client is experimental/i)).toBeInTheDocument();
-
-    // arm64 is published → an enabled download link to the artifact endpoint.
-    expect(screen.getByRole('link', { name: /Download for Apple Silicon/i })).toHaveAttribute(
-      'href',
-      '/admin/desktop/artifact?arch=arm64',
-    );
-
-    // x64 is not published → a disabled button with a "not published" hint.
-    const intelButton = screen.getByRole('button', { name: /Download for Intel/i });
-    expect(intelButton).toBeDisabled();
-    expect(intelButton).toHaveTextContent(/Not published yet/i);
-
-    // Daemon onboarding is reachable (download link), not a dead end.
-    expect(screen.getByRole('link', { name: /Download daemon tarball/i })).toHaveAttribute(
-      'href',
-      '/admin/daemon/artifact',
-    );
-  });
-
-  it('navigates from Downloads to the Machines tab via the daemon CTA', async () => {
-    render(<App />);
-
-    fireEvent.click(await screen.findByRole('button', { name: 'Downloads' }));
-    fireEvent.click(await screen.findByRole('button', { name: 'Go to Machines' }));
-
-    expect(await screen.findByText('Connect a machine')).toBeInTheDocument();
+    expect(within(navigation).queryByRole('button', { name: /Project Guide/i })).toBeNull();
+    expect(within(navigation).queryByRole('button', { name: /Release Notes/i })).toBeNull();
+    expect(within(navigation).queryByRole('button', { name: /Downloads/i })).toBeNull();
   });
 
   it('switches the whole console chrome and pages to Chinese', async () => {
@@ -649,22 +597,12 @@ describe('OpenClaudeTag Console', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: '中文' }));
 
-    expect(await screen.findByRole('button', { name: '项目手册' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '更新日志' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '项目手册' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '更新日志' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '下载' })).toBeNull();
     expect(screen.queryByText('本地服务')).not.toBeInTheDocument();
     expect(screen.getByText('面向飞书群协作的 AI 工程工作台。')).toBeInTheDocument();
     expect(screen.getByText('1. 绑定机器')).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole('button', { name: '项目手册' }));
-    await screen.findByText('在飞书原生协作空间里调度多个 agent 一起开发。');
-    expect(screen.getAllByText('项目手册').length).toBeGreaterThan(0);
-    expect(
-      screen.getByText('在飞书原生协作空间里调度多个 agent 一起开发。'),
-    ).toBeInTheDocument();
-    expect(screen.getByText('worktree 并行开发提升效率')).toBeInTheDocument();
-    expect(screen.getByText('飞书任务看板跟踪')).toBeInTheDocument();
-    expect(screen.queryByText('核心模块')).not.toBeInTheDocument();
-    expect(screen.queryByText('运维边界')).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: '会话' }));
     expect(await screen.findByText('打开飞书')).toBeInTheDocument();
@@ -681,70 +619,20 @@ describe('OpenClaudeTag Console', () => {
     expect(screen.queryByRole('button', { name: '主题' })).not.toBeInTheDocument();
   });
 
-  it('exposes the OpenClaudeTag user group from the console sidebar', async () => {
+  it('does not expose community marketing links from the console sidebar', async () => {
     render(<App />);
 
     expect(await screen.findByText('OpenClaudeTag')).toBeInTheDocument();
-    const userGroupLink = await screen.findByRole('link', {
-      name: 'Join the OpenClaudeTag user group',
-    });
-    expect(userGroupLink).toHaveAttribute(
-      'href',
-      'https://applink.example.com/client/chat/chatter/add_by_link?link_token=53fi1580-0482-4128-9915-b0974bc13301',
-    );
-    expect(userGroupLink).toHaveAttribute('target', '_blank');
-    expect(userGroupLink).toHaveAttribute('rel', 'noreferrer');
-    expect(userGroupLink).toHaveTextContent('User group');
+    expect(screen.queryByRole('link', { name: /user group/i })).toBeNull();
 
     fireEvent.click(screen.getByRole('button', { name: '中文' }));
-    expect(screen.getByRole('link', { name: '加入 OpenClaudeTag 用户群' })).toHaveTextContent(
-      '用户群',
-    );
-  });
-
-  it('renders release notes as a nav-tab page, not a modal drawer', async () => {
-    render(<App />);
-
-    // No sidebar "What's new" drawer trigger and no dialog anywhere.
-    expect(screen.queryByRole('button', { name: 'View release notes' })).toBeNull();
-
-    const navigation = await screen.findByRole('navigation', { name: 'Console sections' });
-    fireEvent.click(within(navigation).getByRole('button', { name: /Release Notes/i }));
-
-    // Topbar title + changelog content render in the workspace, no dialog/backdrop.
-    expect(await screen.findByRole('heading', { level: 1, name: 'Release Notes' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /v1\.0\.2/ })).toBeInTheDocument();
-    expect(screen.getAllByText('Core enhancements').length).toBeGreaterThan(0);
-    expect(screen.queryByRole('dialog')).toBeNull();
-    expect(screen.queryByTestId('release-notes-backdrop')).toBeNull();
+    expect(screen.queryByRole('link', { name: /用户群/ })).toBeNull();
   });
 
   it('omits the manual Refresh button from the sidebar', async () => {
     render(<App />);
     await screen.findByRole('navigation', { name: 'Console sections' });
     expect(screen.queryByRole('button', { name: /^Refresh$/i })).toBeNull();
-  });
-
-  it('collapses and expands version sections on the release-notes page', async () => {
-    render(<App />);
-
-    const navigation = await screen.findByRole('navigation', { name: 'Console sections' });
-    fireEvent.click(within(navigation).getByRole('button', { name: /Release Notes/i }));
-
-    const latest = await screen.findByRole('button', { name: /v1\.0\.5/ });
-    const older = screen.getByRole('button', { name: /v1\.0\.1/ });
-    // Latest expanded by default, older collapsed.
-    expect(latest).toHaveAttribute('aria-expanded', 'true');
-    expect(older).toHaveAttribute('aria-expanded', 'false');
-
-    // Expanding the older version is independent of the latest.
-    fireEvent.click(older);
-    expect(older).toHaveAttribute('aria-expanded', 'true');
-    expect(latest).toHaveAttribute('aria-expanded', 'true');
-
-    // Collapsing the latest version hides its body.
-    fireEvent.click(latest);
-    expect(latest).toHaveAttribute('aria-expanded', 'false');
   });
 
   it('renders overview counts from the admin API', async () => {

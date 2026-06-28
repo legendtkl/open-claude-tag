@@ -3399,8 +3399,8 @@ describe('desktop app artifact + config', () => {
       desktopArtifactPathArm64: '/tmp/does-not-exist-OpenClaudeTag-Console-arm64.dmg',
     });
     const response = await app.inject({ method: 'GET', url: '/admin/auth/config' });
-    // A stale env path must NOT advertise as available, or the Downloads page would
-    // enable a button that 404s on click.
+    // A stale env path must NOT advertise as available, or the console would
+    // enable an artifact action that 404s on click.
     expect(response.json()).toMatchObject({ desktopArtifacts: { arm64: false, x64: false } });
   });
 

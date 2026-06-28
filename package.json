@@ -2,7 +2,7 @@
   "name": "open-claude-tag",
   "private": true,
   "version": "0.1.0",
-  "description": "Vendor-neutral engineering assistant for team chat — pluggable channels and runtimes",
+  "description": "OpenClaudeTag vendor-neutral engineering assistant for team chat with pluggable channels and runtimes",
   "license": "MIT",
   "packageManager": "pnpm@9.15.4",
   "engines": {
