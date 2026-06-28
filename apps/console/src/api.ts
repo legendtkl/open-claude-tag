@@ -718,15 +718,6 @@ export async function updateFeishuApp(
   });
 }
 
-export async function syncFeishuAppMetadata(id: string): Promise<FeishuApp> {
-  return requestJson<FeishuApp>(
-    `/admin/feishu-apps/${encodeURIComponent(id)}/sync-metadata`,
-    {
-      method: 'POST',
-    },
-  );
-}
-
 export async function deleteFeishuApp(id: string): Promise<FeishuApp> {
   return requestJson<FeishuApp>(`/admin/feishu-apps/${encodeURIComponent(id)}`, {
     method: 'DELETE',

@@ -18,7 +18,6 @@ import {
   listMachines,
   setAdminToken,
   startFeishuAppRegistration,
-  syncFeishuAppMetadata,
   unbindBot,
   updateFeishuApp,
   updateChat,
@@ -206,25 +205,6 @@ describe('console API requests', () => {
     expect(init?.method).toBe('PATCH');
     expect(JSON.parse(String(init?.body))).toEqual({ botName: 'Reviewer Bot Local' });
     expect((init?.headers as Headers).get('Content-Type')).toBe('application/json');
-  });
-
-  it('POSTs to sync Feishu app metadata without a request body', async () => {
-    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>
-      jsonResponse({
-        id: 'app-1',
-        appId: 'cli_reviewer',
-        botName: 'Synced Reviewer Bot',
-      }),
-    );
-    vi.stubGlobal('fetch', fetchMock);
-
-    await syncFeishuAppMetadata('app-1');
-
-    const [input, init] = fetchMock.mock.calls[0]!;
-    expect(input).toBe('/admin/feishu-apps/app-1/sync-metadata');
-    expect(init?.method).toBe('POST');
-    expect(init?.body).toBeUndefined();
-    expect((init?.headers as Headers).has('Content-Type')).toBe(false);
   });
 
   it('starts one-click Feishu app registration with preset metadata', async () => {
