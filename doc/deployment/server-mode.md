@@ -38,7 +38,7 @@ The compose file runs Postgres (named volume `pgdata`), API, and Worker. Runtime
 | `SERVER_PUBLIC_URL`           | — (required for pairing)                       | Public base URL users' daemons dial, e.g. `https://your-server.example.com`. Surfaced via `GET /admin/auth/config` so the console's Machines install guide can substitute it into `--server-url <url>`.                                                                                         |
 | `DAEMON_GATEWAY_PORT`         | `3001`                                         | Port the worker's daemon gateway listens on.                                                                                                                                                                                                                                                 |
 | `DAEMON_ARTIFACT_PATH`        | —                                              | Absolute path to a packed daemon tarball (`.tgz`). When set, `GET /admin/daemon/artifact` streams it as `open-claude-tag-daemon.tgz` so the console "Download daemon" button works without a published registry. Unset ⇒ the endpoint returns 404 (the install guide still shows the npx method). |
-| `DESKTOP_ARTIFACT_PATH_ARM64` | —                                              | Absolute path to the Apple Silicon macOS app DMG. When set, `GET /admin/desktop/artifact?arch=arm64` streams it so the console Downloads page's Apple Silicon button works. Unset ⇒ the API falls back to standard `apps/desktop/release` discovery before reporting the arch unavailable.     |
+| `DESKTOP_ARTIFACT_PATH_ARM64` | —                                              | Absolute path to the Apple Silicon macOS app DMG. When set, `GET /admin/desktop/artifact?arch=arm64` streams it for direct/scripted downloads. Unset ⇒ the API falls back to standard `apps/desktop/release` discovery before reporting the arch unavailable.                                  |
 | `DESKTOP_ARTIFACT_PATH_X64`   | —                                              | Absolute path to the Intel macOS app DMG (`arch=x64`). Same behavior as the arm64 path; each arch is independently optional.                                                                                                                                                                 |
 | `DAEMON_GATEWAY_PUBLIC`       | `false`                                        | When `false`, the gateway binds loopback only (localhost mode). Set `true` behind a reverse proxy.                                                                                                                                                                                           |
 | `OPEN_TAG_ADMIN_TOKEN`      | —                                              | Break-glass admin-console token (acts as superadmin). Without it, `/admin/*` is loopback-only for unauthenticated requests.                                                                                                                                                                  |
@@ -177,12 +177,14 @@ export DAEMON_ARTIFACT_PATH="$PWD/apps/daemon/open-claude-tag-daemon-<version>.t
 
 If `DAEMON_ARTIFACT_PATH` is unset (or the file is missing), the endpoint returns 404 with a JSON hint and the console install guide still works via the npx method.
 
-### Producing the downloadable macOS app (DMG)
+### Producing the optional macOS app (DMG)
 
-The console **Downloads** page offers the macOS console app, served per-arch from
-`GET /admin/desktop/artifact?arch=arm64|x64`. The DMG is an Electron build that
-must be produced **on a Mac** (Linux/devbox hosts cannot build or sign it), then
-copied to the server. This is a post-merge ops step, like publishing the daemon:
+The web console no longer exposes a standalone Downloads page, but the API keeps
+the guarded desktop artifact endpoint for operators who distribute the macOS
+console app directly: `GET /admin/desktop/artifact?arch=arm64|x64`. The DMG is
+an Electron build that must be produced **on a Mac** (Linux/devbox hosts cannot
+build or sign it), then copied to the server. This is a post-merge ops step,
+like publishing the daemon:
 
 ```bash
 # 1. On a Mac, build (and ideally sign + notarize) the DMG from the repo root:
@@ -198,11 +200,11 @@ export DESKTOP_ARTIFACT_PATH_ARM64="$HOME/artifacts/OpenClaudeTag Console-<versi
 export DESKTOP_ARTIFACT_PATH_X64="$HOME/artifacts/OpenClaudeTag Console-<version>-x64.dmg"   # optional
 ```
 
-Each arch is independently optional: ship arm64 first and the Intel button renders
-disabled until `DESKTOP_ARTIFACT_PATH_X64` is set. The packaged app defaults its
-API target to the central server (`http://your-server.example.com:3000`); override the baked-in
-default at build/run time with `OPEN_TAG_DESKTOP_DEFAULT_API_URL`. The app is
-surfaced as **Experimental** on the Downloads page.
+Each arch is independently optional: ship arm64 first and leave
+`DESKTOP_ARTIFACT_PATH_X64` unset until an Intel build exists. The packaged app
+defaults its API target to the central server (`http://your-server.example.com:3000`);
+override the baked-in default at build/run time with
+`OPEN_TAG_DESKTOP_DEFAULT_API_URL`.
 
 ## Operations
 

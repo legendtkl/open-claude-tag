@@ -424,6 +424,31 @@ describe('console API requests', () => {
     expect(fallback.personalMode).toBe(false);
   });
 
+  it('keeps web auth config focused on fields the web console uses', async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>
+      jsonResponse({
+        devAuthEnabled: true,
+        personalMode: true,
+        serverPublicUrl: 'https://open-tag.example.com',
+        daemonVersion: '0.1.0',
+        desktopArtifacts: { arm64: true, x64: true },
+        desktopVersion: '0.1.0',
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const config = await getAuthConfig();
+
+    expect(config).toEqual({
+      devAuthEnabled: true,
+      personalMode: true,
+      serverPublicUrl: 'https://open-tag.example.com',
+      daemonVersion: '0.1.0',
+    });
+    expect(config).not.toHaveProperty('desktopArtifacts');
+    expect(config).not.toHaveProperty('desktopVersion');
+  });
+
   it('POSTs the chosen identity to /admin/auth/dev-login', async () => {
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>
       jsonResponse({ role: 'user', devAuth: true }),

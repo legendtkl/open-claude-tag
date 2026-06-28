@@ -124,7 +124,7 @@ function installHandler(options: HandlerOptions = {}) {
         },
       });
     }
-    // profiles / chats / task-boards / machines and anything else: empty list.
+    // profiles / chats / machines and anything else: empty list.
     return jsonResponse([]);
   });
   vi.stubGlobal('fetch', fetchMock);

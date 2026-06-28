@@ -1,7 +1,7 @@
 # Admin Console
 
 OpenClaudeTag ships a local operator console for managing first-class agents,
-Feishu bot bindings, chats, and Feishu task boards without editing YAML or SQL
+Feishu bot bindings, chats, and execution machines without editing YAML or SQL
 for common changes.
 
 ## Start Locally
@@ -33,10 +33,8 @@ rejected unless `OPEN_TAG_ADMIN_TOKEN` is configured and callers pass either
   internal backing configuration and are not exposed as a first-class console
   object.
 - Bots: Feishu app registrations and active agent bindings.
-- Chats: readable chat display names, linked task board names, observed agent
-  activity, runtime, and Feishu jump links.
-- Task Boards: Feishu task tracking spaces created by `/chat init`,
-  including readable task list names, status counts, and local task drill-downs.
+- Chats: readable chat display names, linked Feishu task list names, observed
+  agent activity, runtime, execution-machine binding, and Feishu jump links.
 
 Agent work directories are intentionally not configured on the Agent page. Task
 and chat configuration own workdir selection; new sessions fall back to the
@@ -66,7 +64,7 @@ Chat rows expose backend-generated Feishu AppLinks:
 https://applink.feishu.cn/client/chat/open?openChatId=<chat_id>
 ```
 
-Task board rows expose a task list AppLink when a tasklist GUID is known:
+Chat rows also expose a task list AppLink when a linked tasklist GUID is known:
 
 ```text
 https://applink.feishu.cn/client/todo/task_list?guid=<tasklist_guid>
@@ -75,12 +73,12 @@ https://applink.feishu.cn/client/todo/task_list?guid=<tasklist_guid>
 The frontend renders these links as jump actions and does not construct Feishu
 links itself.
 
-## Board Drill-Downs
+## Chat Task List Metadata
 
-The admin API enriches task board DTOs with linked tasks from
-`feishu_task_links`, joined to local `tasks` and `sessions`. The console groups
-those linked tasks by the last synced Feishu tracking status, falling back to the
-local task status when no Feishu status has been recorded yet.
+The admin API enriches chat DTOs with the linked Feishu task tracking space when
+one exists. The console shows the task list name, linked task count, and jump
+action directly in the chat row instead of exposing task boards as a separate
+top-level page.
 
 Readable names are stored locally:
 

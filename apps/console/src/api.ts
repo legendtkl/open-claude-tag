@@ -423,17 +423,10 @@ export interface AuthConfig {
   serverPublicUrl: string | null;
   /** Version of `@open-tag/daemon` this server distributes, or null. */
   daemonVersion: string | null;
-  /** Whether each macOS app arch is published for download from this server. */
-  desktopArtifacts: { arm64: boolean; x64: boolean };
-  /** Version of `@open-tag/desktop` this server distributes, or null. */
-  desktopVersion: string | null;
 }
 
 /** Endpoint that streams the packed daemon tarball (guard-light, see admin-api). */
 export const DAEMON_ARTIFACT_URL = '/admin/daemon/artifact';
-
-/** Endpoint that streams the macOS app DMG for a given arch (guard-light). */
-export const DESKTOP_ARTIFACT_URL = '/admin/desktop/artifact';
 
 /**
  * Read the auth config (whether the local dev-auth mode is on, plus the
@@ -451,11 +444,6 @@ export async function getAuthConfig(): Promise<AuthConfig> {
       personalMode: body.personalMode === true,
       serverPublicUrl: body.serverPublicUrl?.trim() || null,
       daemonVersion: body.daemonVersion?.trim() || null,
-      desktopArtifacts: {
-        arm64: body.desktopArtifacts?.arm64 === true,
-        x64: body.desktopArtifacts?.x64 === true,
-      },
-      desktopVersion: body.desktopVersion?.trim() || null,
     };
   } catch {
     return {
@@ -463,8 +451,6 @@ export async function getAuthConfig(): Promise<AuthConfig> {
       personalMode: false,
       serverPublicUrl: null,
       daemonVersion: null,
-      desktopArtifacts: { arm64: false, x64: false },
-      desktopVersion: null,
     };
   }
 }
