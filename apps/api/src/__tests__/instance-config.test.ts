@@ -56,7 +56,10 @@ describe('isolated instance config', () => {
   it('sets env vars needed by isolated scripts', () => {
     const env = buildIsolatedEnv({
       cwd: '/tmp/open-claude-tag/.worktrees/codex-session-d637cf65',
-      env: { DATABASE_URL: 'postgresql://open-claude-tag:open-claude-tag@localhost:5432/open-claude-tag' },
+      env: {
+        DATABASE_URL: 'postgresql://open-claude-tag:open-claude-tag@localhost:5432/open-claude-tag',
+        OPEN_ACCESS: 'true',
+      },
     });
 
     expect(env.OPEN_TAG_INSTANCE_ROLE).toBe('isolated');
@@ -71,6 +74,7 @@ describe('isolated instance config', () => {
       '/tmp/open-claude-tag/isolated/codex-session-d637cf65/worker.pid.json',
     );
     expect(env.OPEN_TAG_FEISHU_ACCESS).toBe('disabled');
+    expect(env.OPEN_ACCESS).toBe('false');
   });
 
   it('ignores inherited primary instance ids when deriving an isolated worktree config', () => {

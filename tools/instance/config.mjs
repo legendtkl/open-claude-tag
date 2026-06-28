@@ -172,6 +172,10 @@ export function buildIsolatedEnv({ cwd = process.cwd(), env = process.env } = {}
     DATABASE_URL: config.databaseUrl,
     OPEN_TAG_API_PID_PATH: config.apiPidPath,
     OPEN_TAG_WORKER_PID_PATH: config.workerPidPath,
+    // Isolated verification must fail closed even when a personal `.env` enables
+    // open-access mode for local demos. `tsx --env-file` preserves explicit env
+    // values, so this also prevents the repo `.env` from reopening owner gates.
+    OPEN_ACCESS: 'false',
     OPEN_TAG_FEISHU_ACCESS:
       (env.OPEN_TAG_FEISHU_ACCESS ?? readDotenvValue(cwd, 'OPEN_TAG_FEISHU_ACCESS')) ===
       'enabled'
