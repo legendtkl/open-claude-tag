@@ -39,6 +39,19 @@ export async function getHealth(
   }
 }
 
+export async function isHttpEndpointReachable(
+  url: string,
+  deps: Pick<HealthDeps, 'fetch'> = {},
+): Promise<boolean> {
+  const fetchImpl = deps.fetch ?? (globalThis.fetch as unknown as FetchLike);
+  try {
+    const res = await fetchImpl(url);
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Whether a health snapshot is our personal stack, fully ready. The instance-id
  * check is load-bearing: the api registers its pid before it listens, so a port

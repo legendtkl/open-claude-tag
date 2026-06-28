@@ -4,7 +4,12 @@ import { resolveDbProvider } from '../select.js';
 import type { PersonalConfig } from './config.js';
 import { ensureEmbeddedDb, stopEmbeddedDb } from './db-host.js';
 import { ensureEnvFile } from './env.js';
-import { getHealth, isPersonalHealthReady, waitForPersonalHealth } from './health.js';
+import {
+  getHealth,
+  isHttpEndpointReachable,
+  isPersonalHealthReady,
+  waitForPersonalHealth,
+} from './health.js';
 import { openBrowser } from './browser.js';
 import {
   acquireLock,
@@ -55,6 +60,20 @@ function pidAlive(pidPath: string): boolean {
   return Boolean(record && typeof record.pid === 'number' && isProcessAlive(record.pid));
 }
 
+export async function resolveConsoleUp(
+  consolePidPath: string,
+  consoleUrl: string,
+  deps: {
+    pidAlive?: (pidPath: string) => boolean;
+    isHttpEndpointReachable?: (url: string) => Promise<boolean>;
+  } = {},
+): Promise<boolean> {
+  const pidCheck = deps.pidAlive ?? pidAlive;
+  if (pidCheck(consolePidPath)) return true;
+  const httpCheck = deps.isHttpEndpointReachable ?? isHttpEndpointReachable;
+  return httpCheck(consoleUrl);
+}
+
 async function ensureDatabaseUp(ctx: RuntimeContext): Promise<{ databaseUrl: string }> {
   const { config, effectiveEnv, cliPath, log } = ctx;
   if (config.dbMode === 'embedded') {
@@ -86,11 +105,12 @@ export function buildUpDeps(ctx: RuntimeContext): UpDeps {
         config.dbMode === 'embedded'
           ? pidAlive(config.dbHostPidPath) && (await isDatabaseReachable(ctx))
           : await isDatabaseReachable(ctx);
+      const consoleUp = await resolveConsoleUp(config.consolePidPath, config.consoleUrl);
       const allAlive =
         dbUp &&
         pidAlive(config.apiPidPath) &&
         pidAlive(config.workerPidPath) &&
-        pidAlive(config.consolePidPath);
+        consoleUp;
       if (!allAlive) return { allUp: false, health: null };
       const health = await getHealth(config.healthUrl);
       return { allUp: isPersonalHealthReady(health), health };
@@ -158,7 +178,7 @@ export function buildStatusDeps(ctx: RuntimeContext): StatusDeps {
         databaseDetail,
         api: pidAlive(config.apiPidPath),
         worker: pidAlive(config.workerPidPath),
-        console: pidAlive(config.consolePidPath),
+        console: await resolveConsoleUp(config.consolePidPath, config.consoleUrl),
         health: await getHealth(config.healthUrl),
       };
     },

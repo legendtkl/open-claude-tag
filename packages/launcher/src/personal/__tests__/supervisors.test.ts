@@ -1,6 +1,10 @@
-import { describe, expect, it } from 'vitest';
-import { missingBuildSentinels, buildServiceEnv } from '../supervisors.js';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { missingBuildSentinels, buildServiceEnv, startConsole } from '../supervisors.js';
 import type { PersonalConfig } from '../config.js';
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
 
 describe('buildServiceEnv', () => {
   it('overlays the personal knobs on the effective env', () => {
@@ -91,5 +95,26 @@ describe('missingBuildSentinels', () => {
       deps(present, { types: { main: './dist/index.js' } }), // no build script
     );
     expect(missing).toEqual([]);
+  });
+});
+
+describe('startConsole', () => {
+  it('reuses an already reachable console instead of spawning another process', async () => {
+    const fetch = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({}),
+    }));
+    vi.stubGlobal('fetch', fetch);
+
+    const result = await startConsole(
+      {
+        repoRoot: '/repo',
+        consoleUrl: 'http://127.0.0.1:8080',
+      } as PersonalConfig,
+      {},
+    );
+
+    expect(result.status).toBe('already-running');
+    expect(fetch).toHaveBeenCalledWith('http://127.0.0.1:8080');
   });
 });

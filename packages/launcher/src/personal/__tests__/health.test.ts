@@ -1,5 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
-import { isPersonalHealthReady, waitForPersonalHealth, type HealthSnapshot } from '../health.js';
+import {
+  isHttpEndpointReachable,
+  isPersonalHealthReady,
+  waitForPersonalHealth,
+  type HealthSnapshot,
+} from '../health.js';
 
 const ready: HealthSnapshot = {
   status: 'ok',
@@ -68,5 +73,35 @@ describe('waitForPersonalHealth', () => {
       now: () => (t += 300),
     });
     expect(isPersonalHealthReady(health)).toBe(false);
+  });
+});
+
+describe('isHttpEndpointReachable', () => {
+  it('returns true for an ok response', async () => {
+    const fetch = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({}),
+    }));
+
+    await expect(isHttpEndpointReachable('http://console', { fetch })).resolves.toBe(true);
+  });
+
+  it('returns false for non-ok responses and network errors', async () => {
+    await expect(
+      isHttpEndpointReachable('http://console', {
+        fetch: vi.fn(async () => ({
+          ok: false,
+          json: async () => ({}),
+        })),
+      }),
+    ).resolves.toBe(false);
+
+    await expect(
+      isHttpEndpointReachable('http://console', {
+        fetch: vi.fn(async () => {
+          throw new Error('down');
+        }),
+      }),
+    ).resolves.toBe(false);
   });
 });
