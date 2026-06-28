@@ -1,4 +1,4 @@
-import { truncateText } from '@open-tag/core-types';
+import { truncateText, type RuntimeName } from '@open-tag/core-types';
 
 export interface CardElement {
   tag: string;
@@ -723,7 +723,7 @@ export function buildFailedCardsFromSegments(
 export interface WorkDirConfirmCardParams {
   workDir?: string;
   goal: string;
-  defaultRuntime: 'claude_code' | 'codex';
+  defaultRuntime: RuntimeName;
   sessionId: string;
   chatId: string;
   replyLanguage: string;

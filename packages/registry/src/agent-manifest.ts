@@ -2,8 +2,9 @@ import { readdir, readFile } from 'node:fs/promises';
 import { join, relative } from 'node:path';
 import { load as loadYaml } from 'js-yaml';
 import { z } from 'zod';
+import { KNOWN_RUNTIME_NAMES } from '@open-tag/core-types';
 
-const RuntimeSchema = z.enum(['claude_code', 'codex']);
+const RuntimeSchema = z.enum(KNOWN_RUNTIME_NAMES);
 
 export const AgentManifestSchema = z.object({
   version: z.union([z.literal(1), z.string()]).optional(),

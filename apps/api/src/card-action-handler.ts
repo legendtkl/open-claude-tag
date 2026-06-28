@@ -4,7 +4,7 @@ import { desc, eq } from 'drizzle-orm';
 import { feishuCardActionReceipts, sessions, taskRuns, tasks } from '@open-tag/storage';
 import type { Database } from '@open-tag/storage';
 import { TaskStatus, errorMessage, normalizeRuntimeHint } from '@open-tag/core-types';
-import type { IntentType } from '@open-tag/core-types';
+import type { IntentType, RuntimeName } from '@open-tag/core-types';
 import {
   FeishuClient,
   TASK_CARD_ACTION_RETRY,
@@ -348,7 +348,7 @@ function cloneTaskConstraints(value: unknown, originalTaskId: string, sourceActi
 // set, but a runtime added to the registry is recognized with no change here.
 function isKnownRuntime(
   value: string | null | undefined,
-): value is 'claude_code' | 'codex' {
+): value is RuntimeName {
   return value != null && getRuntimeDescriptor(value) !== undefined;
 }
 
@@ -356,7 +356,7 @@ function resolveRetryRuntime(
   actionValue: TaskCardActionValue,
   latestRuntime: string | null | undefined,
   originalRuntimeHint: string | null,
-): 'claude_code' | 'codex' | 'auto' {
+): RuntimeName | 'auto' {
   if (actionValue.action === TASK_CARD_ACTION_RETRY_RUNTIME) {
     return actionValue.runtime ?? 'codex';
   }
@@ -633,7 +633,7 @@ function getString(value: unknown): string {
   return typeof value === 'string' ? value : '';
 }
 
-function normalizeRuntime(value: string): 'claude_code' | 'codex' {
+function normalizeRuntime(value: string): RuntimeName {
   return value === 'codex' ? 'codex' : 'claude_code';
 }
 

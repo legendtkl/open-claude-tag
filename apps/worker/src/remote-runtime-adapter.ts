@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import type { TaskSpec, RuntimeEvent, ArtifactRef } from '@open-tag/core-types';
+import type { TaskSpec, RuntimeEvent, ArtifactRef, RuntimeName } from '@open-tag/core-types';
 import {
   SeqTracker,
   ENVELOPE_VERSION,
@@ -60,7 +60,7 @@ export interface RemoteRuntimeAdapterOptions {
   gateway: GatewayDispatchPort;
   machine: MachineRow;
   /** Underlying runtime name (claude_code/codex) — what `name()` returns. */
-  runtime: 'claude_code' | 'codex';
+  runtime: RuntimeName;
   workdirHints: WorkdirHints;
   runtimeEnv?: Record<string, string>;
   /** Inline images (base64) materialized server-side for this dispatch (D11). */
@@ -86,7 +86,7 @@ export interface RemoteRuntimeAdapterOptions {
 export class RemoteRuntimeAdapter implements RuntimeAdapter {
   private readonly gateway: GatewayDispatchPort;
   private readonly machine: MachineRow;
-  private readonly runtime: 'claude_code' | 'codex';
+  private readonly runtime: RuntimeName;
   private readonly workdirHints: WorkdirHints;
   private readonly runtimeEnv?: Record<string, string>;
   private readonly images?: InlineImage[];

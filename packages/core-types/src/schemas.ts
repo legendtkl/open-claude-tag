@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { ReplyLanguageSchema } from './reply-language.js';
+import { KNOWN_RUNTIME_NAMES } from './enums.js';
 
 /**
  * `null` is the persisted encoding for the "auto" / inherit runtime: a task row's
@@ -78,7 +79,12 @@ export const NormalizedEventSchema = z.object({
   timestamp: z.number(),
 });
 
-const RuntimeBackendSchema = z.enum(['claude_code', 'codex']);
+/**
+ * Runtime backend name schema, sourced from {@link KNOWN_RUNTIME_NAMES} (issue
+ * #16) so every consumer validates against the one runtime-name set. Exported so
+ * downstream packages reuse it instead of re-declaring the literal.
+ */
+export const RuntimeBackendSchema = z.enum(KNOWN_RUNTIME_NAMES);
 const AgentLifecycleStatusSchema = z.enum(['active', 'inactive', 'archived']);
 
 // ── Agent Identity ──
@@ -229,7 +235,7 @@ export const TaskSpecSchema = z.object({
   ]),
   goal: z.string(),
   agentProfile: z.string().optional(),
-  runtimeHint: z.enum(['claude_code', 'codex', 'auto']).default('auto'),
+  runtimeHint: z.enum([...KNOWN_RUNTIME_NAMES, 'auto'] as const).default('auto'),
   /**
    * Effective model for this task (resolved from the agent profile's
    * `defaultModel`). Drives codex `--model`. When
