@@ -2,8 +2,10 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   decidePromptMetadataConfirmation,
   decideStickyAdhocWorkDirFallback,
+  isExplicitRuntimeSource,
   maybeExtractPromptMetadata,
   resolveTaskRuntime,
+  resolveTaskRuntimeWithSource,
   shouldSkipPromptMetadataExtraction,
 } from '../prompt-metadata.js';
 
@@ -29,6 +31,97 @@ describe('resolveTaskRuntime', () => {
     // falls through to the default — a legacy session/agent never crashes.
     expect(resolveTaskRuntime('coco', 'coco', 'coco')).toBe('claude_code');
     expect(resolveTaskRuntime('auto', 'coco')).toBe('claude_code');
+  });
+});
+
+describe('resolveTaskRuntimeWithSource', () => {
+  it('classifies a confirmed runtime as confirmed (explicit)', () => {
+    const selection = resolveTaskRuntimeWithSource({
+      confirmedRuntime: 'codex',
+      runtimeBackend: 'claude_code',
+      runtimeHint: 'claude_code',
+      agentDefaultRuntime: 'claude_code',
+    });
+    expect(selection).toEqual({ runtime: 'codex', source: 'confirmed' });
+    expect(isExplicitRuntimeSource(selection.source)).toBe(true);
+  });
+
+  it('classifies a session runtime backend as session_resume (not explicit)', () => {
+    const selection = resolveTaskRuntimeWithSource({
+      runtimeBackend: 'codex',
+      runtimeHint: 'claude_code',
+      agentDefaultRuntime: 'claude_code',
+    });
+    expect(selection).toEqual({ runtime: 'codex', source: 'session_resume' });
+    expect(isExplicitRuntimeSource(selection.source)).toBe(false);
+  });
+
+  it('classifies an explicit per-message hint as explicit_hint', () => {
+    const selection = resolveTaskRuntimeWithSource({
+      runtimeHint: 'codex',
+      agentDefaultRuntime: 'claude_code',
+    });
+    expect(selection).toEqual({ runtime: 'codex', source: 'explicit_hint' });
+    expect(isExplicitRuntimeSource(selection.source)).toBe(true);
+  });
+
+  it('classifies the agent default as agent_default when the hint is auto (not explicit)', () => {
+    const selection = resolveTaskRuntimeWithSource({
+      runtimeHint: 'auto',
+      agentDefaultRuntime: 'codex',
+    });
+    expect(selection).toEqual({ runtime: 'codex', source: 'agent_default' });
+    expect(isExplicitRuntimeSource(selection.source)).toBe(false);
+  });
+
+  it('classifies the global default as global_default when nothing else applies', () => {
+    const selection = resolveTaskRuntimeWithSource({ runtimeHint: 'auto' });
+    expect(selection).toEqual({ runtime: 'claude_code', source: 'global_default' });
+    expect(isExplicitRuntimeSource(selection.source)).toBe(false);
+  });
+
+  it('does NOT promote the agent default for an explicit but unknown hint', () => {
+    // An explicitly typed but unregistered runtime falls through to the global
+    // default rather than silently using the agent default (preserves prior
+    // worker behavior).
+    const selection = resolveTaskRuntimeWithSource({
+      runtimeHint: 'coco',
+      agentDefaultRuntime: 'codex',
+    });
+    expect(selection).toEqual({ runtime: 'claude_code', source: 'global_default' });
+  });
+
+  it('does not classify an auto turn as confirmed even when the resolved runtime equals the agent default (sticky-passthrough regression)', () => {
+    // Regression for issue #8 fail-fast over-trigger: the worker re-persists the
+    // auto-resolved runtime into taskConstraints.confirmedRuntime to avoid
+    // re-confirming. Classification must use the GENUINE (pre-sticky)
+    // confirmation — here `confirmedRuntime` is undefined — so an auto turn whose
+    // resolved runtime happens to equal the agent default stays `agent_default`
+    // (fallback allowed), NOT `confirmed` (fail-fast).
+    const selection = resolveTaskRuntimeWithSource({
+      confirmedRuntime: undefined,
+      runtimeBackend: null,
+      runtimeHint: 'auto',
+      agentDefaultRuntime: 'codex',
+    });
+    expect(selection).toEqual({ runtime: 'codex', source: 'agent_default' });
+    expect(isExplicitRuntimeSource(selection.source)).toBe(false);
+
+    // Same for a resumed session backend: still session_resume, not confirmed.
+    const resumed = resolveTaskRuntimeWithSource({
+      confirmedRuntime: undefined,
+      runtimeBackend: 'codex',
+      runtimeHint: 'auto',
+    });
+    expect(resumed).toEqual({ runtime: 'codex', source: 'session_resume' });
+    expect(isExplicitRuntimeSource(resumed.source)).toBe(false);
+  });
+
+  it('keeps resolveTaskRuntime value-equivalent to the source-aware resolver', () => {
+    expect(resolveTaskRuntime('claude_code', 'claude_code', 'codex')).toBe('codex');
+    expect(resolveTaskRuntime('auto', 'codex')).toBe('codex');
+    expect(resolveTaskRuntime('codex', null)).toBe('codex');
+    expect(resolveTaskRuntime('auto', null)).toBe('claude_code');
   });
 });
 

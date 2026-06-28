@@ -35,38 +35,93 @@ describe('RuntimeManager', () => {
     expect(manager.listAdapters()).toEqual(['claude_code', 'codex']);
   });
 
-  it('returns preferred healthy adapter', () => {
-    const manager = new RuntimeManager();
-    const claude = mockAdapter('claude_code');
-    const codex = mockAdapter('codex');
-    manager.register(claude);
-    manager.register(codex);
+  describe('requireHealthy (explicit selection — never substitutes)', () => {
+    it('returns the requested adapter when registered and healthy', async () => {
+      const manager = new RuntimeManager();
+      const codex = mockAdapter('codex', true);
+      manager.register(mockAdapter('claude_code', true));
+      manager.register(codex);
 
-    expect(manager.getHealthy('codex')).toBe(codex);
+      await expect(manager.requireHealthy('codex')).resolves.toBe(codex);
+    });
+
+    it('throws when the requested runtime is not registered', async () => {
+      const manager = new RuntimeManager();
+      manager.register(mockAdapter('claude_code', true));
+
+      await expect(manager.requireHealthy('codex')).rejects.toThrow(
+        'Requested runtime "codex" is not registered',
+      );
+    });
+
+    it('throws when the requested runtime is unhealthy (no claude substitution)', async () => {
+      const manager = new RuntimeManager();
+      manager.register(mockAdapter('claude_code', true));
+      manager.register(mockAdapter('codex', false));
+
+      await expect(manager.requireHealthy('codex')).rejects.toThrow(
+        /Requested runtime "codex" is unavailable/,
+      );
+    });
+
+    it('treats a thrown healthcheck as unavailable', async () => {
+      const manager = new RuntimeManager();
+      const codex = mockAdapter('codex', true);
+      (codex.healthcheck as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('no creds'));
+      manager.register(codex);
+
+      await expect(manager.requireHealthy('codex')).rejects.toThrow(/unavailable: no creds/);
+    });
   });
 
-  it('falls back to another adapter when preferred is unhealthy', async () => {
-    const manager = new RuntimeManager();
-    const claude = mockAdapter('claude_code', true);
-    const codex = mockAdapter('codex', false);
-    manager.register(claude);
-    manager.register(codex);
+  describe('getHealthyFallback (auto/default selection — may substitute)', () => {
+    it('returns the preferred adapter without fallback when it is live-healthy', async () => {
+      const manager = new RuntimeManager();
+      const claude = mockAdapter('claude_code', true);
+      const codex = mockAdapter('codex', true);
+      manager.register(claude);
+      manager.register(codex);
 
-    // Run health check to populate cache
-    await manager.checkHealth();
+      const result = await manager.getHealthyFallback('codex');
+      expect(result?.adapter).toBe(codex);
+      expect(result?.usedFallback).toBe(false);
+      expect(result?.requested).toBe('codex');
+      expect(result?.selected).toBe('codex');
+    });
 
-    const result = manager.getHealthy('codex');
-    expect(result).toBe(claude);
-  });
+    it('live-checks and falls back when the preferred adapter is unhealthy', async () => {
+      const manager = new RuntimeManager();
+      const claude = mockAdapter('claude_code', true);
+      const codex = mockAdapter('codex', false);
+      manager.register(claude);
+      manager.register(codex);
 
-  it('runs health checks', async () => {
-    const manager = new RuntimeManager();
-    const claude = mockAdapter('claude_code');
-    manager.register(claude);
+      const result = await manager.getHealthyFallback('codex');
+      expect(result?.adapter).toBe(claude);
+      expect(result?.usedFallback).toBe(true);
+      expect(result?.requested).toBe('codex');
+      expect(result?.selected).toBe('claude_code');
+      expect(result?.reason).toMatch(/codex/);
+    });
 
-    const results = await manager.checkHealth();
-    expect(results.size).toBe(1);
-    expect(results.get('claude_code')?.healthy).toBe(true);
+    it('falls back when the preferred runtime is not registered', async () => {
+      const manager = new RuntimeManager();
+      const claude = mockAdapter('claude_code', true);
+      manager.register(claude);
+
+      const result = await manager.getHealthyFallback('codex');
+      expect(result?.adapter).toBe(claude);
+      expect(result?.usedFallback).toBe(true);
+      expect(result?.reason).toMatch(/not registered/);
+    });
+
+    it('returns undefined when no adapter is healthy', async () => {
+      const manager = new RuntimeManager();
+      manager.register(mockAdapter('claude_code', false));
+      manager.register(mockAdapter('codex', false));
+
+      await expect(manager.getHealthyFallback('codex')).resolves.toBeUndefined();
+    });
   });
 
   it('cancels a specific execution across registered adapters', async () => {

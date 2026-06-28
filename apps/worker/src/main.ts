@@ -140,9 +140,12 @@ import { toRunningCardUpdate, type RunningCardSource } from './runtime-event-rou
 import {
   decidePromptMetadataConfirmation,
   decideStickyAdhocWorkDirFallback,
+  isExplicitRuntimeSource,
   maybeExtractPromptMetadata,
   resolveTaskRuntime,
+  resolveTaskRuntimeWithSource,
 } from './prompt-metadata.js';
+import { selectLocalRuntimeAdapter, type RuntimeFallbackRecord } from './runtime-selection.js';
 import { decideWorkspaceMode } from './workspace-mode.js';
 import { resolveTaskWorkDir, readDefaultWorkDirEnv } from './agent-workdir.js';
 import { resolveCodexBinaryPath } from './codex-binary.js';
@@ -1654,8 +1657,6 @@ async function processTask(job: { id: string; data: TaskJobData }): Promise<void
     // on the machine that produced them.
     let reviewContextWorkDir: string | undefined;
     let effectiveWorkDir = taskConstraints.confirmedWorkDir as string | undefined;
-    const effectiveRuntime =
-      confirmedRuntime ?? (taskConstraints.confirmedRuntime as string | undefined);
 
     // Transition: QUEUED → RUNNING
     await taskLifecycle.transitionTask(taskId, TaskStatus.RUNNING);
@@ -1663,12 +1664,32 @@ async function processTask(job: { id: string; data: TaskJobData }): Promise<void
     // Select runtime adapter — prefer the runtime from previous turn for resume continuity.
     // 'auto' from runtimeHint means no explicit user choice; resolve to the default runtime
     // explicitly so the fallback does not depend on adapter registration order.
-    const preferredRuntime = resolveTaskRuntime(
-      runtimeHintForSelection,
-      effectiveRuntimeState.runtimeBackend,
-      effectiveRuntime,
-    );
+    //
+    // We track the SELECTION SOURCE (issue #8): an explicit user choice
+    // (confirmed runtime or an explicit per-message hint) must run EXACTLY that
+    // runtime and fail fast if it is unavailable, never silently substituting
+    // another. Auto/default/resume selections may fall back. The resolved
+    // runtime VALUE is unchanged vs the prior `resolveTaskRuntime` call — the
+    // raw hint + agent default are passed separately so the source classifier
+    // can distinguish "user asked for X" from "agent default is X".
+    //
+    // Source classification uses the GENUINE confirmation captured BEFORE the
+    // sticky-passthrough write above. The passthrough re-persists the
+    // auto-resolved runtime into `taskConstraints.confirmedRuntime` to avoid
+    // re-confirming, so reading it back here would mislabel an auto/default/
+    // resume turn as `confirmed` and wrongly force fail-fast. The resolved VALUE
+    // is unaffected: the passthrough only ever writes the auto-resolved runtime,
+    // which the lower-precedence inputs reproduce.
+    const runtimeSelection = resolveTaskRuntimeWithSource({
+      confirmedRuntime,
+      runtimeBackend: effectiveRuntimeState.runtimeBackend,
+      runtimeHint,
+      agentDefaultRuntime,
+    });
+    const preferredRuntime = runtimeSelection.runtime;
+    const runtimeExplicitlySelected = isExplicitRuntimeSource(runtimeSelection.source);
     let adapter: RuntimeAdapter | undefined;
+    let runtimeFallback: RuntimeFallbackRecord | null = null;
 
     // ── Machine routing (D6/D7/D13) ──
     // Resolve the task's execution machine BEFORE local adapter selection: the
@@ -1776,11 +1797,29 @@ async function processTask(job: { id: string; data: TaskJobData }): Promise<void
       }
     }
 
-    // Local adapter selection only when no remote machine took the task.
+    // Local adapter selection only when no remote machine took the task. An
+    // explicit runtime fails fast here (requireHealthy throws → terminal-failure
+    // catch surfaces a clear failed card); an auto/default selection may fall
+    // back, and the substitution is logged now + persisted as a task run event
+    // once the run record exists below.
     if (!adapter) {
-      adapter = runtimeManager.getHealthy(preferredRuntime);
-      if (!adapter) {
-        throw new Error('No healthy runtime adapter available');
+      const localSelection = await selectLocalRuntimeAdapter(
+        runtimeManager,
+        preferredRuntime,
+        runtimeExplicitlySelected,
+      );
+      adapter = localSelection.adapter;
+      runtimeFallback = localSelection.fallback;
+      if (runtimeFallback) {
+        logger.warn(
+          {
+            taskId,
+            preferredRuntime: runtimeFallback.preferredRuntime,
+            fallbackRuntime: runtimeFallback.fallbackRuntime,
+            reason: runtimeFallback.reason,
+          },
+          'Runtime fallback used for non-explicit selection',
+        );
       }
     }
 
@@ -2255,6 +2294,16 @@ async function processTask(job: { id: string; data: TaskJobData }): Promise<void
       })
       .returning();
     taskRunRecord = createdTaskRun;
+
+    // Persist a runtime-fallback marker now that a run record (and thus a valid
+    // run id FK) exists. This records preferredRuntime, fallbackRuntime, and the
+    // reason for the substitution so auto/default fallbacks are auditable.
+    if (runtimeFallback) {
+      await persistRuntimeEvent({
+        type: 'status',
+        message: `Runtime fallback: requested "${runtimeFallback.preferredRuntime}" unavailable (${runtimeFallback.reason}); using "${runtimeFallback.fallbackRuntime}"`,
+      });
+    }
 
     // Prepare task spec
     // Effective model: the agent profile's defaultModel, with an ops-level env
