@@ -210,7 +210,12 @@ export async function handleEvent(
       taskId,
       intent,
       runtime,
-      goal: effectiveText,
+      // Return the already-persisted goal (which includes referenced-message
+      // context appended at creation), not the bare current text. A recovery
+      // redelivery re-enqueues this goal (neutral/Slack path), so returning
+      // `effectiveText` here silently dropped the referenced context. Per
+      // assertDuplicateTaskMatches above, existing.goal === taskGoal.
+      goal: existing.goal,
       imageAttachment,
       fileAttachment,
     };
