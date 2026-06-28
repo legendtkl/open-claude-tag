@@ -172,6 +172,7 @@ export class RemoteRuntimeAdapter implements RuntimeAdapter {
       executionId: this.dispatchId,
       workspacePath: workspace.workspacePath,
       cwd: workspace.cwd ?? workspace.workspacePath,
+      artifactsDir: workspace.artifactsDir,
       readOnly: workspace.readOnly ?? false,
     };
   }

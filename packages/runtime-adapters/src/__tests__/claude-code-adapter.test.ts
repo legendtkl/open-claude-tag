@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { readFile, writeFile } from 'fs/promises';
+import { mkdir, readFile, writeFile } from 'fs/promises';
 import { join } from 'path';
 import { ClaudeCodeAdapter } from '../claude-code-adapter.js';
 import { createWorkspace, cleanupWorkspace } from '../workspace.js';
@@ -1365,5 +1365,78 @@ describe('ClaudeCodeAdapter', () => {
     } finally {
       await cleanupWorkspace(runId).catch(() => {});
     }
+  });
+
+  describe('artifact collection (issue #9 — scratch artifactsDir alignment)', () => {
+    it('emits artifact events ONLY for the scratch artifactsDir, never cwd/artifacts', async () => {
+      const runId = `test-${randomUUID()}`;
+      const workspace = await createWorkspace(runId);
+      // Diverge cwd from the scratch workspacePath (mirrors every real worker
+      // mode: worktree / external repo / agent home). cwd/artifacts holds an
+      // unrelated pre-existing file that must NOT be surfaced as an artifact.
+      workspace.cwd = workspace.repoDir;
+      try {
+        await mkdir(join(workspace.cwd, 'artifacts'), { recursive: true });
+        await writeFile(join(workspace.cwd, 'artifacts', 'decoy.txt'), 'pre-existing repo file');
+        await writeFile(join(workspace.artifactsDir, 'deliverable.txt'), 'real output');
+
+        (mockQuery as any).mockReturnValue(fakeStream(okResult));
+        const spec = makeSpec('task-artifact-1', 'produce a file');
+        const handle = await adapter.prepare(spec, workspace);
+        expect(handle.artifactsDir).toBe(workspace.artifactsDir);
+
+        const events: RuntimeEvent[] = [];
+        for await (const event of adapter.execute(handle, spec)) events.push(event);
+
+        const artifactNames = events
+          .filter((e) => e.type === 'artifact')
+          .map((e) => (e as any).ref.name);
+        expect(artifactNames).toEqual(['deliverable.txt']);
+        const artifactPaths = events
+          .filter((e) => e.type === 'artifact')
+          .map((e) => (e as any).ref.path);
+        expect(artifactPaths).toEqual([join(workspace.artifactsDir, 'deliverable.txt')]);
+      } finally {
+        await cleanupWorkspace(runId).catch(() => {});
+      }
+    });
+
+    it('emits no artifact events when the scratch artifactsDir is empty', async () => {
+      const runId = `test-${randomUUID()}`;
+      const workspace = await createWorkspace(runId);
+      // A decoy under cwd/artifacts must still be ignored even when the scratch
+      // dir is empty (proves the scan target, not just dedupe).
+      workspace.cwd = workspace.repoDir;
+      try {
+        await mkdir(join(workspace.cwd, 'artifacts'), { recursive: true });
+        await writeFile(join(workspace.cwd, 'artifacts', 'decoy.txt'), 'pre-existing repo file');
+
+        (mockQuery as any).mockReturnValue(fakeStream(okResult));
+        const spec = makeSpec('task-artifact-2', 'no deliverable');
+        const handle = await adapter.prepare(spec, workspace);
+
+        const events: RuntimeEvent[] = [];
+        for await (const event of adapter.execute(handle, spec)) events.push(event);
+
+        expect(events.filter((e) => e.type === 'artifact')).toHaveLength(0);
+      } finally {
+        await cleanupWorkspace(runId).catch(() => {});
+      }
+    });
+
+    it('writes the absolute scratch artifactsDir hint into TASK.md', async () => {
+      const runId = `test-${randomUUID()}`;
+      const workspace = await createWorkspace(runId);
+      try {
+        const spec = makeSpec('task-artifact-3', 'hint check');
+        await adapter.prepare(spec, workspace);
+        const taskMd = await readFile(join(workspace.workspacePath, 'TASK.md'), 'utf8');
+        expect(taskMd).toContain(
+          `Place any deliverable files you want surfaced as task artifacts under: ${workspace.artifactsDir}`,
+        );
+      } finally {
+        await cleanupWorkspace(runId).catch(() => {});
+      }
+    });
   });
 });

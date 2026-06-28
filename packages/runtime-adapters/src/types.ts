@@ -35,6 +35,15 @@ export interface RuntimeHandle {
   workspacePath: string;
   /** Resolved agent cwd. Set by adapter.prepare() from workspace.cwd ?? workspace.workspacePath. */
   cwd: string;
+  /**
+   * Canonical scratch artifacts directory (`WorkspaceContext.artifactsDir`). The
+   * adapter scans EXACTLY this dir for output artifacts so the events it emits
+   * agree with what the worker/daemon persist. Never `cwd/artifacts`: in real
+   * modes `cwd` is a worktree / external repo / agent home and scanning it would
+   * both diverge from the persistence scan and pick up unrelated pre-existing
+   * files (artifact-table bloat), violating the scratch-only invariant above.
+   */
+  artifactsDir: string;
   /** Whether this run should use the readonly workflow. */
   readOnly: boolean;
   /** Environment variables injected into the runtime process for this task. */

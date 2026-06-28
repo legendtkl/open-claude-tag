@@ -616,6 +616,7 @@ class ArtifactWritingAdapter {
       executionId: (spec as unknown as { taskId: string }).taskId,
       workspacePath: workspace.workspacePath,
       cwd: workspace.cwd ?? workspace.workspacePath,
+      artifactsDir: workspace.artifactsDir,
       readOnly: Boolean(workspace.readOnly),
     };
   }

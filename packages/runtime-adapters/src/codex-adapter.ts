@@ -119,7 +119,8 @@ export class CodexAdapter implements RuntimeAdapter {
     const taskMdPath = join(workspace.workspacePath, 'TASK.md');
     await writeFile(
       taskMdPath,
-      `# Task: ${spec.goal}\n\nType: ${spec.taskType}\nSession: ${spec.sessionId}\n`,
+      `# Task: ${spec.goal}\n\nType: ${spec.taskType}\nSession: ${spec.sessionId}\n` +
+        `\nPlace any deliverable files you want surfaced as task artifacts under: ${workspace.artifactsDir}\n`,
     );
     const imagePaths = await downloadImageAttachmentsToWorkspace({
       spec,
@@ -140,6 +141,7 @@ export class CodexAdapter implements RuntimeAdapter {
       executionId: spec.taskId,
       workspacePath: workspace.workspacePath,
       cwd: workspace.cwd ?? workspace.workspacePath,
+      artifactsDir: workspace.artifactsDir,
       readOnly: workspace.readOnly ?? false,
       runtimeEnv: workspace.runtimeEnv,
       ...(imagePaths.length > 0 ? { imagePaths } : {}),
@@ -155,6 +157,7 @@ export class CodexAdapter implements RuntimeAdapter {
     yield* this.runSDKTurn(
       spec.goal,
       handle.cwd,
+      handle.artifactsDir,
       handle.executionId,
       spec,
       undefined,
@@ -181,6 +184,7 @@ export class CodexAdapter implements RuntimeAdapter {
     yield* this.runSDKTurn(
       prompt,
       workspace.cwd ?? workspace.workspacePath,
+      workspace.artifactsDir,
       options.executionId ?? options.taskId ?? `resume-${Date.now()}`,
       undefined,
       sdkSessionId,
@@ -236,6 +240,7 @@ export class CodexAdapter implements RuntimeAdapter {
   private async *runSDKTurn(
     prompt: string,
     cwd: string,
+    artifactsDir: string,
     executionId: string,
     spec?: TaskSpec,
     resumeThreadId?: string,
@@ -420,8 +425,10 @@ export class CodexAdapter implements RuntimeAdapter {
         yield { type: 'session_created', sdkSessionId: threadId };
       }
 
-      // Collect artifacts
-      const artifacts = await collectArtifactsFromDir(join(cwd, 'artifacts'));
+      // Collect artifacts from the canonical scratch artifacts dir (NOT
+      // `cwd/artifacts`): aligns these events with the worker/daemon persistence
+      // scan and honors the scratch-only invariant (handle.artifactsDir).
+      const artifacts = await collectArtifactsFromDir(artifactsDir);
       for (const art of artifacts) {
         yield { type: 'artifact', ref: art };
       }
