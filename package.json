@@ -3,6 +3,7 @@
   "private": true,
   "version": "0.1.0",
   "description": "Vendor-neutral engineering assistant for team chat — pluggable channels and runtimes",
+  "license": "MIT",
   "packageManager": "pnpm@9.15.4",
   "engines": {
     "node": ">=20.0.0"

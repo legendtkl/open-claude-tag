@@ -12,7 +12,7 @@ CI status badge: once the GitHub repository slug is known, replace the static
 ![Status](https://img.shields.io/badge/status-alpha-orange)
 ![Version](https://img.shields.io/badge/version-0.1.0-blue)
 ![Node](https://img.shields.io/badge/node-%E2%89%A520-339933?logo=node.js&logoColor=white)
-![License](https://img.shields.io/badge/license-TBD-lightgrey)
+![License](https://img.shields.io/badge/license-MIT-green)
 
 [简体中文 / Chinese](./README.zh-CN.md) · [AGENTS.md (contributor guide)](./AGENTS.md)
 
@@ -814,5 +814,4 @@ PR/MR text. Never commit credentials.
 
 ## License
 
-**License: to be determined.** There is no `LICENSE` file yet; the maintainers
-will add one (e.g. MIT or Apache-2.0). Until then, all rights reserved.
+Released under the [MIT License](./LICENSE).
