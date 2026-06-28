@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { shouldSkipTaskExecution } from '../debug-task-control.js';
+import { shouldSkipTaskExecution, shouldSuppressLoopbackFeishuFeedback } from '../debug-task-control.js';
 
 describe('shouldSkipTaskExecution', () => {
   it('returns true when debugSkipExecution is enabled', () => {
@@ -16,5 +16,16 @@ describe('shouldSkipTaskExecution', () => {
 
   it('returns false for undefined constraints', () => {
     expect(shouldSkipTaskExecution(undefined)).toBe(false);
+  });
+});
+
+describe('shouldSuppressLoopbackFeishuFeedback', () => {
+  it('returns true only for local debug loopback tasks without a Feishu app id', () => {
+    expect(shouldSuppressLoopbackFeishuFeedback({ debugLoopback: true })).toBe(true);
+    expect(
+      shouldSuppressLoopbackFeishuFeedback({ debugLoopback: true }, '00000000-0000-4000-8000-000000000001'),
+    ).toBe(false);
+    expect(shouldSuppressLoopbackFeishuFeedback({ debugLoopback: false })).toBe(false);
+    expect(shouldSuppressLoopbackFeishuFeedback(null)).toBe(false);
   });
 });
