@@ -11,10 +11,18 @@ export interface HealthSnapshot {
   [key: string]: unknown;
 }
 
-export type FetchLike = (
-  url: string,
-  init?: { signal?: AbortSignal },
-) => Promise<{ ok: boolean; json: () => Promise<unknown> }>;
+export interface FetchResponseLike {
+  ok: boolean;
+  json?: () => Promise<unknown>;
+  text?: () => Promise<string>;
+  headers?:
+    | {
+        get?: (name: string) => string | null;
+      }
+    | Record<string, string | undefined>;
+}
+
+export type FetchLike = (url: string, init?: { signal?: AbortSignal }) => Promise<FetchResponseLike>;
 
 export interface HealthDeps {
   fetch?: FetchLike;
@@ -23,6 +31,8 @@ export interface HealthDeps {
 }
 
 const defaultWait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+const OPEN_TAG_CONSOLE_HEADER = 'x-open-claude-tag-console';
+const OPEN_TAG_CONSOLE_TITLE = '<title>OpenClaudeTag Console</title>';
 
 /** Fetch and parse `/health`. Returns null on any network/parse error. */
 export async function getHealth(
@@ -33,6 +43,7 @@ export async function getHealth(
   try {
     const res = await fetchImpl(healthUrl);
     if (!res.ok) return null;
+    if (!res.json) return null;
     return (await res.json()) as HealthSnapshot;
   } catch {
     return null;
@@ -47,6 +58,32 @@ export async function isHttpEndpointReachable(
   try {
     const res = await fetchImpl(url);
     return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+function readHeader(response: FetchResponseLike, name: string): string | null {
+  const headers = response.headers;
+  if (!headers) return null;
+  if ('get' in headers && typeof headers.get === 'function') {
+    return headers.get(name);
+  }
+  const record = headers as Record<string, string | undefined>;
+  return record[name] ?? record[name.toLowerCase()] ?? null;
+}
+
+export async function isOpenClaudeTagConsoleReachable(
+  url: string,
+  deps: Pick<HealthDeps, 'fetch'> = {},
+): Promise<boolean> {
+  const fetchImpl = deps.fetch ?? (globalThis.fetch as unknown as FetchLike);
+  try {
+    const res = await fetchImpl(url);
+    if (!res.ok) return false;
+    if (readHeader(res, OPEN_TAG_CONSOLE_HEADER) === '1') return true;
+    if (!res.text) return false;
+    return (await res.text()).includes(OPEN_TAG_CONSOLE_TITLE);
   } catch {
     return false;
   }

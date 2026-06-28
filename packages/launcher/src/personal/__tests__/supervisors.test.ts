@@ -102,7 +102,11 @@ describe('startConsole', () => {
   it('reuses an already reachable console instead of spawning another process', async () => {
     const fetch = vi.fn(async () => ({
       ok: true,
+      headers: {
+        get: (name: string) => (name === 'x-open-claude-tag-console' ? '1' : null),
+      },
       json: async () => ({}),
+      text: async () => '',
     }));
     vi.stubGlobal('fetch', fetch);
 

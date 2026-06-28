@@ -343,11 +343,17 @@ const initialData: ConsoleData = {
   machines: [],
 };
 
+function isHiddenConsoleRuntime(runtime: string | null | undefined): runtime is string {
+  return Boolean(
+    runtime && (HIDDEN_CONSOLE_RUNTIMES.has(runtime) || !AGENT_RUNTIME_OPTIONS.includes(runtime)),
+  );
+}
+
 function visibleRuntimeValue(runtime: string | null | undefined): string {
   // Normalize an empty, hidden, or no-longer-selectable runtime (e.g. a legacy
   // `coco` default after that runtime was removed) to '' so the select can render
   // it and editing a legacy agent isn't blocked by an option that no longer exists.
-  if (!runtime || HIDDEN_CONSOLE_RUNTIMES.has(runtime) || !AGENT_RUNTIME_OPTIONS.includes(runtime)) {
+  if (!runtime || isHiddenConsoleRuntime(runtime)) {
     return '';
   }
   return runtime;
@@ -2539,6 +2545,7 @@ function AgentsView({
     description: '',
     systemPrompt: '',
     defaultRuntime: '',
+    originalDefaultRuntime: null as string | null,
     defaultModel: '',
     runtimeEnv: '',
     claudeAuthMode: 'subscription' as ClaudeAuthMode,
@@ -2647,6 +2654,7 @@ function AgentsView({
 
   function openAgentEditor(agent: Agent) {
     const profile = profileById.get(agent.profileId) ?? null;
+    const effectiveDefaultRuntime = agent.defaultRuntime ?? profile?.defaultRuntime ?? null;
     const existingClaudeAuthMode = hasClaudeCredentialKeys(agent.runtimeEnvKeys)
       ? 'custom'
       : 'subscription';
@@ -2656,7 +2664,8 @@ function AgentsView({
       displayName: agent.displayName,
       description: agent.description ?? '',
       systemPrompt: unifiedProfileSystemPrompt(profile),
-      defaultRuntime: visibleRuntimeValue(agent.defaultRuntime ?? profile?.defaultRuntime),
+      defaultRuntime: visibleRuntimeValue(effectiveDefaultRuntime),
+      originalDefaultRuntime: effectiveDefaultRuntime,
       defaultModel: profile?.defaultModel ?? '',
       runtimeEnv: '',
       claudeAuthMode: existingClaudeAuthMode,
@@ -3064,7 +3073,12 @@ function AgentsView({
                   )
                     return;
                   void runAction(t.notices.agentUpdated, async () => {
-                    const defaultRuntime = agentEdit.defaultRuntime || null;
+                    const shouldPreserveHiddenRuntime =
+                      !agentEdit.defaultRuntime &&
+                      isHiddenConsoleRuntime(agentEdit.originalDefaultRuntime);
+                    const defaultRuntime = shouldPreserveHiddenRuntime
+                      ? agentEdit.originalDefaultRuntime
+                      : agentEdit.defaultRuntime || null;
                     const displayName = agentEdit.displayName.trim();
                     const runtimeEnvText = agentEdit.runtimeEnv.trim();
                     const claudeEnv: Record<string, string> = {};

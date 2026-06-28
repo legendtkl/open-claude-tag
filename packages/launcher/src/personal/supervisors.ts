@@ -12,7 +12,7 @@ import { join } from 'path';
 import { pathToFileURL } from 'url';
 import type { PersonalConfig } from './config.js';
 import { PERSONAL_INSTANCE_ID } from './config.js';
-import { isHttpEndpointReachable } from './health.js';
+import { isOpenClaudeTagConsoleReachable } from './health.js';
 import { isProcessAlive, writePidRecord } from './process-control.js';
 
 interface StackConfig {
@@ -114,7 +114,7 @@ export async function startConsole(
 ): Promise<{ status: 'started' | 'already-running' }> {
   const serveScript = join(config.repoRoot, 'apps', 'console', 'serve-console.mjs');
 
-  if (await isHttpEndpointReachable(config.consoleUrl)) {
+  if (await isOpenClaudeTagConsoleReachable(config.consoleUrl)) {
     return { status: 'already-running' };
   }
 
@@ -165,7 +165,12 @@ export async function startConsole(
         const res = await fetch(config.consoleUrl);
         // Require a real 200 from our own still-alive child — never record the
         // pid if a foreign server answered or our child has already died.
-        if (res.ok && !childExited && isProcessAlive(pid)) {
+        if (
+          res.ok &&
+          res.headers.get('x-open-claude-tag-console') === '1' &&
+          !childExited &&
+          isProcessAlive(pid)
+        ) {
           writePidRecord(config.consolePidPath, {
             pid,
             role: 'console',

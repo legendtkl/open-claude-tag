@@ -9,6 +9,7 @@ const DIST = process.env.CONSOLE_DIST ?? new URL('.', import.meta.url).pathname 
 const PORT = Number(process.env.CONSOLE_PORT ?? 8080);
 const HOST = process.env.CONSOLE_HOST ?? '0.0.0.0';
 const API = new URL(process.env.API_URL ?? 'http://127.0.0.1:3000');
+const CONSOLE_MARKER_HEADER = 'x-open-claude-tag-console';
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -78,7 +79,10 @@ export function createConsoleServer({ dist = DIST, api = API } = {}) {
     readFile(filePath)
       .catch(() => readFile(join(dist, 'index.html'))) // SPA fallback
       .then((buf) => {
-        res.writeHead(200, { 'content-type': MIME[extname(filePath)] ?? 'text/html; charset=utf-8' });
+        res.writeHead(200, {
+          'content-type': MIME[extname(filePath)] ?? 'text/html; charset=utf-8',
+          [CONSOLE_MARKER_HEADER]: '1',
+        });
         res.end(buf);
       })
       .catch(() => res.writeHead(404).end('not found'));
