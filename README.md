@@ -40,6 +40,24 @@ through a runtime adapter, and reports progress back to the chat.
 > execution. Starting only the API will accept messages and show ACK cards, but
 > tasks stay stuck at `Request received`.
 
+## Product Preview
+
+OpenClaudeTag includes a local admin console for creating agents, binding
+Feishu/Lark apps, checking chat permissions, and monitoring task flow. The
+console screenshot is captured from the real React admin UI in the default
+browser, backed by a sanitized proxy over the local API. The Feishu thread
+preview is a sanitized redraw derived from an existing Feishu usage screenshot:
+it keeps only the generic task lifecycle labels, not raw group content. Names,
+app IDs, chat IDs, task IDs, secrets, workspace paths, and message content are
+redacted or replaced with placeholders.
+
+<img src="doc/images/product-console-bots.jpg" alt="Sanitized OpenClaudeTag admin console showing a Feishu app bound to an agent" width="900" />
+
+The chat experience keeps work in-thread: the bot acknowledges the request,
+asks for confirmation when needed, and posts completion back to the same topic.
+
+<img src="doc/images/product-feishu-thread.jpg" alt="Sanitized Feishu group thread showing the OpenClaudeTag task lifecycle" width="900" />
+
 ## Features
 
 | Feature | Summary |
