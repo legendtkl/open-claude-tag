@@ -3,7 +3,6 @@ import {
   Activity,
   ArrowLeft,
   ArrowRight,
-  BookOpen,
   Bot,
   Check,
   Compass,
@@ -1040,9 +1039,7 @@ export function App() {
             onAuthenticated={refresh}
           />
         ) : null}
-        {view === 'settings' ? (
-          <SettingsView data={data} locale={locale} me={me} refreshConsole={refresh} />
-        ) : null}
+        {view === 'settings' ? <SettingsView locale={locale} me={me} refreshConsole={refresh} /> : null}
       </section>
     </main>
   );
@@ -4467,12 +4464,10 @@ function MachinesView({
 }
 
 function SettingsView({
-  data,
   locale,
   me,
   refreshConsole,
 }: {
-  data: ConsoleData;
   locale: Locale;
   me: Me | null;
   refreshConsole: () => Promise<void>;
@@ -4490,7 +4485,6 @@ function SettingsView({
   const [computerUsers, setComputerUsers] = useState<ComputerAccessUser[]>([]);
   const [computerUsersLoading, setComputerUsersLoading] = useState(false);
   const [savingComputerUserId, setSavingComputerUserId] = useState<string | null>(null);
-  const [savingChatMemoryKey, setSavingChatMemoryKey] = useState<string | null>(null);
   const copy = {
     en: {
       desktop: 'Desktop',
@@ -4519,16 +4513,6 @@ function SettingsView({
       computerAccessSaved: 'Computer access updated',
       loadingUsers: 'Loading users',
       noUsers: 'No platform users found',
-      chatMemory: 'Chat memory',
-      chatMemoryHint: 'Daily summaries use an existing agent from each chat.',
-      chat: 'Chat',
-      summary: 'Summary',
-      defaultAgent: 'Summary agent',
-      chatAgent: 'existing chat agent',
-      nextSummary: 'Next summary',
-      lastError: 'Last error',
-      chatMemorySaved: 'Chat memory updated',
-      noChats: 'No chats found',
     },
     zh: {
       desktop: '桌面端',
@@ -4557,16 +4541,6 @@ function SettingsView({
       computerAccessSaved: 'Computer 权限已更新',
       loadingUsers: '正在加载用户',
       noUsers: '暂无平台用户',
-      chatMemory: '群聊记忆',
-      chatMemoryHint: '每日总结使用各群聊中已有的 agent。',
-      chat: '群聊',
-      summary: '总结',
-      defaultAgent: '总结 agent',
-      chatAgent: '已有群聊 agent',
-      nextSummary: '下一次总结',
-      lastError: '最近错误',
-      chatMemorySaved: '群聊记忆已更新',
-      noChats: '暂无群聊',
     },
   }[locale];
 
@@ -4684,73 +4658,6 @@ function SettingsView({
     }
   }
 
-  async function setChatMemory(chat: Chat, memoryEnabled: boolean) {
-    const key = `${chat.tenantKey}:${chat.chatId}`;
-    setSavingChatMemoryKey(key);
-    setSettingsError(null);
-    setSettingsNotice(null);
-    try {
-      await updateChat(chat.tenantKey, chat.chatId, { memoryEnabled });
-      setSettingsNotice(copy.chatMemorySaved);
-      await refreshConsole();
-    } catch (err) {
-      setSettingsError((err as Error).message);
-    } finally {
-      setSavingChatMemoryKey(null);
-    }
-  }
-
-  const chatMemoryPanel = (
-    <section className="panel settings-panel">
-      <div className="panel-title">
-        <BookOpen size={18} /> {copy.chatMemory}
-      </div>
-      <small className="field-hint">{copy.chatMemoryHint}</small>
-      <DataTable
-        columns={[copy.chat, copy.summary]}
-        rowKeys={data.chats.map((chat) => `${chat.tenantKey}:${chat.chatId}`)}
-        rows={data.chats.map((chat) => {
-          const key = `${chat.tenantKey}:${chat.chatId}`;
-          const isSaving = savingChatMemoryKey === key;
-          const agentName = chat.defaultAgent?.displayName ?? copy.chatAgent;
-          return [
-            <strong className="settings-user-label" key="chat">
-              {chat.displayName}
-              <small>
-                {copy.defaultAgent}: {agentName}
-              </small>
-            </strong>,
-            <div className="settings-toggle-stack" key="summary">
-              <label className="toggle-row">
-                <input
-                  aria-label={`${copy.chatMemory} ${chat.displayName}`}
-                  checked={chat.memoryEnabled}
-                  disabled={isSaving}
-                  onChange={(event) => {
-                    void setChatMemory(chat, event.currentTarget.checked);
-                  }}
-                  type="checkbox"
-                />
-                <span>{chat.memoryEnabled ? copy.enabled : copy.disabled}</span>
-              </label>
-              {chat.memoryEnabled ? (
-                <small className="field-hint">
-                  {copy.nextSummary}: {formatDate(chat.memorySummaryNextRunAt, locale)}
-                </small>
-              ) : null}
-              {chat.memorySummaryLastError ? (
-                <small className="danger-text">
-                  {copy.lastError}: {chat.memorySummaryLastError}
-                </small>
-              ) : null}
-            </div>,
-          ];
-        })}
-        empty={copy.noChats}
-      />
-    </section>
-  );
-
   const computerAccessPanel = isSuperadmin ? (
     <section className="panel settings-panel">
       <div className="panel-title">
@@ -4847,7 +4754,6 @@ function SettingsView({
             {settingsNotice}
           </div>
         ) : null}
-        {chatMemoryPanel}
         {adminTokenPanel}
         {computerAccessPanel}
       </div>
@@ -4863,7 +4769,6 @@ function SettingsView({
           {settingsNotice}
         </div>
       ) : null}
-      {chatMemoryPanel}
       {adminTokenPanel}
       {computerAccessPanel}
       <section className="panel settings-panel">
