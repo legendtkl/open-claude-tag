@@ -21,11 +21,15 @@
  * but ONLY on the `task_created` path — so the channel's ack-message handle can
  * be captured and threaded into the job (`constraints.ackDelivery`) for the
  * worker to update that same message in place to its terminal state (UX parity
- * with lark's live card). A `task_duplicate` (recovery redelivery) re-enqueues
- * idempotently and does NOT re-ACK: the original `task_created` dispatch already
- * posted the one ACK. Because same-task dispatch is serialized by the route's
- * held dedup claim, two dispatches for one task can never run concurrently, so
- * the captured ack handle and the enqueued job stay consistent.
+ * with lark's live card). The handle is also persisted to the task row
+ * (`constraints.ackDelivery`) so a recovery redelivery can recover it (issue #14).
+ * A `task_duplicate` (recovery redelivery) re-enqueues idempotently and does NOT
+ * re-ACK: the original `task_created` dispatch already posted the one ACK. Instead
+ * it REHYDRATES the persisted handle into the job so the worker still updates that
+ * first message in place rather than orphaning it and posting a separate terminal.
+ * Because same-task dispatch is serialized by the route's held dedup claim, two
+ * dispatches for one task can never run concurrently, so the captured ack handle
+ * and the enqueued job stay consistent.
  */
 import { TaskStatus, stableUuidFromKey, normalizeRuntimeHint } from '@open-tag/core-types';
 import type { ChannelKind, ConversationRef, InboundMessage } from '@open-tag/channel-core';
@@ -59,6 +63,18 @@ export interface NeutralDispatchContext {
   transitionTask(taskId: string, status: TaskStatus): Promise<void>;
   enqueue(job: TaskJobData): Promise<string>;
   resolveSender(kind: ChannelKind): FeedbackChannelSender;
+  /**
+   * Persist the captured ACK-message handle for `taskId` (issue #14) so a recovery
+   * redelivery can rehydrate it. Called best-effort at the call site: a failure
+   * must never block the durable enqueue.
+   */
+  persistAckDelivery(taskId: string, ack: NeutralAckDelivery): Promise<void>;
+  /**
+   * Load a previously persisted ACK handle for `taskId`, or null when none was
+   * stored (e.g. the original ACK send failed). Used only on the recovery
+   * (`task_duplicate`) path to rehydrate the handle WITHOUT re-ACKing.
+   */
+  loadAckDelivery(taskId: string): Promise<NeutralAckDelivery | null>;
   logger: Logger;
 }
 
@@ -222,6 +238,28 @@ async function sendNeutralAck(
 }
 
 /**
+ * Best-effort persist of the captured ack handle (issue #14). Mirrors the ACK's
+ * best-effort contract: a failure is logged and swallowed so it can never block
+ * the durable enqueue. The handle still rides the job payload regardless; this DB
+ * copy only backstops a recovery redelivery (`task_duplicate`) that must rehydrate
+ * the handle WITHOUT re-ACKing.
+ */
+async function persistAckDeliveryBestEffort(
+  ctx: NeutralDispatchContext,
+  taskId: string,
+  ack: NeutralAckDelivery,
+): Promise<void> {
+  try {
+    await ctx.persistAckDelivery(taskId, ack);
+  } catch (err) {
+    ctx.logger.warn(
+      { err, taskId },
+      'Neutral dispatch: persisting ack handle failed (best-effort, non-fatal)',
+    );
+  }
+}
+
+/**
  * Dispatch a neutral inbound message: resolve the session, create the task with a
  * deterministic id, move it to QUEUED, send a best-effort ACK (only on
  * `task_created`, capturing its message handle), then enqueue the durable job with
@@ -278,10 +316,23 @@ export async function dispatchNeutralMessage(
   // (ADR-0008). A `task_duplicate` is a recovery redelivery: the original
   // `task_created` dispatch already posted the one ACK, so it must not re-ACK —
   // that also avoids a second ack competing with the already-enqueued handle.
-  const ackDelivery =
-    result.type === 'task_created'
-      ? await sendNeutralAck(ctx, message, queuedResult)
-      : undefined;
+  let ackDelivery: NeutralAckDelivery | undefined;
+  if (result.type === 'task_created') {
+    ackDelivery = await sendNeutralAck(ctx, message, queuedResult);
+    // Persist the captured handle BEFORE the enqueue so a recovery redelivery can
+    // rehydrate it (issue #14). Best-effort: a persistence failure is swallowed so
+    // it never blocks the durable enqueue (the handle still rides the job payload).
+    if (ackDelivery) {
+      await persistAckDeliveryBestEffort(ctx, result.taskId, ackDelivery);
+    }
+  } else {
+    // A non-terminal `task_duplicate` is the recovery redelivery of a dispatch that
+    // ACKed then failed before (or during) enqueue. Rehydrate the persisted ack
+    // handle so the worker still updates that first "Task queued" message in place
+    // instead of posting an orphaned second terminal message — WITHOUT re-ACKing
+    // (issue #14). A missing handle (original ACK failed) threads none (back-compat).
+    ackDelivery = (await ctx.loadAckDelivery(result.taskId)) ?? undefined;
+  }
   // Durable boundary: a failure propagates so the caller keeps the dedup claim
   // open for recovery. The task is never marked terminal for a transient failure.
   await ctx.enqueue(buildNeutralQueuedTask(message, sessionId, queuedResult, ackDelivery));

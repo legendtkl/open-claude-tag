@@ -32,6 +32,8 @@ import {
   bindWaitingContractsToPrimaryTask,
   createWaitingContract,
   setWaitingContractAckMessageId,
+  setTaskAckDelivery,
+  getTaskAckDelivery,
 } from '@open-tag/storage';
 import { sql, eq, desc, and, isNull, or } from 'drizzle-orm';
 import type { AgentAccessContext, Database } from '@open-tag/storage';
@@ -137,6 +139,7 @@ import {
   createSlackInboundDispatch,
 } from './slack-events.js';
 import { dispatchNeutralMessage } from './neutral-dispatch.js';
+import type { NeutralAckDelivery } from './neutral-dispatch.js';
 import { WorkerHealthMonitor } from './worker-health-monitor.js';
 import {
   WorktreeRetentionCleanupService,
@@ -3412,6 +3415,11 @@ if (SLACK_SIGNING_SECRET) {
             transitionTask: (taskId, status) => transitionTask(db, taskId, status),
             enqueue: (job) => queue.enqueue(job),
             resolveSender: (kind) => resolveChannelSender(kind, { slackSender: slackFeedbackSender }),
+            // Persist/rehydrate the ACK handle through the task's existing
+            // constraints jsonb (issue #14) so a recovery redelivery updates the
+            // original ACK message in place instead of orphaning it.
+            persistAckDelivery: (taskId, ack) => setTaskAckDelivery(db, taskId, ack),
+            loadAckDelivery: (taskId) => getTaskAckDelivery<NeutralAckDelivery>(db, taskId),
             logger,
           });
         },

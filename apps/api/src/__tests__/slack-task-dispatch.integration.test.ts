@@ -20,11 +20,19 @@ import type { ConversationRef, DeliveryRef, OutboundMessage } from '@open-tag/ch
 import type { FeedbackChannelSender } from '@open-tag/feishu-adapter';
 import { handleEvent, transitionTask } from '@open-tag/orchestrator';
 import { resolveSession } from '@open-tag/session';
-import { createDb, inboundEvents, sessions, tasks } from '@open-tag/storage';
+import {
+  createDb,
+  inboundEvents,
+  sessions,
+  tasks,
+  setTaskAckDelivery,
+  getTaskAckDelivery,
+} from '@open-tag/storage';
 import type { Database } from '@open-tag/storage';
 import type { Logger } from '@open-tag/observability';
 import { createSlackEventsHandler, createSlackInboundDispatch } from '../slack-events.js';
 import { dispatchNeutralMessage } from '../neutral-dispatch.js';
+import type { NeutralAckDelivery } from '../neutral-dispatch.js';
 import { resolveChannelSender } from '../channel-sender-resolver.js';
 
 const describePg =
@@ -129,6 +137,8 @@ describePg('Slack neutral task dispatch (Postgres)', () => {
             transitionTask: (taskId, status) => transitionTask(db, taskId, status),
             enqueue: (job) => enqueueFn(job as { taskId: string }),
             resolveSender: (kind) => resolveChannelSender(kind, { slackSender: stubSender }),
+            persistAckDelivery: (taskId, ack) => setTaskAckDelivery(db, taskId, ack),
+            loadAckDelivery: (taskId) => getTaskAckDelivery<NeutralAckDelivery>(db, taskId),
             logger: noopLogger,
           });
         },
