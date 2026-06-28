@@ -8,7 +8,6 @@ import {
   RuntimeBackendSchema,
   MemoryItemSchema,
   AgentProfileSchema,
-  AgentSchema,
   FeishuAppRegistrationSchema,
   AgentBotBindingSchema,
   AgentSessionStateSchema,
@@ -156,20 +155,6 @@ describe('Agent identity schemas', () => {
     expect(profile.skillRefs).toEqual([]);
     expect(profile.sourceType).toBe('builtin');
     expect(profile.status).toBe('active');
-  });
-
-  it('parses a routable private agent', () => {
-    const agent = AgentSchema.parse({
-      handle: 'reviewer',
-      displayName: 'Reviewer',
-      profileId: randomUUID(),
-      visibility: 'private',
-    });
-
-    expect(agent.tenantKey).toBe('default');
-    expect(agent.scopeType).toBe('system');
-    expect(agent.visibility).toBe('private');
-    expect(agent.accessPolicy).toEqual({});
   });
 
   it('parses Feishu app, bot binding, session state, and delegation records', () => {
