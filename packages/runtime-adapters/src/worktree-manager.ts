@@ -6,10 +6,11 @@ import { join } from 'path';
 import { createLogger } from '@open-tag/observability';
 import { runWorktreeHook } from './worktree-hooks.js';
 
-// `execAsync` is reserved for static commands that need a shell pipeline (e.g.
-// the `git symbolic-ref ... || git rev-parse ...` fallback). Anything that
-// interpolates user-controllable paths (worktreePath / branch / repoRoot) MUST
-// go through `execFileAsync` so the path cannot break out of its quoting.
+// `execAsync` is reserved for static, shell-only commands (`git worktree list
+// --porcelain`, `pnpm install`). Anything that interpolates user-controllable
+// paths (worktreePath / branch / repoRoot) — or that should stay portable, like
+// branch detection — MUST go through `execFileAsync` so no path can break out of
+// its quoting and no POSIX-only shell syntax is required.
 const execAsync = promisify(execCb);
 const execFileAsync = promisify(execFileCb);
 const logger = createLogger('worktree-manager');
@@ -40,16 +41,27 @@ function branchName(sessionId: string): string {
  * projects) so neither hardcodes a branch name — this repo defaults to `master`,
  * and others may use `develop` / `trunk`.
  *
- * Uses `execAsync` for the static `||` shell fallback; `repoRoot` is passed as
- * `cwd`, never interpolated into the command string (see file header note).
+ * Each git command runs via `execFileAsync` (no shell), so detection works
+ * cross-platform — it avoids the POSIX-only `2>/dev/null` redirection a shell
+ * pipeline would need (daemons run on user machines, including Windows).
  */
 export async function resolveBaseBranch(repoRoot: string): Promise<string> {
   try {
-    const { stdout } = await execAsync(
-      'git symbolic-ref refs/remotes/origin/HEAD --short 2>/dev/null || git rev-parse --abbrev-ref HEAD',
+    const { stdout } = await execFileAsync(
+      'git',
+      ['symbolic-ref', 'refs/remotes/origin/HEAD', '--short'],
       { cwd: repoRoot },
     );
-    return stdout.trim().replace(/^origin\//, '') || 'HEAD';
+    const branch = stdout.trim().replace(/^origin\//, '');
+    if (branch) return branch;
+  } catch {
+    // origin/HEAD unset (no remote or no default) — fall through to current branch
+  }
+  try {
+    const { stdout } = await execFileAsync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], {
+      cwd: repoRoot,
+    });
+    return stdout.trim() || 'HEAD';
   } catch {
     return 'HEAD';
   }
