@@ -95,7 +95,7 @@ type Locale = 'en' | 'zh';
 type RefreshConsole = (options?: { showLoading?: boolean }) => Promise<void>;
 
 const SYSTEM_PROMPT_PLACEHOLDER = 'You are a strict code reviewer, be concise and focus on bugs.';
-const HIDDEN_CONSOLE_RUNTIMES = new Set<string>([]);
+const HIDDEN_CONSOLE_RUNTIMES = new Set<string>(['coco']);
 const AGENT_RUNTIME_OPTIONS = ['', 'codex', 'claude_code'];
 const CLAUDE_BASE_URL_ENV_KEY = 'ANTHROPIC_BASE_URL';
 const CLAUDE_API_KEY_ENV_KEY = 'ANTHROPIC_API_KEY';

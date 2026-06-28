@@ -58,7 +58,7 @@ const fixtures = {
       status: 'online',
       ownerOpenId: 'ou_owner_1234567890',
       lastSeenAt: now,
-      runtimes: ['claude_code', 'codex'],
+      runtimes: ['claude_code', 'codex', 'coco'],
       createdAt: now,
     },
     {
@@ -1527,6 +1527,9 @@ describe('OpenClaudeTag Console', () => {
     expect(Array.from(runtimeSelect.options).map((option) => option.textContent)).toContain(
       'Claude Code',
     );
+    expect(Array.from(runtimeSelect.options).map((option) => option.textContent)).not.toContain(
+      'Coco',
+    );
 
     // Credential fields stay hidden until claude_code is selected.
     expect(within(dialog).queryByLabelText('API Base URL')).not.toBeInTheDocument();
@@ -1963,8 +1966,10 @@ describe('OpenClaudeTag Console', () => {
     // Runtimes render with their proper-noun display names (old-laptop = codex).
     expect(screen.getByText('Codex')).toBeInTheDocument();
     // claude_code is now a first-class console runtime, so the machine's
-    // advertised runtimes render it alongside Codex, using brand names.
+    // advertised runtimes render it alongside Codex, using brand names; internal
+    // runtimes stay hidden from the operator-facing console.
     expect(screen.getByText('Claude Code, Codex')).toBeInTheDocument();
+    expect(screen.queryByText('Coco')).not.toBeInTheDocument();
     const guideTitle = screen.getByText('Connect a machine');
     const machinesStack = firstMachine.closest('.machines-stack');
     expect(machinesStack).toContainElement(guideTitle.closest('section'));
