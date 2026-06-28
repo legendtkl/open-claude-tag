@@ -389,6 +389,7 @@ export interface AdminApiStoreOptions {
   }) => Pick<FeishuClient, 'listApplicationScopes' | 'applyApplicationScopes'> &
     Partial<Pick<FeishuClient, 'getApplicationInfo'>>;
   feishuTaskTrackingEnabled?: boolean;
+  feishuDocumentCommentsEnabled?: boolean;
   registerFeishuApp?: typeof registerOneClickFeishuApp;
   feishuAppRegistrationReadyTimeoutMs?: number;
   afterFeishuAppRegistrationComplete?: () => Promise<void>;
@@ -1779,6 +1780,7 @@ function evaluateFeishuScopeGrants(input: {
   appId: string;
   scopes: FeishuApplicationScopeGrant[];
   feishuTaskTrackingEnabled: boolean;
+  feishuDocumentCommentsEnabled: boolean;
 }): FeishuAppPermissionCheckDto {
   const grantedScopes = input.scopes
     .filter((scope) => scope.grantStatus === 1)
@@ -1791,6 +1793,7 @@ function evaluateFeishuScopeGrants(input: {
       grantedScopes,
       inventory: buildOpenClaudeTagFeishuPermissionInventory({
         feishuTaskTrackingEnabled: input.feishuTaskTrackingEnabled,
+        feishuDocumentCommentsEnabled: input.feishuDocumentCommentsEnabled,
       }),
     }),
   };
@@ -2681,6 +2684,7 @@ export function createDrizzleAdminApiStore(
         appId: row.appId,
         scopes,
         feishuTaskTrackingEnabled: options.feishuTaskTrackingEnabled ?? false,
+        feishuDocumentCommentsEnabled: options.feishuDocumentCommentsEnabled ?? false,
       });
     },
 
@@ -3427,6 +3431,7 @@ export interface RegisterAdminApiOptions {
   adminToken?: string;
   resolveFeishuChatDisplayName?: AdminApiStoreOptions['resolveFeishuChatDisplayName'];
   feishuTaskTrackingEnabled?: boolean;
+  feishuDocumentCommentsEnabled?: boolean;
   afterFeishuRuntimeChange?: () => Promise<void>;
   /**
    * Whether the local dev-auth login mode is active (design D-A6). Defaults to
@@ -3738,6 +3743,7 @@ export function registerAdminApiRoutes(
     createDrizzleAdminApiStore(options.db!, {
       resolveFeishuChatDisplayName: options.resolveFeishuChatDisplayName,
       feishuTaskTrackingEnabled: options.feishuTaskTrackingEnabled,
+      feishuDocumentCommentsEnabled: options.feishuDocumentCommentsEnabled,
       afterFeishuAppRegistrationComplete: options.afterFeishuRuntimeChange,
     });
   const preHandler = createAdminGuard(options);

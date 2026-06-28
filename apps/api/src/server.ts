@@ -248,6 +248,7 @@ const FEISHU_WEBHOOK_VERIFICATION_TOKEN =
   process.env.FEISHU_CALLBACK_VERIFICATION_TOKEN ?? process.env.FEISHU_VERIFICATION_TOKEN ?? '';
 const FEISHU_ENCRYPT_KEY = process.env.FEISHU_ENCRYPT_KEY ?? '';
 const FEISHU_WEBHOOK_MAX_BODY_BYTES = 1024 * 1024;
+const FEISHU_DOCUMENT_COMMENTS_ENABLED = process.env.OPEN_TAG_FEISHU_DOCUMENT_COMMENTS === 'enabled';
 // Slack Events API inbound (channel #2). The route is registered only when a
 // signing secret is configured, so an unconfigured instance exposes no Slack
 // endpoint at all (404). The bot token is optional for inbound-only use.
@@ -3059,7 +3060,7 @@ async function reloadFeishuRuntimeFromAdmin(): Promise<void> {
 }
 
 async function subscribeDocumentCommentEventsForHealthyApps(): Promise<void> {
-  if (FEISHU_ACCESS_DISABLED) return;
+  if (FEISHU_ACCESS_DISABLED || !FEISHU_DOCUMENT_COMMENTS_ENABLED) return;
   const contexts = feishuAppRuntime
     .getHealthyContexts()
     .filter(
@@ -4441,6 +4442,7 @@ async function start(): Promise<void> {
     desktopVersion: readDesktopVersion(),
     resolveFeishuChatDisplayName: resolveAdminConsoleChatDisplayName,
     feishuTaskTrackingEnabled: createFeishuTaskTrackingConfigFromEnv().enabled,
+    feishuDocumentCommentsEnabled: FEISHU_DOCUMENT_COMMENTS_ENABLED,
     afterFeishuRuntimeChange: reloadFeishuRuntimeFromAdmin,
   });
 

@@ -171,7 +171,7 @@ describe('Feishu permission check inventory', () => {
     ]);
   });
 
-  it('excludes Feishu Task tracking permissions when task tracking is disabled', () => {
+  it('uses message-only permissions for the default bot flow', () => {
     const result = evaluateFeishuPermissionScopes({
       grantedScopes: [
         'im:message.p2p_msg:readonly',
@@ -181,17 +181,41 @@ describe('Feishu permission check inventory', () => {
         'im:message.reactions:write_only',
         'im:message:readonly',
         'im:resource',
-        'docs:event:subscribe',
-        'docs:document.comment:read',
-        'docs:document.comment:create',
         'im:chat:read',
-        'im:chat.members:read',
       ],
       inventory: buildOpenClaudeTagFeishuPermissionInventory({ feishuTaskTrackingEnabled: false }),
     });
 
     expect(result.status).toBe('pass');
     expect(result.inventoryScopes.some((scope) => scope.startsWith('task:'))).toBe(false);
+    expect(result.inventoryScopes.some((scope) => scope.startsWith('docs:'))).toBe(false);
+    expect(result.inventoryScopes).not.toContain('im:chat.members:read');
     expect(result.missingRequiredCapabilities).toEqual([]);
+  });
+
+  it('requires document-comment scopes only when document comments are enabled', () => {
+    const result = evaluateFeishuPermissionScopes({
+      grantedScopes: [
+        'im:message.p2p_msg:readonly',
+        'im:message.group_at_msg:readonly',
+        'im:message:send_as_bot',
+        'im:message:update',
+        'im:message.reactions:write_only',
+        'im:message:readonly',
+        'im:resource',
+        'im:chat:read',
+      ],
+      inventory: buildOpenClaudeTagFeishuPermissionInventory({
+        feishuTaskTrackingEnabled: false,
+        feishuDocumentCommentsEnabled: true,
+      }),
+    });
+
+    expect(result.status).toBe('fail');
+    expect(result.missingRequiredCapabilities).toEqual([
+      'document-comment-events',
+      'document-comment-read',
+      'document-comment-reply',
+    ]);
   });
 });

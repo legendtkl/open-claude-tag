@@ -842,11 +842,7 @@ describe('admin api routes', () => {
       { scopeName: 'im:message.reactions:write_only', grantStatus: 1 },
       { scopeName: 'im:message:readonly', grantStatus: 1 },
       { scopeName: 'im:resource', grantStatus: 1 },
-      { scopeName: 'docs:event:subscribe', grantStatus: 1 },
-      { scopeName: 'docs:document.comment:read', grantStatus: 1 },
-      { scopeName: 'docs:document.comment:create', grantStatus: 1 },
       { scopeName: 'im:chat:read', grantStatus: 1 },
-      { scopeName: 'im:chat.members:read', grantStatus: 1 },
     ]);
     const createFeishuClient = vi.fn(() => ({
       listApplicationScopes,
@@ -861,7 +857,49 @@ describe('admin api routes', () => {
 
     expect(result.status).toBe('pass');
     expect(result.inventoryScopes.some((scope) => scope.startsWith('task:'))).toBe(false);
+    expect(result.inventoryScopes.some((scope) => scope.startsWith('docs:'))).toBe(false);
+    expect(result.inventoryScopes).not.toContain('im:chat.members:read');
     expect(result.missingRequiredCapabilities).toEqual([]);
+  });
+
+  it('requires document comment scopes when document comments are enabled', async () => {
+    const feishuAppRow = {
+      id: '00000000-0000-4000-8000-000000000003',
+      appId: 'cli_reviewer',
+      appSecretRef: 'stored',
+      appSecret: 'stored-secret-value',
+    };
+    const limit = vi.fn(async () => [feishuAppRow]);
+    const where = vi.fn(() => ({ limit }));
+    const from = vi.fn(() => ({ where }));
+    const db = { select: vi.fn(() => ({ from })) };
+    const listApplicationScopes = vi.fn(async () => [
+      { scopeName: 'im:message.p2p_msg:readonly', grantStatus: 1 },
+      { scopeName: 'im:message.group_at_msg:readonly', grantStatus: 1 },
+      { scopeName: 'im:message:send_as_bot', grantStatus: 1 },
+      { scopeName: 'im:message:update', grantStatus: 1 },
+      { scopeName: 'im:message.reactions:write_only', grantStatus: 1 },
+      { scopeName: 'im:message:readonly', grantStatus: 1 },
+      { scopeName: 'im:resource', grantStatus: 1 },
+      { scopeName: 'im:chat:read', grantStatus: 1 },
+    ]);
+    const createFeishuClient = vi.fn(() => ({
+      listApplicationScopes,
+      applyApplicationScopes: vi.fn(),
+    }));
+    const store = createDrizzleAdminApiStore(
+      db as unknown as Parameters<typeof createDrizzleAdminApiStore>[0],
+      { createFeishuClient, feishuDocumentCommentsEnabled: true },
+    );
+
+    const result = await store.checkFeishuAppPermissions(SUPERADMIN_SCOPE, feishuAppRow.id);
+
+    expect(result.status).toBe('fail');
+    expect(result.missingRequiredCapabilities).toEqual([
+      'document-comment-events',
+      'document-comment-read',
+      'document-comment-reply',
+    ]);
   });
 
   it('requires Feishu Task scopes when task tracking is enabled', async () => {
