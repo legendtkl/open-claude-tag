@@ -3476,8 +3476,8 @@ export interface RegisterAdminApiOptions {
    * `GET /admin/desktop/artifact?arch=arm64|x64`. Default to env
    * `DESKTOP_ARTIFACT_PATH_ARM64` / `DESKTOP_ARTIFACT_PATH_X64`, then fall back
    * to standard desktop release output discovery. Each arch is independently
-   * optional: an unavailable arch 404s and the Downloads page renders its button
-   * disabled. Injectable so tests can point at a fixture.
+   * optional: an unavailable arch 404s and the console renders its artifact
+   * action disabled. Injectable so tests can point at a fixture.
    */
   desktopArtifactPathArm64?: string | null;
   desktopArtifactPathX64?: string | null;
@@ -3489,8 +3489,8 @@ export interface RegisterAdminApiOptions {
   /**
    * Version of the `@open-tag/desktop` package this server distributes. Read
    * from `apps/desktop/package.json` at startup (server.ts) and surfaced via
-   * `GET /admin/auth/config` so the Downloads page can show it. Null when it
-   * cannot be resolved.
+   * `GET /admin/auth/config` for desktop artifact metadata. Null when it cannot
+   * be resolved.
    */
   desktopVersion?: string | null;
 }
@@ -3578,8 +3578,8 @@ interface DesktopArtifact {
 /**
  * True iff a desktop artifact path is configured AND points at a readable regular
  * file. `/admin/auth/config` reports this (rather than merely "path configured")
- * so the Downloads page never shows an enabled button for a stale env path that
- * would deterministically 404 on click.
+ * so artifact actions never appear enabled for a stale env path that would
+ * deterministically 404 on click.
  */
 async function desktopArtifactExists(path: string | null): Promise<boolean> {
   if (!path) return false;
@@ -3789,8 +3789,8 @@ export function registerAdminApiRoutes(
       daemonVersion,
       // Whether each macOS app arch is actually downloadable right now (path set
       // or standard release output discovered AND the file exists on disk), so
-      // the Downloads page never enables a button that would 404 — matching what
-      // GET /admin/desktop/artifact would actually serve.
+      // artifact actions never appear enabled when they would 404 — matching
+      // what GET /admin/desktop/artifact would actually serve.
       desktopArtifacts: {
         arm64: await desktopArtifactExists(arm64DesktopArtifact?.path ?? null),
         x64: await desktopArtifactExists(x64DesktopArtifact?.path ?? null),

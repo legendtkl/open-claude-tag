@@ -146,29 +146,6 @@ small {
   box-shadow: 3px 3px 0 var(--ink-shadow-strong);
 }
 
-.sidebar-utility {
-  display: grid;
-  gap: 10px;
-}
-
-.sidebar-community {
-  justify-content: space-between;
-  padding: 0 12px;
-  border-color: var(--green);
-  background: var(--green-soft);
-  color: var(--green);
-  font-weight: 800;
-}
-
-.sidebar-community span {
-  flex: 1;
-  text-align: left;
-}
-
-.sidebar-community-external {
-  flex: 0 0 auto;
-}
-
 .primary {
   border-color: var(--green);
   background: #fff;
@@ -638,97 +615,6 @@ h2 {
   background: var(--blue-soft);
   color: #0d4b9b;
   box-shadow: 2px 2px 0 var(--ink-shadow);
-}
-
-.project-stack {
-  display: grid;
-  gap: 18px;
-}
-
-.project-hero {
-  display: grid;
-  grid-template-columns: minmax(0, 1.1fr) minmax(280px, 0.9fr);
-  gap: 18px;
-  align-items: center;
-  background: linear-gradient(135deg, rgba(255, 255, 252, 0.96), rgba(235, 239, 236, 0.84)), #fff;
-}
-
-.project-hero h2 {
-  max-width: 760px;
-  font-size: 28px;
-  line-height: 1.12;
-}
-
-.project-hero p,
-.manual-grid p {
-  margin-top: 12px;
-  color: var(--muted);
-  line-height: 1.5;
-}
-
-.project-badges {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-  align-content: start;
-}
-
-.project-badges span {
-  display: inline-flex;
-  min-height: 32px;
-  align-items: center;
-  padding: 0 10px;
-  border: 1.5px solid var(--ink);
-  border-radius: 13px 9px 14px 10px;
-  background: #fff;
-  box-shadow: 2px 2px 0 var(--ink-shadow);
-  color: var(--ink);
-  font-size: 13px;
-  font-weight: 800;
-}
-
-.manual-grid,
-.pipeline-grid {
-  display: grid;
-  gap: 12px;
-}
-
-.manual-grid {
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-}
-
-.manual-grid article,
-.pipeline-grid article {
-  min-width: 0;
-  padding: 13px;
-  border: 1.5px dashed rgba(22, 23, 24, 0.58);
-  border-radius: 14px 10px 15px 11px;
-  background: #fff;
-}
-
-.manual-grid strong,
-.pipeline-grid strong {
-  display: block;
-}
-
-.manual-grid small,
-.pipeline-grid small {
-  line-height: 1.45;
-}
-
-.pipeline-grid {
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-}
-
-.pipeline-grid b {
-  display: inline-grid;
-  width: 26px;
-  height: 26px;
-  place-items: center;
-  margin-bottom: 10px;
-  border: 1.5px solid var(--ink);
-  border-radius: 999px;
-  background: var(--yellow);
 }
 
 .chips {
@@ -1622,23 +1508,11 @@ textarea::placeholder {
     display: none;
   }
 
-  .sidebar-utility {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    margin-top: 0;
-  }
-
-  .sidebar-community {
-    justify-content: center;
-  }
-
   .grid.two,
   .grid.main-detail,
   .overview-hero,
   .bot-onboarding-status-grid,
   .overview-guide-grid,
-  .project-hero,
-  .manual-grid,
-  .pipeline-grid,
   .row-card,
   .board-card summary {
     grid-template-columns: 1fr;
@@ -1802,54 +1676,6 @@ textarea::placeholder {
   gap: 28px;
 }
 
-.downloads-stack {
-  display: grid;
-  gap: 28px;
-}
-
-.downloads-subtitle {
-  margin: 0 0 6px;
-  color: var(--muted);
-  max-width: 70ch;
-}
-
-.experimental-badge {
-  display: inline-flex;
-  align-items: center;
-  margin-left: 10px;
-  padding: 1px 10px;
-  border: 1.5px solid var(--ink);
-  border-radius: 999px;
-  background: var(--yellow);
-  font-size: 11px;
-  font-weight: 800;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-}
-
-.experimental-note {
-  margin: 0 0 14px;
-  padding: 8px 10px;
-  border: 1.5px dashed var(--ink);
-  border-radius: 10px 8px 11px 7px;
-  background: rgba(255, 218, 99, 0.25);
-  color: var(--ink);
-  max-width: 70ch;
-  font-size: 13px;
-}
-
-.downloads-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
-}
-
-.downloads-version {
-  margin: 12px 0 0;
-  color: var(--muted);
-  font-size: 13px;
-}
-
 .daemon-guide-subtitle {
   margin-bottom: 14px;
   color: var(--muted);
@@ -2002,97 +1828,6 @@ textarea::placeholder {
   }
 }
 
-/* Release notes page */
-.release-notes-page {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-}
-
-.release-notes-entry {
-  border: 2px solid var(--ink);
-  border-radius: 16px 12px 17px 11px;
-  background: #fff;
-  box-shadow: 4px 4px 0 var(--ink-shadow);
-  overflow: hidden;
-}
-
-.release-notes-accordion-header {
-  display: flex;
-  align-items: baseline;
-  gap: 10px;
-  width: 100%;
-  padding: 14px;
-  border: 0;
-  background: transparent;
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
-}
-
-.release-notes-accordion-header:hover {
-  background: var(--paper);
-}
-
-.release-notes-accordion-header svg {
-  align-self: center;
-  color: var(--ink);
-}
-
-.release-notes-body {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  padding: 0 14px 14px;
-}
-
-.release-notes-version {
-  font-size: 16px;
-  font-weight: 700;
-  color: var(--blue);
-}
-
-.release-notes-date {
-  font-size: 13px;
-  color: var(--muted);
-}
-
-.release-notes-group {
-  margin-top: 10px;
-}
-
-.release-notes-group-title {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin: 0 0 6px;
-  font-size: 13px;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: var(--muted);
-}
-
-.release-notes-group ul {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  margin: 0;
-  padding-left: 18px;
-}
-
-.release-notes-group li {
-  font-size: 14px;
-  line-height: 1.5;
-}
-
-.release-notes-empty {
-  padding: 14px;
-  border: 2px dashed var(--blue);
-  border-radius: 16px 12px 17px 11px;
-  background: #fff;
-  color: var(--muted);
-}
-
 /* Light blue console refresh. Keep this block late so shared primitives across
    older pages inherit the calmer admin-console treatment. */
 :root {
@@ -2225,23 +1960,6 @@ small {
 
 .nav-item.active svg {
   color: var(--blue);
-}
-
-.sidebar-utility {
-  margin-top: auto;
-  padding-top: 16px;
-  border-top: 1px solid var(--border);
-}
-
-.sidebar-community {
-  border-color: transparent;
-  background: transparent;
-  color: var(--green);
-  box-shadow: none;
-}
-
-.sidebar-community:hover {
-  background: var(--green-soft);
 }
 
 .workspace {
@@ -2404,16 +2122,13 @@ h2 {
 
 .panel-subtitle,
 .overview-hero p,
-.overview-guide-grid p,
-.project-hero p,
-.manual-grid p {
+.overview-guide-grid p {
   color: var(--muted);
   line-height: 1.55;
 }
 
 .overview-stack,
 .bots-stack,
-.project-stack,
 .settings-stack,
 .grid {
   gap: 16px;
@@ -2564,9 +2279,7 @@ h2 {
   line-height: 1.05;
 }
 
-.bot-registration-card,
-.manual-grid article,
-.pipeline-grid article {
+.bot-registration-card {
   border: 1px solid var(--border);
   border-radius: 12px;
   background: var(--surface);
@@ -2677,8 +2390,7 @@ textarea:focus {
 }
 
 .row-card,
-.board-card,
-.release-notes-entry {
+.board-card {
   border: 1px solid var(--border);
   border-radius: 14px;
   background: var(--surface);
@@ -2767,8 +2479,6 @@ textarea:focus {
 .empty,
 .loading,
 .alert,
-.release-notes-empty,
-.experimental-note,
 .daemon-guide-note {
   border: 1px solid var(--border);
   border-radius: 14px;

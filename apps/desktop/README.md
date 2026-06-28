@@ -5,9 +5,8 @@ This package wraps the existing `apps/console` admin UI in a macOS Electron app.
 ## Packaging Boundary
 
 The desktop package does not bundle the console source tree. Root desktop
-commands build `apps/console` with `VITE_OPEN_TAG_DESKTOP=1`, which removes the
-Project Guide entry from the compiled desktop console. `electron-builder` only
-includes:
+commands build `apps/console` with `VITE_OPEN_TAG_DESKTOP=1` and
+`electron-builder` only includes:
 
 - `apps/desktop/dist/**` for the Electron main process and preload bridge
 - `apps/console/dist/**` copied into app resources as `console/`

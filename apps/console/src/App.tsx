@@ -29,14 +29,12 @@ import {
   Save,
   Settings2,
   Shield,
-  Sparkles,
   TerminalSquare,
   Trash2,
   Unlink,
   UserRound,
   X,
 } from 'lucide-react';
-import { ReleaseNotesView } from './ReleaseNotes';
 import { Modal } from './Modal';
 import {
   applyFeishuAppPermissions,
@@ -45,7 +43,6 @@ import {
   checkFeishuAppPermissions,
   createAgent,
   DAEMON_ARTIFACT_URL,
-  DESKTOP_ARTIFACT_URL,
   deleteAgent,
   deleteFeishuApp,
   createFeishuApp,
@@ -98,23 +95,17 @@ import { createQrCodeSvgDataUrl } from './qr-code';
 import './styles.css';
 
 type View =
-  | 'project'
   | 'onboarding'
   | 'overview'
   | 'agents'
   | 'bots'
   | 'chats'
   | 'machines'
-  | 'downloads'
   | 'taskBoards'
-  | 'releaseNotes'
   | 'settings';
 type Locale = 'en' | 'zh';
 type RefreshConsole = (options?: { showLoading?: boolean }) => Promise<void>;
 
-const desktopConsoleBuild =
-  (import.meta as ImportMeta & { env?: { VITE_OPEN_TAG_DESKTOP?: string } }).env
-    ?.VITE_OPEN_TAG_DESKTOP === '1';
 const SYSTEM_PROMPT_PLACEHOLDER = 'You are a strict code reviewer, be concise and focus on bugs.';
 const HIDDEN_CONSOLE_RUNTIMES = new Set<string>([]);
 const AGENT_RUNTIME_OPTIONS = ['', 'codex', 'claude_code'];
@@ -124,8 +115,6 @@ type ClaudeAuthMode = 'subscription' | 'custom';
 const AGENT_STATUS_OPTIONS = ['active', 'inactive', 'archived'];
 const DEV_AUTH_SUB_MAX_LENGTH = 128;
 const DEV_AUTH_SUB_PATTERN = /^[A-Za-z0-9._@-]+$/;
-const USER_GROUP_URL =
-  'https://applink.example.com/client/chat/chatter/add_by_link?link_token=53fi1580-0482-4128-9915-b0974bc13301';
 const PRODUCT_NAME = 'OpenClaudeTag';
 const PRODUCT_FULL_NAME = `${PRODUCT_NAME} Console`;
 const PRODUCT_ICON_SRC = '/open-claude-tag-favicon.png?v=20260616';
@@ -137,37 +126,28 @@ const navItems = [
   { id: 'chats', icon: MessageSquare },
   { id: 'machines', icon: Laptop },
   { id: 'taskBoards', icon: Rows3 },
-  ...(desktopConsoleBuild ? [] : [{ id: 'project' as const, icon: BookOpen }]),
-  { id: 'releaseNotes', icon: Sparkles },
-  { id: 'downloads', icon: Download },
   { id: 'settings', icon: Settings2 },
 ] satisfies Array<{ id: View; icon: typeof Home }>;
 
 const viewLabels: Record<Locale, Record<View, string>> = {
   en: {
-    project: desktopConsoleBuild ? '' : 'Project Guide',
     onboarding: 'Get Started',
     overview: 'Overview',
     agents: 'Agents',
     bots: 'Bots',
     chats: 'Chats',
     machines: 'Machines',
-    downloads: 'Downloads',
     taskBoards: 'Task Boards',
-    releaseNotes: 'Release Notes',
     settings: 'Settings',
   },
   zh: {
-    project: desktopConsoleBuild ? '' : '项目手册',
     onboarding: '快速开始',
     overview: '总览',
     agents: '智能体',
     bots: '机器人',
     chats: '会话',
     machines: '执行机器',
-    downloads: '下载',
     taskBoards: '任务看板',
-    releaseNotes: '更新日志',
     settings: '设置',
   },
 };
@@ -176,31 +156,6 @@ const uiText = {
   en: {
     brandSubtitle: 'local operator board',
     consoleSections: 'Console sections',
-    userGroup: 'User group',
-    userGroupTitle: `Join the ${PRODUCT_NAME} user group`,
-    refresh: 'Refresh',
-    releaseNotes: {
-      enhancements: 'Core enhancements',
-      fixes: 'Bug fixes',
-      empty: 'No release notes yet.',
-    },
-    downloads: {
-      macTitle: 'macOS app',
-      macSubtitle:
-        `${PRODUCT_FULL_NAME} as a native macOS app. Connects to the central server out of the box.`,
-      experimentalBadge: 'Experimental',
-      experimentalNote:
-        'The macOS client is experimental — expect rough edges. Report issues in the user group.',
-      appleSilicon: 'Download for Apple Silicon',
-      intel: 'Download for Intel',
-      notPublished: 'Not published yet',
-      version: (v: string) => `Version ${v}`,
-      daemonTitle: 'Execution daemon',
-      daemonSubtitle:
-        'Run tasks on your own machine. Pair it and get the install command from the Machines tab.',
-      daemonCta: 'Go to Machines',
-      daemonDownload: 'Download daemon tarball',
-    },
     loading: 'Loading console data',
     localhost: 'localhost',
     language: 'Language',
@@ -314,28 +269,6 @@ const uiText = {
   zh: {
     brandSubtitle: '运维控制台',
     consoleSections: '控制台分区',
-    userGroup: '用户群',
-    userGroupTitle: `加入 ${PRODUCT_NAME} 用户群`,
-    refresh: '刷新',
-    releaseNotes: {
-      enhancements: '核心功能增强',
-      fixes: 'Bug 修复',
-      empty: '暂无更新日志',
-    },
-    downloads: {
-      macTitle: 'macOS 应用',
-      macSubtitle: `${PRODUCT_FULL_NAME} 的原生 macOS 应用，开箱即默认连接中心服务器。`,
-      experimentalBadge: '实验性',
-      experimentalNote: 'macOS 客户端为实验性功能，可能不稳定。如遇问题请在用户群反馈。',
-      appleSilicon: '下载 Apple Silicon 版',
-      intel: '下载 Intel 版',
-      notPublished: '尚未发布',
-      version: (v: string) => `版本 ${v}`,
-      daemonTitle: '执行 daemon',
-      daemonSubtitle: '在你自己的机器上执行任务。请在「执行机器」页完成配对并获取安装命令。',
-      daemonCta: '前往执行机器',
-      daemonDownload: '下载 daemon 压缩包',
-    },
     loading: '正在加载控制台数据',
     localhost: '本地服务',
     language: '语言',
@@ -1074,20 +1007,6 @@ export function App() {
             );
           })}
         </nav>
-        <div className="sidebar-utility">
-          <a
-            aria-label={text.userGroupTitle}
-            className="secondary full sidebar-community"
-            href={USER_GROUP_URL}
-            rel="noreferrer"
-            target="_blank"
-            title={text.userGroupTitle}
-          >
-            <MessageSquare size={16} />
-            <span>{text.userGroup}</span>
-            <ExternalLink aria-hidden="true" className="sidebar-community-external" size={14} />
-          </a>
-        </div>
       </aside>
 
       <section className="workspace">
@@ -1134,9 +1053,6 @@ export function App() {
           </div>
         ) : null}
 
-        {!desktopConsoleBuild && !loading && view === 'project' ? (
-          <ProjectView locale={locale} />
-        ) : null}
         {!loading && view === 'onboarding' ? (
           <OnboardingWizard
             data={data}
@@ -1187,21 +1103,8 @@ export function App() {
             onAuthenticated={refresh}
           />
         ) : null}
-        {!loading && view === 'downloads' ? (
-          <DownloadsView
-            locale={locale}
-            authConfig={authConfig}
-            onGoToMachines={() => {
-              setView('machines');
-              setNotice(null);
-            }}
-          />
-        ) : null}
         {!loading && view === 'taskBoards' ? (
           <TaskBoardsView data={data} locale={locale} />
-        ) : null}
-        {!loading && view === 'releaseNotes' ? (
-          <ReleaseNotesView labels={text.releaseNotes} locale={locale} />
         ) : null}
         {view === 'settings' ? (
           <SettingsView data={data} locale={locale} me={me} refreshConsole={refresh} />
@@ -1536,143 +1439,6 @@ function LoginGate({
         ) : null}
       </section>
     </main>
-  );
-}
-
-function ProjectView({ locale }: { locale: Locale }) {
-  const guide = {
-    en: {
-      eyebrow: 'Project Guide',
-      title: 'Collaborate with multiple agents from native Feishu workspaces.',
-      intro:
-        'OpenClaudeTag is built for teams that coordinate engineering in Feishu. Group members keep context in a topic thread, route work to named agents, let agents develop in isolated worktrees in parallel, and follow progress through Feishu cards and task boards.',
-      capabilities: [
-        'Multi-person and multi-agent collaboration',
-        'Parallel worktrees for faster development',
-        'Feishu topic threads preserve context',
-        'Feishu task boards surface progress',
-        'Bot identities route to named agents',
-        'Codex runtime execution',
-      ],
-      sections: [
-        {
-          title: 'Multi-person and agent collaboration',
-          body:
-            'A Feishu topic becomes the shared workspace. People can add context, ask follow-ups, approve actions, and hand work to different named agents without losing the conversation history.',
-        },
-        {
-          title: 'Parallel worktree development',
-          body: 'Agents can execute tasks in isolated worktrees or bound machines, so multiple changes can move at the same time without blocking one developer terminal or mixing workspace state.',
-        },
-        {
-          title: 'Feishu-native topic context',
-          body: 'Topic group chats keep task requests, clarifications, card updates, and final results in one thread. OpenClaudeTag reuses that session context when the team continues the discussion.',
-        },
-        {
-          title: 'Feishu task board tracking',
-          body: 'Linked task boards turn chat work into visible work items. Teams can scan status by board while Feishu cards still provide ACK, running, completion, failure, retry, and approval feedback.',
-        },
-      ],
-      pipeline: [
-        ['Start in Feishu', 'apps/api receives topic messages and card actions from Feishu WebSocket.'],
-        [
-          'Route to agents',
-          'Session and orchestrator logic resolve tenant, chat context, bot binding, target agent, runtime, and permissions.',
-        ],
-        [
-          'Develop in parallel',
-          'pg-boss persists tasks, then apps/worker runs Codex in the selected runtime, worktree, or machine.',
-        ],
-        [
-          'Report back',
-          'OpenClaudeTag updates Feishu cards, syncs task boards, stores outputs, and keeps the team in the same topic.',
-        ],
-      ],
-    },
-    zh: {
-      eyebrow: '项目手册',
-      title: '在飞书原生协作空间里调度多个 agent 一起开发。',
-      intro:
-        'OpenClaudeTag 面向已经在飞书里协同工程工作的团队。群成员在话题里沉淀上下文，把任务路由给命名 agent，让 agent 在隔离 worktree 中并行开发，并通过飞书卡片和任务看板持续跟踪进展。',
-      capabilities: [
-        '多人和多 agent 协作',
-        'worktree 并行开发提升效率',
-        '飞书话题群聊保留上下文',
-        '飞书任务看板呈现进度',
-        '机器人身份路由到命名 agent',
-        'Codex runtime 执行',
-      ],
-      sections: [
-        {
-          title: '多人和 agent 协作',
-          body:
-            '一个飞书话题就是共享工作空间。成员可以补充上下文、追问结果、审批动作，也可以把不同工作交给不同命名 agent，而不会丢失对话历史。',
-        },
-        {
-          title: 'worktree 并行开发',
-          body: 'Agent 可以在隔离 worktree 或绑定机器里执行任务，多条改动可以同时推进，不会阻塞某个开发者终端，也不会混用同一份 workspace 状态。',
-        },
-        {
-          title: '飞书话题群聊上下文',
-          body: '话题群聊把需求、澄清、卡片更新和最终结果收拢在同一个 thread。团队继续讨论时，OpenClaudeTag 会复用对应 session 上下文。',
-        },
-        {
-          title: '飞书任务看板跟踪',
-          body: '绑定任务看板后，群聊里的工作会变成可扫描的任务项。团队可以按看板查看状态，同时在飞书卡片里看到 ACK、运行中、完成、失败、重试和审批反馈。',
-        },
-      ],
-      pipeline: [
-        ['飞书发起', 'apps/api 通过飞书 WebSocket 接收话题消息和卡片操作。'],
-        ['路由给 agent', 'session 和 orchestrator 逻辑解析租户、会话上下文、机器人绑定、目标 agent、runtime 和权限。'],
-        ['并行开发', 'pg-boss 持久化任务后，apps/worker 在选定 runtime、worktree 或机器上运行 Codex。'],
-        ['回传进展', 'OpenClaudeTag 更新飞书卡片、同步任务看板、保存输出，并让团队留在同一个话题里协作。'],
-      ],
-    },
-  }[locale];
-
-  return (
-    <div className="project-stack">
-      <section className="panel project-hero">
-        <div>
-          <div className="panel-title">
-            <BookOpen size={18} /> {guide.eyebrow}
-          </div>
-          <h2>{guide.title}</h2>
-          <p>{guide.intro}</p>
-        </div>
-        <div className="project-badges" aria-label="Project capabilities">
-          {guide.capabilities.map((capability) => (
-            <span key={capability}>{capability}</span>
-          ))}
-        </div>
-      </section>
-
-      <section className="panel">
-        <div className="manual-grid">
-          {guide.sections.map((section) => (
-            <article key={section.title}>
-              <strong>{section.title}</strong>
-              <p>{section.body}</p>
-            </article>
-          ))}
-        </div>
-      </section>
-
-      <section className="panel">
-        <div className="panel-title">
-          <Rows3 size={18} /> {locale === 'zh' ? '协作链路' : 'Collaboration Flow'}
-        </div>
-        <div className="pipeline-grid">
-          {guide.pipeline.map(([title, description], index) => (
-            <article key={title}>
-              <b>{index + 1}</b>
-              <strong>{title}</strong>
-              <small>{description}</small>
-            </article>
-          ))}
-        </div>
-      </section>
-    </div>
   );
 }
 
@@ -4896,76 +4662,6 @@ function MachinesView({
         me={me}
         onAuthenticated={onAuthenticated}
       />
-    </div>
-  );
-}
-
-/**
- * Top-level Downloads page: the org-facing place to get the clients. Surfaces the
- * macOS console app per-arch (enabled only for published arches, from
- * `authConfig.desktopArtifacts`) with an Experimental badge/notice, and links the
- * daemon onboarding so neither client dead-ends. Download links hit the
- * unauthenticated artifact endpoints; the Machines CTA navigates in-console.
- */
-function DownloadsView({
-  locale,
-  authConfig,
-  onGoToMachines,
-}: {
-  locale: Locale;
-  authConfig: AuthConfig | null;
-  onGoToMachines: () => void;
-}) {
-  const t = uiText[locale].downloads;
-  const artifacts = authConfig?.desktopArtifacts ?? { arm64: false, x64: false };
-  const desktopVersion = authConfig?.desktopVersion ?? null;
-
-  const macButton = (arch: 'arm64' | 'x64', label: string) =>
-    artifacts[arch] ? (
-      <a
-        key={arch}
-        className="primary desktop-download"
-        href={`${DESKTOP_ARTIFACT_URL}?arch=${arch}`}
-        download
-      >
-        <Download size={16} /> {label}
-      </a>
-    ) : (
-      <button key={arch} className="primary desktop-download" type="button" disabled>
-        <Download size={16} /> {label} · {t.notPublished}
-      </button>
-    );
-
-  return (
-    <div className="downloads-stack">
-      <section className="panel">
-        <div className="panel-title">
-          <Download size={18} /> {t.macTitle}
-          <span className="experimental-badge">{t.experimentalBadge}</span>
-        </div>
-        <p className="downloads-subtitle">{t.macSubtitle}</p>
-        <p className="experimental-note">{t.experimentalNote}</p>
-        <div className="downloads-actions">
-          {macButton('arm64', t.appleSilicon)}
-          {macButton('x64', t.intel)}
-        </div>
-        {desktopVersion ? <p className="downloads-version">{t.version(desktopVersion)}</p> : null}
-      </section>
-
-      <section className="panel">
-        <div className="panel-title">
-          <Laptop size={18} /> {t.daemonTitle}
-        </div>
-        <p className="downloads-subtitle">{t.daemonSubtitle}</p>
-        <div className="downloads-actions">
-          <button className="primary" type="button" onClick={onGoToMachines}>
-            {t.daemonCta}
-          </button>
-          <a className="secondary daemon-download" href={DAEMON_ARTIFACT_URL} download>
-            <Download size={16} /> {t.daemonDownload}
-          </a>
-        </div>
-      </section>
     </div>
   );
 }

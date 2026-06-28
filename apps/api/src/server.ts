@@ -210,8 +210,8 @@ function readDaemonVersion(): string | null {
 }
 
 /**
- * Read the `@open-tag/desktop` package version so the Downloads page can show
- * which Mac app build the server distributes. Resolves `apps/desktop/package.json`
+ * Read the `@open-tag/desktop` package version so desktop artifact metadata can
+ * show which Mac app build the server distributes. Resolves `apps/desktop/package.json`
  * relative to this module (works from both `dist` and `tsx` layouts) and falls
  * back to null if it cannot be read.
  */
