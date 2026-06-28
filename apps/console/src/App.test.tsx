@@ -2634,6 +2634,17 @@ describe('OpenClaudeTag Console', () => {
     expect(screen.queryByLabelText('SSO JWT')).not.toBeInTheDocument();
     expect(screen.getAllByRole('button', { name: /^Save token$/i })).toHaveLength(1);
   });
+
+  it('keeps web settings focused on usable controls without a desktop-only empty panel', async () => {
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole('button', { name: /Settings/i }));
+    expect(await screen.findByText('Chat memory')).toBeInTheDocument();
+    expect(screen.getByText('Access')).toBeInTheDocument();
+    expect(
+      screen.queryByText('Desktop settings are available in the macOS app'),
+    ).not.toBeInTheDocument();
+  });
 });
 
 describe('console-e2e-audit-fixes', () => {
