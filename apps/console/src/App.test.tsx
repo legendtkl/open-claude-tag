@@ -1513,6 +1513,50 @@ describe('OpenClaudeTag Console', () => {
     expect(body.runtimeEnv).toEqual({});
   });
 
+  it('preserves a hidden existing runtime when saving unrelated agent edits', async () => {
+    const agent = fixtures['/admin/agents'][0];
+    const profile = fixtures['/admin/profiles'][0];
+    const previousAgentRuntime = agent.defaultRuntime;
+    const previousProfileRuntime = profile.defaultRuntime;
+    agent.defaultRuntime = 'coco';
+    profile.defaultRuntime = 'coco';
+
+    try {
+      render(<App />);
+
+      fireEvent.click(await screen.findByRole('button', { name: /Agents/i }));
+      fireEvent.click(await screen.findByRole('button', { name: /Edit Reviewer/i }));
+
+      const dialog = await screen.findByRole('dialog', { name: /Edit Agent/i });
+      const runtimeSelect = within(dialog).getByLabelText('Runtime') as HTMLSelectElement;
+      expect(runtimeSelect.value).toBe('');
+      expect(Array.from(runtimeSelect.options).map((option) => option.value)).not.toContain('coco');
+
+      fireEvent.change(within(dialog).getByLabelText('Description'), {
+        target: { value: 'Updated description only' },
+      });
+      fireEvent.click(within(dialog).getByRole('button', { name: /^Save Agent$/i }));
+
+      await waitFor(() =>
+        expect(fetchMock).toHaveBeenCalledWith(
+          '/admin/agents/agent-1',
+          expect.objectContaining({ method: 'PATCH' }),
+        ),
+      );
+      const patchCall = fetchMock.mock.calls.find(
+        ([input, init]) =>
+          input === '/admin/agents/agent-1' && (init as RequestInit | undefined)?.method === 'PATCH',
+      );
+      const body = JSON.parse(String((patchCall?.[1] as RequestInit | undefined)?.body));
+      expect(body.defaultRuntime).toBe('coco');
+      expect(body.profile.defaultRuntime).toBe('coco');
+      expect(body.description).toBe('Updated description only');
+    } finally {
+      agent.defaultRuntime = previousAgentRuntime;
+      profile.defaultRuntime = previousProfileRuntime;
+    }
+  });
+
   it('serializes custom Claude Code Base URL + API Key into runtimeEnv', async () => {
     render(<App />);
 

@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   isHttpEndpointReachable,
+  isOpenClaudeTagConsoleReachable,
   isPersonalHealthReady,
   waitForPersonalHealth,
   type HealthSnapshot,
@@ -103,5 +104,37 @@ describe('isHttpEndpointReachable', () => {
         }),
       }),
     ).resolves.toBe(false);
+  });
+});
+
+describe('isOpenClaudeTagConsoleReachable', () => {
+  it('accepts the static console marker header', async () => {
+    const fetch = vi.fn(async () => ({
+      ok: true,
+      headers: { get: (name: string) => (name === 'x-open-claude-tag-console' ? '1' : null) },
+      text: async () => 'foreign body is not consulted',
+    }));
+
+    await expect(isOpenClaudeTagConsoleReachable('http://console', { fetch })).resolves.toBe(true);
+  });
+
+  it('accepts the Vite console HTML title as a development marker', async () => {
+    const fetch = vi.fn(async () => ({
+      ok: true,
+      headers: { get: () => null },
+      text: async () => '<!doctype html><title>OpenClaudeTag Console</title>',
+    }));
+
+    await expect(isOpenClaudeTagConsoleReachable('http://console', { fetch })).resolves.toBe(true);
+  });
+
+  it('rejects an arbitrary ok HTTP server on the console port', async () => {
+    const fetch = vi.fn(async () => ({
+      ok: true,
+      headers: { get: () => null },
+      text: async () => '<!doctype html><title>Other app</title>',
+    }));
+
+    await expect(isOpenClaudeTagConsoleReachable('http://console', { fetch })).resolves.toBe(false);
   });
 });

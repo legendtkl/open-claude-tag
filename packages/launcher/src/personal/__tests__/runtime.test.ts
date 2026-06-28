@@ -8,7 +8,7 @@ describe('resolveConsoleUp', () => {
     await expect(
       resolveConsoleUp('/tmp/console.pid.json', 'http://127.0.0.1:8080', {
         pidAlive: () => true,
-        isHttpEndpointReachable: http,
+        isConsoleReachable: http,
       }),
     ).resolves.toBe(true);
     expect(http).not.toHaveBeenCalled();
@@ -18,7 +18,7 @@ describe('resolveConsoleUp', () => {
     await expect(
       resolveConsoleUp('/tmp/console.pid.json', 'http://127.0.0.1:8080', {
         pidAlive: () => false,
-        isHttpEndpointReachable: async () => true,
+        isConsoleReachable: async () => true,
       }),
     ).resolves.toBe(true);
   });
@@ -27,7 +27,7 @@ describe('resolveConsoleUp', () => {
     await expect(
       resolveConsoleUp('/tmp/console.pid.json', 'http://127.0.0.1:8080', {
         pidAlive: () => false,
-        isHttpEndpointReachable: async () => false,
+        isConsoleReachable: async () => false,
       }),
     ).resolves.toBe(false);
   });

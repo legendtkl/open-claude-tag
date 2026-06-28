@@ -6,7 +6,7 @@ import { ensureEmbeddedDb, stopEmbeddedDb } from './db-host.js';
 import { ensureEnvFile } from './env.js';
 import {
   getHealth,
-  isHttpEndpointReachable,
+  isOpenClaudeTagConsoleReachable,
   isPersonalHealthReady,
   waitForPersonalHealth,
 } from './health.js';
@@ -65,13 +65,13 @@ export async function resolveConsoleUp(
   consoleUrl: string,
   deps: {
     pidAlive?: (pidPath: string) => boolean;
-    isHttpEndpointReachable?: (url: string) => Promise<boolean>;
+    isConsoleReachable?: (url: string) => Promise<boolean>;
   } = {},
 ): Promise<boolean> {
   const pidCheck = deps.pidAlive ?? pidAlive;
   if (pidCheck(consolePidPath)) return true;
-  const httpCheck = deps.isHttpEndpointReachable ?? isHttpEndpointReachable;
-  return httpCheck(consoleUrl);
+  const consoleCheck = deps.isConsoleReachable ?? isOpenClaudeTagConsoleReachable;
+  return consoleCheck(consoleUrl);
 }
 
 async function ensureDatabaseUp(ctx: RuntimeContext): Promise<{ databaseUrl: string }> {
