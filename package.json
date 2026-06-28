@@ -2,7 +2,7 @@
   "name": "open-claude-tag",
   "private": true,
   "version": "0.1.0",
-  "description": "OpenClaudeTag - AI coding assistant in Feishu group chat",
+  "description": "Vendor-neutral engineering assistant for team chat — pluggable channels and runtimes",
   "packageManager": "pnpm@9.15.4",
   "engines": {
     "node": ">=20.0.0"
