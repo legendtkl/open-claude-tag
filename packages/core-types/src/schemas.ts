@@ -107,9 +107,9 @@ export const AgentProfileSchema = z.object({
 
 // NOTE: there is deliberately no hand-maintained `AgentSchema` here. The
 // authoritative agent shape is the Drizzle `agents` row (storage), the API write
-// schema is admin-api's `CreateAgentObject`, and the API response is its
-// `AgentDto` (which exposes `runtimeEnvKeys`, not the secret-bearing
-// `runtimeEnv`). A duplicated core-types mirror only drifted (issue #17).
+// validator is admin-api's `CreateAgentSchema` (the refined `CreateAgentObject`),
+// and the API response is its `AgentDto` (which exposes `runtimeEnvKeys`, not the
+// secret-bearing `runtimeEnv`). A duplicated core-types mirror only drifted (issue #17).
 
 export const FeishuAppRegistrationSchema = z.object({
   id: z.string().uuid().optional(),
