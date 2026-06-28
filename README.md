@@ -1,6 +1,8 @@
 # OpenClaudeTag
 
-> Vendor-neutral engineering assistant for team chat — pluggable **channels** and **runtimes**.
+> The open-source version of Claude Tag — @-mention a coding agent in your team chat.
+> Vendor-neutral and extensible: pluggable **channels** (Feishu, Slack, …) and
+> **runtimes** (Claude Code, Codex, …).
 
 <!--
 CI status badge: once the GitHub repository slug is known, replace the static
@@ -16,14 +18,23 @@ CI status badge: once the GitHub repository slug is known, replace the static
 
 [简体中文 / Chinese](./README.zh-CN.md) · [AGENTS.md (contributor guide)](./AGENTS.md)
 
-OpenClaudeTag is a vendor-neutral engineering assistant for team chat. The
-orchestrator core speaks a neutral message contract, so two axes are pluggable:
-the **channel** the chat lives in and the **runtime** that executes the task. It
-receives a chat message, routes work through an async task pipeline, executes the
-task through a runtime adapter (Claude Code or Codex), and reports progress back
-to the chat. Lark/Feishu is the fully-featured channel today; Slack is a second,
-working channel (inbound task dispatch + outbound send), with OAuth,
-multi-workspace install, and Socket Mode still in progress.
+OpenClaudeTag is the open-source version of **Claude Tag**: @-mention a coding agent in a
+team chat and it does real engineering work — reading a repo, running a task, opening a
+PR — then reports progress back in the thread. Where Claude Tag pairs one chat platform
+with one runtime, OpenClaudeTag makes both axes **pluggable and extensible**. The
+orchestrator core speaks a neutral message contract, so adding a new option on either
+axis means implementing one contract, not forking the core:
+
+- **Channel** — where the chat lives. Lark/Feishu is the fully-featured channel today;
+  Slack is a working second channel (inbound dispatch + outbound send), with OAuth,
+  multi-workspace install, and Socket Mode still in progress. New channels implement the
+  `Channel` contract in `packages/channel-core`.
+- **Runtime** — what executes the task. Claude Code (the default) and Codex are full
+  runtimes; Coco (TRAE CLI) auto-registers when its binary is present. New runtimes plug
+  into the descriptor-driven registry in `packages/runtime-adapters`.
+
+It receives a chat message, routes work through an async task pipeline, executes the task
+through a runtime adapter, and reports progress back to the chat.
 
 > **Important:** both the API and the Worker must be running for end-to-end
 > execution. Starting only the API will accept messages and show ACK cards, but
@@ -227,14 +238,27 @@ curl -X POST http://localhost:3000/debug/simulate \
   -d '{"text":"hello"}'
 ```
 
-Choose a path:
+### Deployment modes
 
-- Personal zero-Docker (`pnpm personal:up`): one command to run the full stack
-  locally with the onboarding wizard.
-- Local source install: best for contributors and debugging.
-- Single-host Docker deployment: best for a quick self-hosted trial.
-- Server-centralized (team mode): deploy once, let users pair their own machines.
-- Isolated worktree mode: best when multiple branches or worktrees run in parallel.
+Pick by who you are running it for. Two personal paths get a single user going fast; the
+team path deploys once for everyone.
+
+**Personal — run it for yourself**
+
+- **Minimal / zero-Docker** — `pnpm personal:up` boots an embedded Postgres plus
+  API + Worker + Console and opens the onboarding wizard, with no Docker and no external
+  database. See *Personal Quick Start (zero-Docker)* above.
+- **Single-host Docker** — run Postgres + API + Worker via Docker Compose for a quick
+  self-hosted trial. See *Single-Host Docker Deployment* below.
+- **Local source install** — run API and Worker from source; best for contributors and
+  debugging. Use the isolated commands when several branches or worktrees run in parallel.
+
+**Team — server + daemon mode**
+
+- Deploy OpenClaudeTag once as a central server (Postgres + API + Worker); each user
+  pairs their own machine as an optional execution target via a zero-credential daemon.
+  A machine-bound task never silently falls back to server-local. See *Server-Centralized
+  Deployment (Team Mode)* below.
 
 ### Single-Host Docker Deployment (Experimental)
 
