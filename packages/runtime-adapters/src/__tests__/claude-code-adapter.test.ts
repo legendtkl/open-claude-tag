@@ -344,6 +344,96 @@ describe('ClaudeCodeAdapter', () => {
     }
   });
 
+  // Regression for #7: the adapter declares modelSelection: true, so the per-task
+  // model must reach the SDK. Production registration builds the adapter WITHOUT a
+  // global model, so previously the per-task model was silently dropped.
+  const okResult = [
+    {
+      type: 'result',
+      subtype: 'success',
+      session_id: 's',
+      result: 'ok',
+      duration_ms: 1,
+      total_cost_usd: 0,
+      usage: { input_tokens: 1, output_tokens: 1 },
+    },
+  ];
+
+  it('forwards per-task spec.model to the SDK even with no global model configured', async () => {
+    const runId = `test-${randomUUID()}`;
+    const workspace = await createWorkspace(runId);
+    try {
+      const noModelAdapter = new ClaudeCodeAdapter({
+        baseUrl: 'http://localhost:8080',
+        authToken: 'test-token',
+      });
+      (mockQuery as any).mockReturnValue(fakeStream(okResult));
+      const spec = { ...makeSpec('task-model-1', 'hi'), model: 'claude-opus-4-20250514' };
+      const handle = await noModelAdapter.prepare(spec, workspace);
+      const events: RuntimeEvent[] = [];
+      for await (const event of noModelAdapter.execute(handle, spec)) events.push(event);
+      const callArgs = (mockQuery as any).mock.calls[0][0];
+      expect(callArgs.options.model).toBe('claude-opus-4-20250514');
+    } finally {
+      await cleanupWorkspace(runId).catch(() => {});
+    }
+  });
+
+  it('prefers per-task spec.model over the global config model', async () => {
+    const runId = `test-${randomUUID()}`;
+    const workspace = await createWorkspace(runId);
+    try {
+      // `adapter` (beforeEach) has global model claude-sonnet-4-20250514.
+      (mockQuery as any).mockReturnValue(fakeStream(okResult));
+      const spec = { ...makeSpec('task-model-2', 'hi'), model: 'claude-opus-4-20250514' };
+      const handle = await adapter.prepare(spec, workspace);
+      const events: RuntimeEvent[] = [];
+      for await (const event of adapter.execute(handle, spec)) events.push(event);
+      const callArgs = (mockQuery as any).mock.calls[0][0];
+      expect(callArgs.options.model).toBe('claude-opus-4-20250514');
+    } finally {
+      await cleanupWorkspace(runId).catch(() => {});
+    }
+  });
+
+  it('falls back to the global config model when the task has none', async () => {
+    const runId = `test-${randomUUID()}`;
+    const workspace = await createWorkspace(runId);
+    try {
+      (mockQuery as any).mockReturnValue(fakeStream(okResult));
+      const spec = makeSpec('task-model-3', 'hi'); // no per-task model
+      const handle = await adapter.prepare(spec, workspace);
+      const events: RuntimeEvent[] = [];
+      for await (const event of adapter.execute(handle, spec)) events.push(event);
+      const callArgs = (mockQuery as any).mock.calls[0][0];
+      expect(callArgs.options.model).toBe('claude-sonnet-4-20250514');
+    } finally {
+      await cleanupWorkspace(runId).catch(() => {});
+    }
+  });
+
+  it('forwards the resume options.model to the SDK', async () => {
+    const runId = `test-${randomUUID()}`;
+    const workspace = await createWorkspace(runId);
+    try {
+      const noModelAdapter = new ClaudeCodeAdapter({
+        baseUrl: 'http://localhost:8080',
+        authToken: 'test-token',
+      });
+      (mockQuery as any).mockReturnValue(fakeStream(okResult));
+      const events: RuntimeEvent[] = [];
+      for await (const event of noModelAdapter.resume('sdk-session-1', 'continue', workspace, undefined, {
+        model: 'claude-opus-4-20250514',
+      })) {
+        events.push(event);
+      }
+      const callArgs = (mockQuery as any).mock.calls[0][0];
+      expect(callArgs.options.model).toBe('claude-opus-4-20250514');
+    } finally {
+      await cleanupWorkspace(runId).catch(() => {});
+    }
+  });
+
   it('reports healthy even without global credentials (per-agent supplies them)', async () => {
     const credlessAdapter = new ClaudeCodeAdapter({ baseUrl: '', authToken: '' });
     const health = await credlessAdapter.healthcheck();
