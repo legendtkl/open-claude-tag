@@ -1,9 +1,31 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { spawn } from 'child_process';
+import { join } from 'path';
 import { missingBuildSentinels, buildServiceEnv, startConsole } from '../supervisors.js';
 import type { PersonalConfig } from '../config.js';
 
+// Mock only the side-effecting boundaries startConsole touches; the sibling
+// suites (buildServiceEnv / missingBuildSentinels) use injected deps, not these
+// modules, so importActual keeps everything else real.
+vi.mock('child_process', async (orig) => ({
+  ...(await orig<typeof import('child_process')>()),
+  spawn: vi.fn(),
+}));
+vi.mock('fs', async (orig) => ({
+  ...(await orig<typeof import('fs')>()),
+  mkdirSync: vi.fn(),
+  openSync: vi.fn(() => 3),
+  closeSync: vi.fn(),
+}));
+vi.mock('../process-control.js', async (orig) => ({
+  ...(await orig<typeof import('../process-control.js')>()),
+  isProcessAlive: vi.fn(() => false),
+  writePidRecord: vi.fn(),
+}));
+
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.mocked(spawn).mockReset();
 });
 
 describe('buildServiceEnv', () => {
@@ -120,5 +142,46 @@ describe('startConsole', () => {
 
     expect(result.status).toBe('already-running');
     expect(fetch).toHaveBeenCalledWith('http://127.0.0.1:8080');
+  });
+
+  // Regression for #25: a foreign service answering plain HTTP 200 on the console
+  // URL (no `x-open-claude-tag-console` header, no console <title>) must NOT be
+  // treated as already-running — startConsole must proceed to spawn its own.
+  it('does not treat a foreign HTTP 200 as already-running; proceeds to spawn', async () => {
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      headers: { get: () => null },
+      json: async () => ({}),
+      text: async () => '<title>Some other app</title>',
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+    // Spawn a fake child that immediately looks dead (isProcessAlive → false),
+    // so startConsole throws fast without real I/O, timers, or signals.
+    const killSpy = vi.spyOn(process, 'kill').mockImplementation(() => true as never);
+    vi.mocked(spawn).mockReturnValue({ pid: 999_999, unref: vi.fn(), on: vi.fn() } as never);
+
+    await expect(
+      startConsole(
+        {
+          repoRoot: '/repo',
+          consoleUrl: 'http://127.0.0.1:8080',
+          runtimeDir: '/tmp/oct-console-test',
+          consoleLogPath: '/tmp/oct-console-test/console.log',
+          consolePort: 8080,
+          apiUrl: 'http://127.0.0.1:3000',
+          consolePidPath: '/tmp/oct-console-test/console.pid',
+        } as unknown as PersonalConfig,
+        {},
+      ),
+    ).rejects.toThrow(/exited during startup/);
+
+    // Proves the foreign 200 did not short-circuit to already-running.
+    expect(vi.mocked(spawn)).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(spawn)).toHaveBeenCalledWith(
+      'node',
+      [join('/repo', 'apps', 'console', 'serve-console.mjs')],
+      expect.objectContaining({ cwd: '/repo' }),
+    );
+    killSpy.mockRestore();
   });
 });
