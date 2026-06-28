@@ -93,7 +93,11 @@ function assertDuplicateTaskMatches(
     !nullableEquals(existing.feishuAppId, expected.feishuAppId) ||
     existing.taskType !== expected.taskType ||
     existing.goal !== expected.goal ||
-    !nullableEquals(existing.runtimeHint, expected.runtimeHint)
+    // Normalize both sides so a pre-deploy row that stored the legacy literal
+    // 'auto' still matches the now-null expected hint — otherwise a redelivered
+    // deterministic-id task (neutral Slack, ambient, relay) created before this
+    // change would throw Task id conflict instead of recovering as a duplicate.
+    normalizeRuntimeHint(existing.runtimeHint) !== normalizeRuntimeHint(expected.runtimeHint)
   ) {
     throw new Error(`Task id conflict: ${expected.id}`);
   }
