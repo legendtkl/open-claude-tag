@@ -7,7 +7,6 @@ import {
   Bot,
   Boxes,
   Check,
-  ChevronDown,
   Compass,
   Copy,
   Download,
@@ -59,14 +58,12 @@ import {
   issuePairingToken,
   listComputerAccessUsers,
   loadConsoleData,
-  loadTaskBoardTasks,
   logout as logoutRequest,
   resetDesktopApiUrl,
   saveDesktopApiUrl,
   setAdminToken,
   startFeishuAppRegistration,
   syncFeishuAppMetadata,
-  TASK_BOARD_TASK_PAGE_SIZE,
   unbindBot,
   updateAgent,
   updateChat,
@@ -86,10 +83,6 @@ import {
   type FeishuPermissionCheckResult,
   type Machine,
   type Me,
-  type TaskRun,
-  type TaskRunEvent,
-  type TaskBoard,
-  type TaskBoardTask,
 } from './api';
 import { createQrCodeSvgDataUrl } from './qr-code';
 import './styles.css';
@@ -101,7 +94,6 @@ type View =
   | 'bots'
   | 'chats'
   | 'machines'
-  | 'taskBoards'
   | 'settings';
 type Locale = 'en' | 'zh';
 type RefreshConsole = (options?: { showLoading?: boolean }) => Promise<void>;
@@ -125,7 +117,6 @@ const navItems = [
   { id: 'bots', icon: Bot },
   { id: 'chats', icon: MessageSquare },
   { id: 'machines', icon: Laptop },
-  { id: 'taskBoards', icon: Rows3 },
   { id: 'settings', icon: Settings2 },
 ] satisfies Array<{ id: View; icon: typeof Home }>;
 
@@ -137,7 +128,6 @@ const viewLabels: Record<Locale, Record<View, string>> = {
     bots: 'Bots',
     chats: 'Chats',
     machines: 'Machines',
-    taskBoards: 'Task Boards',
     settings: 'Settings',
   },
   zh: {
@@ -147,7 +137,6 @@ const viewLabels: Record<Locale, Record<View, string>> = {
     bots: '机器人',
     chats: '会话',
     machines: '执行机器',
-    taskBoards: '任务看板',
     settings: '设置',
   },
 };
@@ -669,19 +658,6 @@ function formatRelativeTime(value: string | null, locale: Locale): string {
   return formatter.format(Math.round(diffMs / 1000), 'second');
 }
 
-function formatRunWindow(run: TaskRun, locale: Locale): string {
-  const start = formatDate(run.startedAt, locale);
-  if (!run.completedAt) return `${start} - ${statusLabel('running', locale)}`;
-  return `${start} - ${formatDate(run.completedAt, locale)}`;
-}
-
-function eventMessage(event: TaskRunEvent): string {
-  const message = event.message?.trim();
-  if (message) return message;
-  if (event.eventType === 'completed') return 'Completed';
-  return event.eventType;
-}
-
 type AgentFormField = 'displayName' | 'defaultRuntime' | 'machineId' | 'status';
 
 function validateAgentForm(
@@ -789,20 +765,6 @@ function validateFeishuAppForm(
     appId: requiredError(input.appId, 'App ID', locale),
     appSecret: requiredError(input.appSecret, 'App Secret', locale),
   };
-}
-
-const taskStatusOrder = ['todo', 'in-progress', 'to-clarify', 'review', 'completed'] as const;
-
-function boardStatuses(board: TaskBoard): string[] {
-  const seen = new Set<string>(taskStatusOrder);
-  for (const task of board.tasks) seen.add(task.trackingStatus);
-  for (const [status, count] of Object.entries(board.statusCounts)) {
-    if (count > 0) seen.add(status);
-  }
-  return [
-    ...taskStatusOrder,
-    ...[...seen].filter((status) => !(taskStatusOrder as readonly string[]).includes(status)),
-  ];
 }
 
 const LOCALE_STORAGE_KEY = 'open-claude-tag.console.locale';
@@ -1102,9 +1064,6 @@ export function App() {
             me={me}
             onAuthenticated={refresh}
           />
-        ) : null}
-        {!loading && view === 'taskBoards' ? (
-          <TaskBoardsView data={data} locale={locale} />
         ) : null}
         {view === 'settings' ? (
           <SettingsView data={data} locale={locale} me={me} refreshConsole={refresh} />
@@ -2062,7 +2021,7 @@ function Overview({
     [locale === 'zh' ? '飞书应用' : 'Feishu Apps', data.summary.feishuApps],
     [locale === 'zh' ? '机器人绑定' : 'Bot Bindings', data.summary.botBindings],
     [viewLabels[locale].chats, data.summary.chats],
-    [viewLabels[locale].taskBoards, data.summary.taskBoards],
+    [locale === 'zh' ? '任务看板' : 'Task Boards', data.summary.taskBoards],
     [
       viewLabels[locale].machines,
       locale === 'zh'
@@ -4573,269 +4532,6 @@ function MachinesView({
         onAuthenticated={onAuthenticated}
       />
     </div>
-  );
-}
-
-function TaskBoardsView({ data, locale }: { data: ConsoleData; locale: Locale }) {
-  return (
-    <section className="panel">
-      <div className="panel-title">
-        <Rows3 size={18} /> {viewLabels[locale].taskBoards}
-      </div>
-      {data.taskBoards.length === 0 ? (
-        <EmptyState label={locale === 'zh' ? '暂无任务看板' : 'No task boards found'} />
-      ) : null}
-      <div className="board-list">
-        {data.taskBoards.map((board, index) => (
-          <TaskBoardCard board={board} key={board.id} defaultOpen={index === 0} locale={locale} />
-        ))}
-      </div>
-    </section>
-  );
-}
-
-function TaskBoardCard({
-  board,
-  defaultOpen,
-  locale,
-}: {
-  board: TaskBoard;
-  defaultOpen: boolean;
-  locale: Locale;
-}) {
-  const t = uiText[locale];
-  const statuses = boardStatuses(board);
-  const [visibleTasks, setVisibleTasks] = useState<TaskBoardTask[]>(board.tasks);
-  const [loadingStatus, setLoadingStatus] = useState<string | null>(null);
-  const [loadMoreErrors, setLoadMoreErrors] = useState<Record<string, string>>({});
-  const [reachedEndStatuses, setReachedEndStatuses] = useState<Set<string>>(() => new Set());
-
-  useEffect(() => {
-    setVisibleTasks(board.tasks);
-    setLoadMoreErrors({});
-    setLoadingStatus(null);
-    setReachedEndStatuses(new Set());
-  }, [board.id, board.tasks]);
-
-  async function loadMore(status: string, offset: number) {
-    if (loadingStatus) return;
-    setLoadingStatus(status);
-    setLoadMoreErrors((current) => {
-      const { [status]: _ignored, ...rest } = current;
-      return rest;
-    });
-    try {
-      const nextTasks = await loadTaskBoardTasks(board.id, {
-        offset,
-        limit: TASK_BOARD_TASK_PAGE_SIZE,
-        status,
-      });
-      if (nextTasks.length === 0) {
-        setReachedEndStatuses((statuses) => new Set(statuses).add(status));
-      }
-      setVisibleTasks((current) => {
-        const seen = new Set(current.map((task) => task.id));
-        const merged = [...current];
-        for (const task of nextTasks) {
-          if (!seen.has(task.id)) {
-            merged.push(task);
-          }
-        }
-        return merged;
-      });
-    } catch (err) {
-      setLoadMoreErrors((current) => ({ ...current, [status]: (err as Error).message }));
-    } finally {
-      setLoadingStatus(null);
-    }
-  }
-
-  return (
-    <details className="board-card" open={defaultOpen || board.taskCount === 0}>
-      <summary>
-        <div className="board-heading">
-          <ChevronDown size={18} className="summary-chevron" />
-          <div className="resource-title">
-            <strong>{board.name}</strong>
-            <small>
-              {board.scopeType === 'chat'
-                ? `${board.chatDisplayName ?? viewLabels[locale].chats} · ${shortId(board.chatId ?? board.scopeId)}`
-                : t.common.globalBoard}{' '}
-              ·{' '}
-              {locale === 'zh'
-                ? `${board.taskCount} 个已关联任务`
-                : `${board.taskCount} linked tasks`}
-            </small>
-          </div>
-        </div>
-        <div className="status-strip">
-          {statuses.map((status) => (
-            <span className={`status-chip ${status}`} key={status}>
-              {statusLabel(status, locale)} {board.statusCounts[status] ?? 0}
-            </span>
-          ))}
-        </div>
-        <div className="inline-actions" onClick={(event) => event.stopPropagation()}>
-          <a
-            className="icon-button"
-            href={board.openTasklistUrl}
-            title="Open task board"
-            target="_blank"
-            rel="noreferrer"
-          >
-            <ExternalLink size={16} />
-          </a>
-          {board.openChatUrl ? (
-            <a
-              className="icon-button"
-              href={board.openChatUrl}
-              title="Open chat"
-              target="_blank"
-              rel="noreferrer"
-            >
-              <MessageSquare size={16} />
-            </a>
-          ) : null}
-        </div>
-      </summary>
-      <div className="board-meta">
-        <span>
-          {t.common.taskList} {shortId(board.tasklistGuid)}
-        </span>
-        <span>
-          {t.common.statusField} {shortId(board.statusFieldGuid)}
-        </span>
-      </div>
-      {board.taskCount === 0 ? (
-        <EmptyState
-          label={locale === 'zh' ? '这个看板暂无关联任务' : 'No linked tasks in this board'}
-        />
-      ) : (
-        <div className="kanban-grid">
-          {statuses.map((status) => {
-            const tasks = visibleTasks.filter((task) => task.trackingStatus === status);
-            const totalTasks = board.statusCounts[status] ?? tasks.length;
-            const countLabel =
-              totalTasks === tasks.length ? `${totalTasks}` : `${tasks.length}/${totalTasks}`;
-            const hasMoreStatusTasks = !reachedEndStatuses.has(status) && tasks.length < totalTasks;
-            const nextTaskCount = Math.min(
-              TASK_BOARD_TASK_PAGE_SIZE,
-              Math.max(totalTasks - tasks.length, 0),
-            );
-            const showPagination = totalTasks > TASK_BOARD_TASK_PAGE_SIZE || hasMoreStatusTasks;
-            return (
-              <section className="status-column" key={status}>
-                <div className="status-column-title">
-                  <span>{statusLabel(status, locale)}</span>
-                  <strong>{countLabel}</strong>
-                </div>
-                <div className="task-stack">
-                  {tasks.length === 0 ? (
-                    <div className="task-empty">
-                      {totalTasks > 0 ? t.common.notLoaded : t.common.empty}
-                    </div>
-                  ) : null}
-                  {tasks.map((task) => (
-                    <TaskMiniCard task={task} key={task.id} locale={locale} />
-                  ))}
-                  {showPagination ? (
-                    <div className="task-column-pagination">
-                      <span>{t.common.taskProgress(tasks.length, totalTasks)}</span>
-                      {hasMoreStatusTasks ? (
-                        <button
-                          className="secondary tiny"
-                          onClick={() => loadMore(status, tasks.length)}
-                          type="button"
-                          disabled={loadingStatus !== null}
-                        >
-                          {loadingStatus === status ? (
-                            <Loader2 size={14} className="spin" />
-                          ) : (
-                            <Plus size={14} />
-                          )}
-                          {loadingStatus === status
-                            ? t.common.loadingMore
-                            : t.common.loadMoreTasks(nextTaskCount)}
-                        </button>
-                      ) : null}
-                    </div>
-                  ) : null}
-                  {loadMoreErrors[status] ? (
-                    <div className="task-load-error">{loadMoreErrors[status]}</div>
-                  ) : null}
-                </div>
-              </section>
-            );
-          })}
-        </div>
-      )}
-    </details>
-  );
-}
-
-function TaskMiniCard({ task, locale }: { task: TaskBoardTask; locale: Locale }) {
-  const t = uiText[locale];
-  const latestRun = task.runs[0] ?? null;
-  return (
-    <article className="task-mini-card">
-      <strong>{task.title}</strong>
-      <small>
-        {statusLabel(task.localStatus, locale)} · {runtimeLabel(task.runtimeHint, locale)} ·{' '}
-        {formatDate(task.createdAt, locale)}
-      </small>
-      {latestRun ? (
-        <div className="run-summary">
-          <span>{runtimeLabel(latestRun.runtimeBackend, locale)}</span>
-          <span>{statusLabel(latestRun.status, locale)}</span>
-          <span>{latestRun.eventCount} events</span>
-        </div>
-      ) : null}
-      {task.lastSyncError ? <small className="danger-text">{task.lastSyncError}</small> : null}
-      {latestRun ? <TaskRunTrace run={latestRun} locale={locale} /> : null}
-      <div className="inline-actions compact-actions">
-        {task.openTaskUrl ? (
-          <a className="secondary tiny" href={task.openTaskUrl} target="_blank" rel="noreferrer">
-            <ExternalLink size={14} /> {t.actions.task}
-          </a>
-        ) : null}
-        {task.sourceTopicUrl ? (
-          <a className="secondary tiny" href={task.sourceTopicUrl} target="_blank" rel="noreferrer">
-            <MessageSquare size={14} /> {t.actions.topic}
-          </a>
-        ) : null}
-      </div>
-    </article>
-  );
-}
-
-function TaskRunTrace({ run, locale }: { run: TaskRun; locale: Locale }) {
-  return (
-    <details className="trace-details">
-      <summary>
-        <Activity size={14} />
-        <span>Trace</span>
-        <small>{formatRunWindow(run, locale)}</small>
-      </summary>
-      {run.events.length === 0 ? (
-        <div className="trace-empty">No events captured</div>
-      ) : (
-        <ol className="trace-list">
-          {run.events.map((event) => (
-            <li className={`trace-event ${event.eventType}`} key={event.id}>
-              <div className="trace-dot">{event.eventIndex}</div>
-              <div className="trace-body">
-                <div className="trace-head">
-                  <span>{event.eventType}</span>
-                  {event.progress == null ? null : <strong>{event.progress}%</strong>}
-                </div>
-                <p>{eventMessage(event)}</p>
-                <small>{formatDate(event.createdAt, locale)}</small>
-              </div>
-            </li>
-          ))}
-        </ol>
-      )}
-    </details>
   );
 }
 

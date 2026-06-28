@@ -583,13 +583,13 @@ describe('OpenClaudeTag Console', () => {
       'Bots',
       'Chats',
       'Machines',
-      'Task Boards',
       'Settings',
     ]);
 
     expect(within(navigation).queryByRole('button', { name: /Project Guide/i })).toBeNull();
     expect(within(navigation).queryByRole('button', { name: /Release Notes/i })).toBeNull();
     expect(within(navigation).queryByRole('button', { name: /Downloads/i })).toBeNull();
+    expect(within(navigation).queryByRole('button', { name: /Task Boards/i })).toBeNull();
   });
 
   it('switches the whole console chrome and pages to Chinese', async () => {
@@ -822,6 +822,9 @@ describe('OpenClaudeTag Console', () => {
   it('shows chat and task board Feishu jump actions', async () => {
     render(<App />);
 
+    const navigation = await screen.findByRole('navigation', { name: 'Console sections' });
+    expect(within(navigation).queryByRole('button', { name: /Task Boards/i })).toBeNull();
+
     fireEvent.click(await screen.findByRole('button', { name: /Chats/i }));
     expect(await screen.findByText('Engineering')).toBeInTheDocument();
     // The chat agent pill shows the display name and status (handle is gone).
@@ -840,108 +843,6 @@ describe('OpenClaudeTag Console', () => {
       'href',
       'https://applink.feishu.cn/client/todo/task_list?guid=tl_test',
     );
-  });
-
-  it('shows task boards as expandable status groups with linked tasks', async () => {
-    render(<App />);
-
-    fireEvent.click(await screen.findByRole('button', { name: /Task Boards/i }));
-
-    expect(await screen.findByText('Engineering任务看板')).toBeInTheDocument();
-    expect(screen.getByText('Ship readable boards')).toBeInTheDocument();
-    expect(screen.getByText('in-progress 1')).toBeInTheDocument();
-    expect(screen.getByText('2 events')).toBeInTheDocument();
-    expect(screen.getByText('running')).toBeInTheDocument();
-    fireEvent.click(screen.getByText('Trace'));
-    expect(screen.getByText('Starting Codex...')).toBeInTheDocument();
-    expect(screen.getByText('Reading files')).toBeInTheDocument();
-    expect(screen.getByText('35%')).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: /^Task$/i })).toHaveAttribute(
-      'href',
-      'https://applink.example.com/client/todo/detail?guid=ft_test',
-    );
-  });
-
-  it('loads task board tasks in pages of five', async () => {
-    const baseBoard = fixtures['/admin/task-boards?taskLimit=5'][0];
-    const baseTask = baseBoard.tasks[0];
-    const makeTask = (index: number) => ({
-      ...baseTask,
-      id: `link-${index}`,
-      taskId: `task-${index}`,
-      sessionId: `session-${index}`,
-      title: `Paged task ${index}`,
-      feishuTaskGuid: `ft_${index}`,
-      openTaskUrl: `https://applink.example.com/client/todo/detail?guid=ft_${index}`,
-      runs: [],
-    });
-    const firstPageTasks = Array.from({ length: 5 }, (_, index) => makeTask(index + 1));
-    const nextPageTasks = [makeTask(6), makeTask(7)];
-
-    fetchMock.mockImplementation(async (input: RequestInfo | URL) => {
-      const url = typeof input === 'string' ? input : input.toString();
-      if (url === '/admin/task-boards?taskLimit=5') {
-        return new Response(
-          JSON.stringify([
-            {
-              ...baseBoard,
-              tasks: firstPageTasks,
-              taskCount: 7,
-              statusCounts: {
-                ...baseBoard.statusCounts,
-                'in-progress': 7,
-              },
-            },
-          ]),
-          {
-            status: 200,
-            headers: { 'Content-Type': 'application/json' },
-          },
-        );
-      }
-      if (url === '/admin/task-boards/board-1/tasks?offset=5&limit=5&status=in-progress') {
-        return new Response(JSON.stringify(nextPageTasks), {
-          status: 200,
-          headers: { 'Content-Type': 'application/json' },
-        });
-      }
-      const body = fixtures[url as keyof typeof fixtures] ?? {};
-      return new Response(JSON.stringify(body), {
-        status: 200,
-        headers: { 'Content-Type': 'application/json' },
-      });
-    });
-
-    render(<App />);
-    fireEvent.click(await screen.findByRole('button', { name: /Task Boards/i }));
-
-    expect(await screen.findByText('Paged task 1')).toBeInTheDocument();
-    const inProgressColumn = screen.getByText('Paged task 5').closest('.status-column');
-    expect(inProgressColumn).not.toBeNull();
-    expect(
-      within(inProgressColumn as HTMLElement).getByText('5 of 7 tasks shown'),
-    ).toBeInTheDocument();
-    expect(
-      within(inProgressColumn as HTMLElement).getByRole('button', { name: /Load 2 more/i }),
-    ).toBeInTheDocument();
-    expect(screen.queryByText('Paged task 6')).not.toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole('button', { name: /Load 2 more/i }));
-
-    expect(await screen.findByText('Paged task 6')).toBeInTheDocument();
-    expect(screen.getByText('Paged task 7')).toBeInTheDocument();
-    const updatedColumn = screen.getByText('Paged task 7').closest('.status-column');
-    expect(updatedColumn).not.toBeNull();
-    expect(
-      within(updatedColumn as HTMLElement).getByText('7 of 7 tasks shown'),
-    ).toBeInTheDocument();
-    const taskRequest = fetchMock.mock.calls.find(
-      ([input]) => input === '/admin/task-boards/board-1/tasks?offset=5&limit=5&status=in-progress',
-    );
-    expect(taskRequest).toBeDefined();
-    const taskRequestHeaders = (taskRequest?.[1] as RequestInit | undefined)?.headers as Headers;
-    expect(taskRequestHeaders).toBeInstanceOf(Headers);
-    expect(taskRequestHeaders.has('Content-Type')).toBe(false);
   });
 
   it('omits empty optional bot fields when registering a Feishu app', async () => {
