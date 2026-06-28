@@ -134,17 +134,9 @@ const fixtures = {
       chatId: 'oc_test',
       displayName: 'Engineering',
       openFeishuUrl: 'https://applink.feishu.cn/client/chat/open?openChatId=oc_test',
-      defaultWorkDir: null,
       defaultRuntime: null,
-      defaultAgentId: null,
-      defaultAgent: null,
       defaultMachineId: null,
       defaultMachineName: null,
-      memoryEnabled: false,
-      memorySummaryNextRunAt: null,
-      memorySummaryLastRunAt: null,
-      memorySummaryLastStatus: null,
-      memorySummaryLastError: null,
       agents: [
         {
           id: 'agent-1',
@@ -323,9 +315,6 @@ beforeEach(() => {
           ...fixtures['/admin/chats'][0],
           defaultMachineId: payload.defaultMachineId ?? null,
           defaultMachineName: payload.defaultMachineId === 'machine-1' ? 'studio-mbp' : null,
-          memoryEnabled: payload.memoryEnabled ?? fixtures['/admin/chats'][0].memoryEnabled,
-          memorySummaryNextRunAt:
-            payload.memoryEnabled === true ? '2026-06-06T01:30:00.000Z' : null,
         }),
         {
           status: 200,

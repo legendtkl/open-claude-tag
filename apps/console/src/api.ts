@@ -191,17 +191,9 @@ export interface Chat {
   chatId: string;
   displayName: string;
   openFeishuUrl: string;
-  defaultWorkDir: string | null;
   defaultRuntime: string | null;
-  defaultAgentId: string | null;
-  defaultAgent: Pick<Agent, 'id' | 'handle' | 'displayName' | 'status'> | null;
   defaultMachineId: string | null;
   defaultMachineName: string | null;
-  memoryEnabled: boolean;
-  memorySummaryNextRunAt: string | null;
-  memorySummaryLastRunAt: string | null;
-  memorySummaryLastStatus: string | null;
-  memorySummaryLastError: string | null;
   agents: ChatAgent[];
   taskCount: number;
   lastTaskAt: string | null;
@@ -780,12 +772,7 @@ export async function updateChat(
   tenantKey: string,
   chatId: string,
   input: {
-    displayName?: string | null;
-    defaultAgentId?: string | null;
-    defaultRuntime?: string | null;
-    defaultWorkDir?: string | null;
     defaultMachineId?: string | null;
-    memoryEnabled?: boolean;
   },
 ): Promise<Chat> {
   return requestJson<Chat>(
