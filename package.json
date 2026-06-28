@@ -8,10 +8,6 @@
   "engines": {
     "node": ">=20.0.0"
   },
-  "bin": {
-    "open-claude-tag": "packages/launcher/dist/cli.js",
-    "oct": "packages/launcher/dist/cli.js"
-  },
   "scripts": {
     "build": "pnpm -r run build",
     "dev": "pnpm -r --parallel run dev",
