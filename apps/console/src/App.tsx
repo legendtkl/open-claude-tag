@@ -4867,7 +4867,6 @@ function SettingsView({
   const copy = {
     en: {
       desktop: 'Desktop',
-      unavailable: 'Desktop settings are available in the macOS app',
       loading: 'Loading settings',
       apiServer: 'API Server',
       saved: 'API URL saved',
@@ -4906,7 +4905,6 @@ function SettingsView({
     },
     zh: {
       desktop: '桌面端',
-      unavailable: '桌面端设置仅在 macOS app 中可用',
       loading: '正在加载设置',
       apiServer: 'API 服务',
       saved: 'API URL 已保存',
@@ -5225,12 +5223,6 @@ function SettingsView({
         {chatMemoryPanel}
         {adminTokenPanel}
         {computerAccessPanel}
-        <section className="panel settings-panel">
-          <div className="panel-title">
-            <Settings2 size={18} /> {copy.desktop}
-          </div>
-          <EmptyState label={copy.unavailable} />
-        </section>
       </div>
     );
   }
