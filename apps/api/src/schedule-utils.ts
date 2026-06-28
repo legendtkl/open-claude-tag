@@ -16,6 +16,20 @@ export function formatLocalTime(d: Date, tz = process.env.TZ ?? 'Asia/Shanghai')
   });
 }
 
+// Schedule wall-clock times ("今晚22点") are China time (UTC+8, which has no DST),
+// matching `formatLocalTime`'s default zone. Compose the instant in a +8-shifted
+// frame using only UTC getters/setters, so the result is the same absolute instant
+// regardless of the runner's local timezone (a UTC CI runner and a UTC+8 dev box
+// agree). Using `setHours`/`getDate` here would silently bind to the runner's TZ.
+const CHINA_OFFSET_MS = 8 * 60 * 60 * 1000;
+
+function chinaWallClockInstant(now: Date, hour: number, minute: number, dayOffset: number): Date {
+  const shifted = new Date(now.getTime() + CHINA_OFFSET_MS);
+  shifted.setUTCHours(hour, minute, 0, 0);
+  shifted.setUTCDate(shifted.getUTCDate() + dayOffset);
+  return new Date(shifted.getTime() - CHINA_OFFSET_MS);
+}
+
 /**
  * Parse "/schedule <time_expr> <goal>" args into a scheduled date + goal string.
  *
@@ -47,22 +61,23 @@ export function parseScheduleArgs(input: string, now = new Date()): ParsedSchedu
     return { scheduledAt, goal: m[2].trim(), timeDesc: `in ${hrs} hr (${formatLocalTime(scheduledAt)})` };
   }
 
-  // "今天/今晚/今日 HH点 | HH:MM <goal>" — today at specified time
+  // "今天/今晚/今日 HH点 | HH:MM <goal>" — today at specified China-time
   m = input.match(/^(?:今天|今晚|今日)\s*(\d{1,2})(?::(\d{2}))?[点时]?\s+([\s\S]+)$/);
   if (m) {
-    const scheduledAt = new Date(now);
-    scheduledAt.setHours(parseInt(m[1], 10), m[2] ? parseInt(m[2], 10) : 0, 0, 0);
-    // If the time has already passed today, roll over to tomorrow
-    if (scheduledAt <= now) scheduledAt.setDate(scheduledAt.getDate() + 1);
+    const hour = parseInt(m[1], 10);
+    const minute = m[2] ? parseInt(m[2], 10) : 0;
+    let scheduledAt = chinaWallClockInstant(now, hour, minute, 0);
+    // If the time has already passed today, roll over to tomorrow.
+    if (scheduledAt <= now) scheduledAt = chinaWallClockInstant(now, hour, minute, 1);
     return { scheduledAt, goal: m[3].trim(), timeDesc: formatLocalTime(scheduledAt) };
   }
 
-  // "明天 HH点 | HH:MM <goal>" — tomorrow at specified time
+  // "明天 HH点 | HH:MM <goal>" — tomorrow at specified China-time
   m = input.match(/^明天\s*(\d{1,2})(?::(\d{2}))?[点时]?\s+([\s\S]+)$/);
   if (m) {
-    const scheduledAt = new Date(now);
-    scheduledAt.setDate(scheduledAt.getDate() + 1);
-    scheduledAt.setHours(parseInt(m[1], 10), m[2] ? parseInt(m[2], 10) : 0, 0, 0);
+    const hour = parseInt(m[1], 10);
+    const minute = m[2] ? parseInt(m[2], 10) : 0;
+    const scheduledAt = chinaWallClockInstant(now, hour, minute, 1);
     return { scheduledAt, goal: m[3].trim(), timeDesc: formatLocalTime(scheduledAt) };
   }
 

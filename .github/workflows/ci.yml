@@ -61,6 +61,13 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      # tsconfig uses composite project references, so each package's `tsc --noEmit`
+      # resolves cross-package `@open-tag/*` imports from its dependencies' built
+      # .d.ts. Build first (like build-and-test / integration / e2e do) or typecheck
+      # fails with "Cannot find module '@open-tag/...'" on a fresh checkout.
+      - name: Build
+        run: pnpm build
+
       - name: Typecheck
         run: pnpm typecheck
 
