@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { TaskQueue, TASK_QUEUE_NAME } from '../task-queue.js';
+import { TaskQueue, TASK_QUEUE_NAME, REQUIRED_JOB_COLUMNS } from '../task-queue.js';
 import type { TaskJobData } from '../task-queue.js';
 import { randomUUID } from 'crypto';
 
@@ -45,16 +45,49 @@ const postgresMock = vi.hoisted(() => {
     end: ReturnType<typeof vi.fn>;
   }> = [];
 
+  // Mirror of REQUIRED_JOB_COLUMNS from task-queue.ts. vi.hoisted() runs before
+  // static imports are initialized, so the exported constant cannot be read in
+  // here; the 'mock column list matches REQUIRED_JOB_COLUMNS' test below guards
+  // against the two drifting apart.
+  const layoutColumns = [
+    'id',
+    'name',
+    'data',
+    'state',
+    'priority',
+    'singleton_key',
+    'policy',
+    'start_after',
+    'started_on',
+    'completed_on',
+    'expire_in',
+    'created_on',
+    'retry_count',
+  ];
+
+  // The startup layout self-check (assertPgBossLayout) runs two queries during
+  // start(): an information_schema.columns probe and a zero-row type probe.
+  // Teach the shared mock to answer the columns probe with the full required
+  // set so start()-based tests keep working; everything else (the type probe,
+  // enqueue/fetch SQL) defaults to an empty result, as before.
+  const layoutAwareUnsafe = () =>
+    vi.fn().mockImplementation((sql: unknown) => {
+      if (typeof sql === 'string' && sql.includes('information_schema.columns')) {
+        return Promise.resolve(layoutColumns.map((column_name) => ({ column_name })));
+      }
+      return Promise.resolve([]);
+    });
+
   const postgres = vi.fn(() => {
     const client = {
-      unsafe: vi.fn().mockResolvedValue([]),
+      unsafe: layoutAwareUnsafe(),
       end: vi.fn().mockResolvedValue(undefined),
     };
     clients.push(client);
     return client;
   });
 
-  return { clients, postgres };
+  return { clients, postgres, layoutColumns };
 });
 
 vi.mock('pg-boss', () => ({
@@ -361,6 +394,8 @@ describe('TaskQueue types', () => {
     await queue.start();
     const boss = pgBossMock.instances[0];
     const sql = postgresMock.clients[0];
+    // Discard the start-up layout-check calls so fetch SQL is mock.calls[0].
+    sql.unsafe.mockClear();
     const jobs = [
       makeJob('job-1', 'task-1', 'session-1'),
       makeJob('job-2', 'task-2', 'session-2'),
@@ -437,6 +472,8 @@ describe('TaskQueue types', () => {
     await queue.start();
     const boss = pgBossMock.instances[0];
     const sql = postgresMock.clients[0];
+    // Discard the start-up layout-check calls so fetch SQL indices stay 1-based.
+    sql.unsafe.mockClear();
     const longJob = makeJob('job-long', 'task-long', 'session-1');
     const shortJob = makeJob('job-short', 'task-short', 'session-2');
     const refillJob = makeJob('job-refill', 'task-refill', 'session-3');
@@ -495,6 +532,8 @@ describe('TaskQueue types', () => {
     await queue.start();
     const boss = pgBossMock.instances[0];
     const sql = postgresMock.clients[0];
+    // Discard the start-up layout-check calls so the fetch is call #1.
+    sql.unsafe.mockClear();
     const lateJob = makeJob('job-late', 'task-late', 'session-1');
     let resolveFetch: ((jobs: unknown[]) => void) | undefined;
     sql.unsafe.mockReturnValueOnce(
@@ -666,6 +705,85 @@ describe('TaskQueue enqueue id-conflict resolution', () => {
 
     await expect(queue.enqueue(makeJobData())).rejects.toThrow(/live queue job/);
     expect(boss.send.mock.calls.length).toBeGreaterThanOrEqual(2);
+  });
+});
+
+describe('TaskQueue pg-boss layout self-check', () => {
+  beforeEach(() => {
+    pgBossMock.instances.length = 0;
+    postgresMock.clients.length = 0;
+    vi.clearAllMocks();
+  });
+
+  // Replace the next postgres() client so start() runs the layout check against
+  // a custom unsafe() implementation.
+  function stubNextClient(unsafe: ReturnType<typeof vi.fn>) {
+    const client = { unsafe, end: vi.fn().mockResolvedValue(undefined) };
+    postgresMock.postgres.mockImplementationOnce(() => {
+      postgresMock.clients.push(client);
+      return client;
+    });
+    return client;
+  }
+
+  function columnsAwareUnsafe(columns: readonly string[], typeProbe: () => Promise<unknown>) {
+    return vi.fn().mockImplementation((sql: unknown) => {
+      if (typeof sql === 'string' && sql.includes('information_schema.columns')) {
+        return Promise.resolve(columns.map((column_name) => ({ column_name })));
+      }
+      return typeProbe();
+    });
+  }
+
+  it('shared mock column list matches REQUIRED_JOB_COLUMNS', () => {
+    // The mock mirrors the column list (vi.hoisted cannot read the import);
+    // keep them identical so the layout-aware mock stays faithful.
+    expect(postgresMock.layoutColumns).toEqual([...REQUIRED_JOB_COLUMNS]);
+  });
+
+  it('rejects start() with a clear error when pgboss.job is missing', async () => {
+    // Every query (including the columns probe) returns no rows.
+    stubNextClient(vi.fn().mockResolvedValue([]));
+    const queue = new TaskQueue('postgres://test');
+
+    await expect(queue.start()).rejects.toThrow(/pgboss\.job not found/);
+  });
+
+  it('rejects start() listing the missing column when one is absent', async () => {
+    const withoutExpireIn = REQUIRED_JOB_COLUMNS.filter((column) => column !== 'expire_in');
+    stubNextClient(columnsAwareUnsafe(withoutExpireIn, () => Promise.resolve([])));
+    const queue = new TaskQueue('postgres://test');
+
+    await expect(queue.start()).rejects.toThrow(/missing required columns \[expire_in\]/);
+  });
+
+  it('rejects start() with wrapped context when the type probe fails', async () => {
+    stubNextClient(
+      columnsAwareUnsafe(REQUIRED_JOB_COLUMNS, () =>
+        Promise.reject(new Error('operator does not exist: job_state < unknown')),
+      ),
+    );
+    const queue = new TaskQueue('postgres://test');
+
+    await expect(queue.start()).rejects.toThrow(
+      /column types are incompatible.*operator does not exist: job_state < unknown/,
+    );
+  });
+
+  it('resolves start() when the full required column set is present', async () => {
+    // Uses the shared layout-aware mock, which reports REQUIRED_JOB_COLUMNS.
+    const queue = new TaskQueue('postgres://test');
+
+    await expect(queue.start()).resolves.toBeUndefined();
+
+    const sql = postgresMock.clients[0];
+    expect(sql.unsafe).toHaveBeenCalledWith(
+      expect.stringContaining('information_schema.columns'),
+      ['pgboss'],
+    );
+    expect(sql.unsafe).toHaveBeenCalledWith(
+      expect.stringContaining('EXTRACT(epoch FROM expire_in)'),
+    );
   });
 });
 

@@ -17,6 +17,26 @@ const FULL_CAPACITY_WAIT_MS = 100;
 // fail loudly instead of guessing.
 const LIVE_JOB_STATES = new Set(['created', 'retry', 'active']);
 const FINISHED_JOB_STATES = new Set(['completed', 'cancelled', 'failed']);
+// Every column the custom pgboss.job SQL below reads or writes. The startup
+// self-check (assertPgBossLayout) fails loudly when a pg-boss version bump
+// renames or removes any of these, instead of letting the queue silently
+// misbehave. Keep this aligned with fetchAvailableJobsSql / selectJobRowSql /
+// requeueActiveJobsSql.
+export const REQUIRED_JOB_COLUMNS = [
+  'id',
+  'name',
+  'data',
+  'state',
+  'priority',
+  'singleton_key',
+  'policy',
+  'start_after',
+  'started_on',
+  'completed_on',
+  'expire_in',
+  'created_on',
+  'retry_count',
+] as const;
 // Send attempts per enqueue: tolerates a chain of (MAX - 1) finished
 // generations still inside the archive window before giving up.
 const MAX_ENQUEUE_SEND_ATTEMPTS = 5;
@@ -164,7 +184,52 @@ export class TaskQueue {
     // active job per key, which gives OpenClaudeTag per-session serial execution.
     const queueOptions = { policy: TASK_QUEUE_POLICY } as Parameters<PgBoss['createQueue']>[1];
     await this.ensureQueueWithRetry(queueOptions);
+    await this.assertPgBossLayout();
     logger.info('Task queue started');
+  }
+
+  /**
+   * Proactive startup guard against pg-boss internal-schema drift. The custom
+   * SQL below reads and writes pgboss.job directly, so a version bump that
+   * renames a column, drops a column, or changes the job-state type/enum would
+   * otherwise surface only as subtle runtime misbehaviour. Fail fast at startup
+   * instead, with an actionable error pointing at the version coupling.
+   */
+  private async assertPgBossLayout(): Promise<void> {
+    if (!this.sql) throw new Error('Queue SQL client not started');
+
+    const columnRows = await this.sql.unsafe<Array<{ column_name: string }>>(
+      pgBossJobColumnsSql(),
+      [PG_BOSS_SCHEMA],
+    );
+
+    if (columnRows.length === 0) {
+      throw new Error(
+        `${PG_BOSS_SCHEMA}.job not found — incompatible pg-boss version; this code targets 10.x`,
+      );
+    }
+
+    const presentColumns = new Set(columnRows.map((row) => row.column_name));
+    const missingColumns = REQUIRED_JOB_COLUMNS.filter((column) => !presentColumns.has(column));
+    if (missingColumns.length > 0) {
+      throw new Error(
+        `${PG_BOSS_SCHEMA}.job is missing required columns [${missingColumns.join(', ')}] — ` +
+          'incompatible pg-boss version; this code targets 10.x',
+      );
+    }
+
+    // Zero-row type probe: exercises the job-state ordering comparison and the
+    // expire_in/state/completed_on column types the custom SQL depends on,
+    // without touching any data. A type or enum change makes this fail loudly.
+    try {
+      await this.sql.unsafe(pgBossJobTypeProbeSql());
+    } catch (err) {
+      throw new Error(
+        `${PG_BOSS_SCHEMA}.job column types are incompatible with the pg-boss 10.x layout ` +
+          `this code targets: ${errorMessage(err)}`,
+        { cause: err },
+      );
+    }
   }
 
   /**
@@ -580,6 +645,34 @@ function fetchAvailableJobsSql(): string {
         )
       )
     RETURNING j.id, j.name, j.data, EXTRACT(epoch FROM j.expire_in) AS "expireInSeconds"
+  `;
+}
+
+// Lists the columns present on pgboss.job for the startup layout self-check.
+// The schema name is bound as a parameter ($1) rather than interpolated.
+function pgBossJobColumnsSql(): string {
+  return `
+    SELECT column_name
+    FROM information_schema.columns
+    WHERE table_schema = $1
+      AND table_name = 'job'
+  `;
+}
+
+// Zero-row probe used by assertPgBossLayout to verify the job-state ordering
+// comparison and the expire_in / state / completed_on column types the custom
+// SQL relies on. `AND false` guarantees no rows are scanned or returned.
+function pgBossJobTypeProbeSql(): string {
+  const schema = quotePgIdentifier(PG_BOSS_SCHEMA);
+  return `
+    SELECT
+      EXTRACT(epoch FROM expire_in) AS "expireInSeconds",
+      state::text AS state,
+      completed_on AS "completedOn"
+    FROM ${schema}.job
+    WHERE state < 'active'
+      AND false
+    LIMIT 1
   `;
 }
 

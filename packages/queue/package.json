@@ -23,7 +23,7 @@
   "dependencies": {
     "@open-tag/core-types": "workspace:*",
     "@open-tag/observability": "workspace:^",
-    "pg-boss": "^10.1.0",
+    "pg-boss": "10.4.2",
     "pino": "^9.6.0",
     "postgres": "^3.4.5"
   },
