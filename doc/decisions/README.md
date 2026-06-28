@@ -8,6 +8,10 @@ ADRs are the lightweight record for architectural decisions. In the `self-dev`
 workflow, write one **on demand** — only when a change has a genuine
 architectural fork. See `AGENTS.md` → "Change Workflow".
 
+> For the synthesized, end-to-end architecture overview that ties these
+> point-decisions together, see
+> [`doc/architecture/technical-design.md`](../architecture/technical-design.md).
+
 ## When to write an ADR
 
 Write one for:
