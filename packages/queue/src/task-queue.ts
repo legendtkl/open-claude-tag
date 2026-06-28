@@ -659,16 +659,22 @@ function pgBossJobColumnsSql(): string {
   `;
 }
 
-// Zero-row probe used by assertPgBossLayout to verify the job-state ordering
-// comparison and the expire_in / state / completed_on column types the custom
-// SQL relies on. `AND false` guarantees no rows are scanned or returned.
+// Zero-row probe used by assertPgBossLayout to verify the column types/operations
+// the custom SQL relies on: the job-state ordering comparison (`state < 'active'`),
+// `expire_in` epoch extraction, `completed_on`, plus the `start_after < now()`
+// timestamp comparison (fetchAvailableJobsSql) and the `retry_count + 1` integer
+// increment (the fetch UPDATE). `AND false` guarantees no rows are scanned or
+// returned. Keep these expressions aligned with the custom SQL so a pg-boss
+// column-type change fails fast here instead of as a cryptic runtime SQL error.
 function pgBossJobTypeProbeSql(): string {
   const schema = quotePgIdentifier(PG_BOSS_SCHEMA);
   return `
     SELECT
       EXTRACT(epoch FROM expire_in) AS "expireInSeconds",
       state::text AS state,
-      completed_on AS "completedOn"
+      completed_on AS "completedOn",
+      (start_after < now()) AS "startAfterComparable",
+      (retry_count + 1) AS "retryCountIncrementable"
     FROM ${schema}.job
     WHERE state < 'active'
       AND false
