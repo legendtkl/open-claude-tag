@@ -602,7 +602,8 @@ describe('OpenClaudeTag Console', () => {
     expect(screen.queryByRole('button', { name: '下载' })).toBeNull();
     expect(screen.queryByText('本地服务')).not.toBeInTheDocument();
     expect(screen.getByText('面向飞书群协作的 AI 工程工作台。')).toBeInTheDocument();
-    expect(screen.getByText('1. 绑定机器')).toBeInTheDocument();
+    expect(screen.queryByText('用户指南')).not.toBeInTheDocument();
+    expect(screen.queryByText('1. 绑定机器')).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: '会话' }));
     expect(await screen.findByText('打开飞书')).toBeInTheDocument();
@@ -642,11 +643,11 @@ describe('OpenClaudeTag Console', () => {
     expect(
       await screen.findByText('A Feishu-native workspace for AI engineering collaboration.'),
     ).toBeInTheDocument();
-    expect(screen.getByText('User Guide')).toBeInTheDocument();
-    expect(screen.getByText('1. Bind a machine')).toBeInTheDocument();
-    expect(screen.getByText('2. Create an agent')).toBeInTheDocument();
-    expect(screen.getByText('3. Connect a Feishu bot')).toBeInTheDocument();
-    expect(screen.getByText('4. Collaborate in Feishu groups')).toBeInTheDocument();
+    expect(screen.queryByText('User Guide')).not.toBeInTheDocument();
+    expect(screen.queryByText('1. Bind a machine')).not.toBeInTheDocument();
+    expect(screen.queryByText('2. Create an agent')).not.toBeInTheDocument();
+    expect(screen.queryByText('3. Connect a Feishu bot')).not.toBeInTheDocument();
+    expect(screen.queryByText('4. Collaborate in Feishu groups')).not.toBeInTheDocument();
     await waitFor(() => expect(screen.getAllByText('Agents').length).toBeGreaterThan(0));
     expect(screen.getByText('Objects')).toBeInTheDocument();
     expect(screen.getByText('Bot Bindings')).toBeInTheDocument();

@@ -2047,78 +2047,14 @@ function Overview({
       title: 'A Feishu-native workspace for AI engineering collaboration.',
       intro:
         'OpenClaudeTag connects machines, agent profiles, Feishu bot identities, group chats, and task boards. Operators prepare the runtime here, then teammates collaborate directly in Feishu while OpenClaudeTag routes work to the right agent and keeps task status visible.',
-      guideTitle: 'User Guide',
-      guideSubtitle: 'Set up the collaboration loop in four steps.',
       statusTitle: 'Current Status',
-      steps: [
-        {
-          title: '1. Bind a machine',
-          body:
-            'Open Machines, generate a pairing token, then run the daemon connect command on the machine that should execute Codex tasks.',
-          meta: `${data.summary.onlineMachines}/${data.summary.machines} online`,
-          icon: Laptop,
-        },
-        {
-          title: '2. Create an agent',
-          body:
-            'Open Agents, create a named teammate such as Developer or Reviewer, choose its runtime, and bind it to the machine that should run its work.',
-          meta: `${data.summary.activeAgents}/${data.summary.agents} active`,
-          icon: UserRound,
-        },
-        {
-          title: '3. Connect a Feishu bot',
-          body:
-            'Open Bots, register the Feishu app credentials, bind the bot identity to an agent, and run the permission check before inviting it into chats.',
-          meta: `${data.summary.botBindings} bindings`,
-          icon: Bot,
-        },
-        {
-          title: '4. Collaborate in Feishu groups',
-          body:
-            'Invite the bot to a group, mention it for work, let multiple people reply in the same thread, and follow progress through Feishu cards and task boards.',
-          meta: `${data.summary.chats} chats`,
-          icon: MessageSquare,
-        },
-      ],
     },
     zh: {
       eyebrow: `${PRODUCT_NAME} 控制台`,
       title: '面向飞书群协作的 AI 工程工作台。',
       intro:
         'OpenClaudeTag 串联执行机器、智能体配置、飞书机器人身份、群聊和任务看板。运维人员在这里完成运行环境和身份绑定，团队成员则直接在飞书群里协作，系统会把工作路由到合适的 agent，并持续回传任务状态。',
-      guideTitle: '用户指南',
-      guideSubtitle: '用四步完成协作链路配置。',
       statusTitle: '当前状态',
-      steps: [
-        {
-          title: '1. 绑定机器',
-          body:
-            '进入执行机器页面，生成配对令牌，并在负责执行任务的机器上运行 daemon connect 命令，让 Codex 可以在那里工作。',
-          meta: `${data.summary.onlineMachines}/${data.summary.machines} 在线`,
-          icon: Laptop,
-        },
-        {
-          title: '2. 创建 agent',
-          body:
-            '进入智能体页面，创建 Developer、Reviewer 等命名协作成员，选择 runtime，并绑定到实际执行它工作的机器。',
-          meta: `${data.summary.activeAgents}/${data.summary.agents} 启用`,
-          icon: UserRound,
-        },
-        {
-          title: '3. 接入飞书 bot 并绑定 agent',
-          body:
-            '进入机器人页面，注册飞书应用凭证，把机器人身份绑定到对应 agent，并在邀请进群前完成权限检测。',
-          meta: `${data.summary.botBindings} 个绑定`,
-          icon: Bot,
-        },
-        {
-          title: '4. 在飞书群内多人协作使用',
-          body:
-            '把机器人加入群聊，在群内 @ 机器人执行 /chat set-workdir 绑定工作目录，之后即可发起任务并多人协作。',
-          meta: `${data.summary.chats} 个会话`,
-          icon: MessageSquare,
-        },
-      ],
     },
   }[locale];
   const counters = [
@@ -2181,32 +2117,6 @@ function Overview({
         onOpenBots={onOpenBots}
         refreshConsole={refreshConsole}
       />
-
-      <section className="panel">
-        <div className="panel-heading">
-          <div>
-            <div className="panel-title">
-              <Rows3 size={18} /> {copy.guideTitle}
-            </div>
-            <p className="panel-subtitle">{copy.guideSubtitle}</p>
-          </div>
-        </div>
-        <div className="overview-guide-grid">
-          {copy.steps.map((step) => {
-            const StepIcon = step.icon;
-            return (
-              <article key={step.title}>
-                <div className="overview-step-icon">
-                  <StepIcon size={18} />
-                </div>
-                <strong>{step.title}</strong>
-                <p>{step.body}</p>
-                <span>{step.meta}</span>
-              </article>
-            );
-          })}
-        </div>
-      </section>
 
       <section className="panel">
         <div className="panel-title">
