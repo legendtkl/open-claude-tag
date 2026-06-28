@@ -29,7 +29,6 @@ function summaryFor(apps: FeishuApp[], agents: Agent[]) {
     enabledFeishuApps: apps.filter((a) => a.status === 'enabled').length,
     botBindings,
     chats: 0,
-    taskBoards: 0,
     machines: 0,
     onlineMachines: 0,
   };

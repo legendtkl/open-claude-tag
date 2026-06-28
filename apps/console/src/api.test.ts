@@ -509,7 +509,6 @@ describe('console API requests', () => {
           enabledFeishuApps: 0,
           botBindings: 0,
           chats: 0,
-          taskBoards: 0,
           machines: 0,
           onlineMachines: 0,
         },
@@ -523,9 +522,8 @@ describe('console API requests', () => {
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    const data = await loadConsoleData();
+    await loadConsoleData();
 
-    expect(data.summary.taskBoards).toBe(0);
     expect(fetchMock.mock.calls.map(([input]) => String(input))).toEqual([
       '/admin/summary',
       '/admin/profiles',
