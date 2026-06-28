@@ -13,6 +13,7 @@ import {
   getAuthConfig,
   getMe,
   issuePairingToken,
+  loadConsoleData,
   listComputerAccessUsers,
   listMachines,
   setAdminToken,
@@ -486,5 +487,47 @@ describe('console API requests', () => {
     vi.stubGlobal('fetch', fetchMock);
     await getMe();
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('loads console data without fetching the removed standalone task board view', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = typeof input === 'string' ? input : input.toString();
+      if (url.includes('/admin/task-boards')) {
+        throw new Error(`Unexpected task board request: ${url}`);
+      }
+      const bodyByUrl: Record<string, unknown> = {
+        '/admin/summary': {
+          profiles: 0,
+          agents: 0,
+          activeAgents: 0,
+          feishuApps: 0,
+          enabledFeishuApps: 0,
+          botBindings: 0,
+          chats: 0,
+          taskBoards: 0,
+          machines: 0,
+          onlineMachines: 0,
+        },
+        '/admin/profiles': [],
+        '/admin/agents': [],
+        '/admin/feishu-apps': [],
+        '/admin/chats': [],
+        '/admin/machines': [],
+      };
+      return jsonResponse(bodyByUrl[url] ?? {});
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const data = await loadConsoleData();
+
+    expect(data.summary.taskBoards).toBe(0);
+    expect(fetchMock.mock.calls.map(([input]) => String(input))).toEqual([
+      '/admin/summary',
+      '/admin/profiles',
+      '/admin/agents',
+      '/admin/feishu-apps',
+      '/admin/chats',
+      '/admin/machines',
+    ]);
   });
 });
