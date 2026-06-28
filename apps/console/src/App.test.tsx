@@ -2180,7 +2180,7 @@ describe('OpenClaudeTag Console', () => {
       ),
     ).toBeInTheDocument();
     expect(screen.queryByText(/open-claude-tag-daemon install --server-url/)).not.toBeInTheDocument();
-    expect(screen.getByText(/no SERVER_PUBLIC_URL configured/)).toBeInTheDocument();
+    expect(screen.getByText(/No public daemon gateway URL is configured yet/)).toBeInTheDocument();
   });
 
   it('binds a chat to a machine via the inline select', async () => {
@@ -2431,6 +2431,100 @@ describe('console-e2e-audit-fixes', () => {
     await waitFor(() =>
       expect(screen.getByRole('button', { name: '中文' })).toHaveAttribute('aria-pressed', 'true'),
     );
+  });
+
+  it('uses consistent Chinese labels in the local console agent form', async () => {
+    fetchMock.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = typeof input === 'string' ? input : input.toString();
+      if (url === '/admin/auth/config') {
+        return new Response(
+          JSON.stringify({ ...fixtures['/admin/auth/config'], serverPublicUrl: null }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        );
+      }
+      if (url === '/admin/me') {
+        return new Response(
+          JSON.stringify({ ...fixtures['/admin/me'], id: null, email: null, displayName: null, tokenAdmin: true }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        );
+      }
+      const body = fixtures[url as keyof typeof fixtures] ?? {};
+      return new Response(JSON.stringify(body), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    });
+
+    render(<App />);
+    await screen.findByRole('button', { name: '中文' });
+
+    fireEvent.click(screen.getByRole('button', { name: '中文' }));
+    fireEvent.click(await screen.findByRole('button', { name: '智能体' }));
+    fireEvent.click(await screen.findByRole('button', { name: '创建智能体' }));
+
+    const dialog = await screen.findByRole('dialog', { name: /创建智能体/ });
+    expect(within(dialog).getByLabelText('运行时')).toBeInTheDocument();
+    expect(within(dialog).getByLabelText('环境变量')).toBeInTheDocument();
+    expect(within(dialog).queryByLabelText('执行机器')).not.toBeInTheDocument();
+    expect(within(dialog).queryByLabelText('Runtime')).not.toBeInTheDocument();
+    expect(within(dialog).queryByLabelText('Env')).not.toBeInTheDocument();
+    expect(within(dialog).getByLabelText('系统提示词')).toHaveAttribute(
+      'placeholder',
+      '你是一个严格的代码评审助手，请简洁回答并优先指出问题。',
+    );
+  });
+
+  it('hides machine and account-management surfaces in local console mode', async () => {
+    fetchMock.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = typeof input === 'string' ? input : input.toString();
+      if (url === '/admin/auth/config') {
+        return new Response(
+          JSON.stringify({ ...fixtures['/admin/auth/config'], serverPublicUrl: null }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        );
+      }
+      if (url === '/admin/me') {
+        return new Response(
+          JSON.stringify({
+            ...fixtures['/admin/me'],
+            id: null,
+            email: null,
+            displayName: null,
+            tokenAdmin: true,
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        );
+      }
+      const body = fixtures[url as keyof typeof fixtures] ?? {};
+      return new Response(JSON.stringify(body), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    });
+
+    render(<App />);
+    await screen.findByRole('button', { name: '中文' });
+    fireEvent.click(screen.getByRole('button', { name: '中文' }));
+
+    const navigation = await screen.findByRole('navigation', { name: '控制台分区' });
+    expect(within(navigation).getAllByRole('button').map((button) => button.textContent)).toEqual([
+      '智能体',
+      '机器人',
+      '会话',
+    ]);
+    expect(screen.queryByRole('button', { name: '执行机器' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '设置' })).not.toBeInTheDocument();
+    expect(screen.queryByText('Ops Admin')).not.toBeInTheDocument();
+
+    await screen.findByRole('columnheader', { name: '智能体' });
+    expect(screen.queryByRole('columnheader', { name: '所有者' })).not.toBeInTheDocument();
+    expect(screen.queryByText('本地服务器')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: '机器人' }));
+    await screen.findByText('飞书应用');
+    expect(screen.queryByRole('columnheader', { name: '所有者' })).not.toBeInTheDocument();
+    expect(screen.queryByText('本地服务器执行')).not.toBeInTheDocument();
+    expect(screen.queryByText('管理令牌')).not.toBeInTheDocument();
   });
 
   it('closes the create-agent modal on Escape and via the Cancel button', async () => {

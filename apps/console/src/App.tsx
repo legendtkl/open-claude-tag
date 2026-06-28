@@ -89,7 +89,10 @@ type View =
 type Locale = 'en' | 'zh';
 type RefreshConsole = (options?: { showLoading?: boolean }) => Promise<void>;
 
-const SYSTEM_PROMPT_PLACEHOLDER = 'You are a strict code reviewer, be concise and focus on bugs.';
+const SYSTEM_PROMPT_PLACEHOLDERS: Record<Locale, string> = {
+  en: 'You are a strict code reviewer, be concise and focus on bugs.',
+  zh: '你是一个严格的代码评审助手，请简洁回答并优先指出问题。',
+};
 const HIDDEN_CONSOLE_RUNTIMES = new Set<string>(['coco']);
 const AGENT_RUNTIME_OPTIONS = ['', 'codex', 'claude_code'];
 const CLAUDE_BASE_URL_ENV_KEY = 'ANTHROPIC_BASE_URL';
@@ -109,6 +112,24 @@ const navItems = [
   { id: 'machines', icon: Laptop },
   { id: 'settings', icon: Settings2 },
 ] satisfies Array<{ id: View; icon: typeof UserRound }>;
+
+function isLoopbackHostname(hostname: string): boolean {
+  return (
+    hostname === '' ||
+    hostname === 'localhost' ||
+    hostname === '::1' ||
+    hostname === '0.0.0.0' ||
+    /^127(?:\.\d{1,3}){3}$/.test(hostname)
+  );
+}
+
+function isLocalConsoleMode(authConfig: AuthConfig | null, me: Me | null): boolean {
+  if (!authConfig || authConfig.personalMode) return false;
+  if (authConfig.serverPublicUrl) return false;
+  if (typeof window === 'undefined') return false;
+  if (!isLoopbackHostname(window.location.hostname)) return false;
+  return me?.tokenAdmin === true || ['4173', '5173'].includes(window.location.port);
+}
 
 const viewLabels: Record<Locale, Record<View, string>> = {
   en: {
@@ -131,7 +152,7 @@ const viewLabels: Record<Locale, Record<View, string>> = {
 
 const uiText = {
   en: {
-    brandSubtitle: 'local operator board',
+    brandSubtitle: 'local admin console',
     consoleSections: 'Console sections',
     loading: 'Loading console data',
     localhost: 'localhost',
@@ -197,7 +218,7 @@ const uiText = {
       copy: 'Copy',
       copied: 'Copied',
       serverPlaceholderNote:
-        'The server has no SERVER_PUBLIC_URL configured yet. Replace <SERVER_PUBLIC_URL> with the daemon gateway URL (ask your deployer).',
+        'No public daemon gateway URL is configured yet. Replace <SERVER_PUBLIC_URL> with a URL this machine can reach; for same-machine local testing, use http://127.0.0.1:3001.',
       step1Title: '1. Install Node.js 20+',
       step1Linux: 'Linux: use nvm or your distro package manager.',
       step1Mac: 'macOS: install via Homebrew or nvm.',
@@ -214,21 +235,21 @@ const uiText = {
       tokenAdminDevBody:
         'This local server has dev-auth enabled. Switch to a test user, then generate the token again.',
       tokenAdminNoDevBody:
-        'This session is using the break-glass admin identity. Start the local API with OPEN_TAG_DEV_AUTH=enabled and sign in as a user to mint pairing tokens.',
+        'You are signed in with the emergency admin token. Pairing needs a named local user. Restart the local API with OPEN_TAG_DEV_AUTH=enabled, sign in as that user, then generate the token.',
       devSubLabel: 'Identity ID',
       devNameLabel: 'Display name',
       devSignIn: 'Sign in as user',
       devSignInFailed: 'Could not sign in as the test user. Retry or check OPEN_TAG_DEV_AUTH.',
       step3Title: '3. Install and start',
-      methodBNpx: 'Recommended — one command from the internal registry',
+      methodBNpx: 'Recommended — one npx command',
       methodBNpxBody: 'npx fetches the daemon, pairs this machine, and starts it in the background:',
-      step4Title: '4. Manage the daemon',
+      step4Title: '4. Manage the background service',
       step4Body:
-        'After installation, use these commands to inspect, stop, or restart the background daemon.',
+        'After installation, use these commands to inspect, stop, or restart the background service.',
     },
   },
   zh: {
-    brandSubtitle: '运维控制台',
+    brandSubtitle: '本地管理控制台',
     consoleSections: '控制台分区',
     loading: '正在加载控制台数据',
     localhost: '本地服务',
@@ -288,13 +309,13 @@ const uiText = {
       optionalGaps: '可选缺口',
     },
     daemonGuide: {
-      title: '接入一台机器',
+      title: '接入执行机器',
       subtitle:
-        '在你的机器上运行 OpenClaudeTag daemon，任务即可在该机器执行。选择操作系统、获取配对令牌，然后执行一条命令完成安装启动。',
+        '在你的机器上运行 OpenClaudeTag 后台服务（daemon），任务即可在该机器执行。选择操作系统、获取配对令牌，然后执行一条命令完成安装启动。',
       copy: '复制',
       copied: '已复制',
       serverPlaceholderNote:
-        '服务端尚未配置 SERVER_PUBLIC_URL。请将 <SERVER_PUBLIC_URL> 替换为 daemon 网关地址（向部署者获取）。',
+        '尚未配置可访问的执行服务地址。请将 <SERVER_PUBLIC_URL> 替换为这台机器能访问的网关地址；同机本地测试可使用 http://127.0.0.1:3001。',
       step1Title: '1. 安装 Node.js 20+',
       step1Linux: 'Linux：使用 nvm 或发行版包管理器。',
       step1Mac: 'macOS：通过 Homebrew 或 nvm 安装。',
@@ -310,16 +331,16 @@ const uiText = {
       tokenAdminDevBody:
         '当前本地服务已开启 dev-auth。请切换为测试用户，然后再次生成令牌。',
       tokenAdminNoDevBody:
-        '当前会话使用的是 break-glass 管理员身份。请在本地 API 启动时设置 OPEN_TAG_DEV_AUTH=enabled，并以用户身份登录后再生成配对令牌。',
+        '当前使用应急管理令牌登录。配对机器需要明确的本地用户身份。请用 OPEN_TAG_DEV_AUTH=enabled 重启本地 API，切换为用户身份后再生成配对令牌。',
       devSubLabel: '身份 ID',
       devNameLabel: '显示名',
       devSignIn: '以用户身份登录',
       devSignInFailed: '测试用户登录失败。请重试或检查 OPEN_TAG_DEV_AUTH。',
       step3Title: '3. 安装并启动',
-      methodBNpx: '推荐 — 从内部源一条命令安装',
-      methodBNpxBody: 'npx 会拉取 daemon、完成配对，并在后台启动：',
-      step4Title: '4. 管理 daemon',
-      step4Body: '安装后可用这些命令查看、停止或重启后台 daemon。',
+      methodBNpx: '推荐 — 使用一条 npx 命令',
+      methodBNpxBody: 'npx 会拉取后台服务、完成配对，并在后台启动：',
+      step4Title: '4. 管理后台服务',
+      step4Body: '安装后可用这些命令查看、停止或重启后台服务。',
     },
   },
 } as const;
@@ -377,6 +398,22 @@ function runtimeDisplayName(runtime: string): string {
 function runtimeLabel(runtime: string | null, locale: Locale): string {
   const visibleRuntime = visibleRuntimeValue(runtime);
   return visibleRuntime ? runtimeDisplayName(visibleRuntime) : uiText[locale].common.auto;
+}
+
+function runtimeFieldLabel(locale: Locale): string {
+  return locale === 'zh' ? '运行时' : 'Runtime';
+}
+
+function envFieldLabel(locale: Locale): string {
+  return locale === 'zh' ? '环境变量' : 'Env';
+}
+
+function serverLocalLabel(locale: Locale): string {
+  return locale === 'zh' ? '本地服务器' : 'Server-local';
+}
+
+function systemPromptPlaceholder(locale: Locale): string {
+  return SYSTEM_PROMPT_PLACEHOLDERS[locale];
 }
 
 function secretLabel(
@@ -632,13 +669,19 @@ function validateAgentForm(
     locale: Locale;
     machineOptions: string[];
     displayNameLabel: string;
+    runtimeLabel: string;
     machineLabel: string;
     statusLabel?: string;
   },
 ): FieldErrors<AgentFormField> {
   const errors: FieldErrors<AgentFormField> = {};
   errors.displayName = requiredError(input.displayName, options.displayNameLabel, options.locale);
-  errors.defaultRuntime = optionError(input.defaultRuntime, AGENT_RUNTIME_OPTIONS, 'Runtime', options.locale);
+  errors.defaultRuntime = optionError(
+    input.defaultRuntime,
+    AGENT_RUNTIME_OPTIONS,
+    options.runtimeLabel,
+    options.locale,
+  );
   errors.machineId = optionError(input.machineId, options.machineOptions, options.machineLabel, options.locale);
   if (input.status !== undefined) {
     errors.status = optionError(
@@ -698,7 +741,7 @@ function claudeCredentialFieldErrors(
   const apiKeyMsg = locale === 'zh' ? '请填写 API 密钥 (API Key)' : 'API Key is required';
   const pairMsg =
     locale === 'zh'
-      ? '更新凭证需同时填写 Base URL 和 API Key（会整体替换 Env）'
+      ? '更新凭证需同时填写 Base URL 和 API Key（会整体替换环境变量）'
       : 'Provide both Base URL and API Key to update credentials (they replace runtimeEnv together)';
   if (mode === 'edit') {
     return {
@@ -853,6 +896,8 @@ export function App() {
   const text = uiText[locale];
   const canUseComputer = me?.computerAccessEnabled === true;
   const personalMode = authConfig?.personalMode === true;
+  const localMode = isLocalConsoleMode(authConfig, me);
+  const desktopMode = isDesktopApp();
 
   // Empty-state auto-launch (personal mode): on first load, route to the wizard
   // when setup is not complete and the user has not skipped it. Runs once per
@@ -879,12 +924,25 @@ export function App() {
     }
   }, [loading, needsLogin, authConfig, data]);
 
-  // The onboarding wizard is reachable from the nav only in personal mode, so the
-  // full multi-tenant console is unchanged when the flag is off.
-  const visibleNavItems = personalMode
-    ? [{ id: 'onboarding' as const, icon: Compass }, ...navItems]
-    : navItems;
+  // The onboarding wizard is reachable from the nav only in personal mode. In
+  // loopback local mode, hide multi-machine and account-management surfaces that
+  // only make sense for a central server deployment.
+  const visibleNavItems = useMemo(() => {
+    const operationalNavItems = localMode
+      ? navItems.filter((item) => item.id !== 'machines' && (desktopMode || item.id !== 'settings'))
+      : navItems;
+    return personalMode
+      ? [{ id: 'onboarding' as const, icon: Compass }, ...operationalNavItems]
+      : operationalNavItems;
+  }, [desktopMode, localMode, personalMode]);
   const navStyle = { '--nav-item-count': visibleNavItems.length } as React.CSSProperties;
+
+  useEffect(() => {
+    if (loading) return;
+    if (visibleNavItems.some((item) => item.id === view)) return;
+    setNotice(null);
+    setView(visibleNavItems[0]?.id ?? 'agents');
+  }, [loading, view, visibleNavItems]);
 
   function exitOnboardingToConsole() {
     writeOnboardingDismissed(true);
@@ -957,7 +1015,7 @@ export function App() {
                 中文
               </button>
             </div>
-            {me ? <IdentityChip me={me} locale={locale} onLogout={logout} /> : null}
+            {me && !localMode ? <IdentityChip me={me} locale={locale} onLogout={logout} /> : null}
           </div>
         </header>
 
@@ -994,6 +1052,7 @@ export function App() {
             runAction={runAction}
             isSuperadmin={me?.role === 'superadmin'}
             canUseComputer={canUseComputer}
+            localMode={localMode}
           />
         ) : null}
         {!loading && view === 'bots' ? (
@@ -1002,12 +1061,18 @@ export function App() {
             busy={busy}
             locale={locale}
             runAction={runAction}
-            isSuperadmin={me?.role === 'superadmin'}
+            isSuperadmin={me?.role === 'superadmin' && !localMode}
             refreshConsole={refresh}
           />
         ) : null}
         {!loading && view === 'chats' ? (
-          <ChatsView data={data} busy={busy} locale={locale} runAction={runAction} />
+          <ChatsView
+            data={data}
+            busy={busy}
+            locale={locale}
+            localMode={localMode}
+            runAction={runAction}
+          />
         ) : null}
         {!loading && view === 'machines' ? (
           <MachinesView
@@ -1018,7 +1083,14 @@ export function App() {
             onAuthenticated={refresh}
           />
         ) : null}
-        {view === 'settings' ? <SettingsView locale={locale} me={me} refreshConsole={refresh} /> : null}
+        {view === 'settings' ? (
+          <SettingsView
+            locale={locale}
+            me={me}
+            refreshConsole={refresh}
+            showAccountManagement={!localMode}
+          />
+        ) : null}
       </section>
     </main>
   );
@@ -1445,7 +1517,7 @@ function OnboardingWizard({
       selfApprove: 'Open self-approve page',
       feishuDone: (count: number) => `${count} Feishu app${count === 1 ? '' : 's'} connected.`,
       agentLead:
-        'Create your first agent. It runs server-local on this machine by default; pick a runtime and (for Claude Code) its credentials.',
+        'Create your first agent. It runs on the local server by default; pick a runtime and, for Claude Code, its credentials.',
       agentExisting: (count: number) =>
         `${count} active agent${count === 1 ? '' : 's'} ready. Create another or continue.`,
       createAgent: 'Create agent',
@@ -1494,7 +1566,7 @@ function OnboardingWizard({
       selfApprove: '打开自助审批页',
       feishuDone: (count: number) => `已连接 ${count} 个飞书应用。`,
       agentLead:
-        '创建你的第一个智能体。默认在本机以 server-local 方式运行；选择 runtime，并（对 Claude Code）填写凭证。',
+        '创建你的第一个智能体。默认在本地服务器运行；选择运行时，并为 Claude Code 填写所需凭证。',
       agentExisting: (count: number) => `已有 ${count} 个启用的智能体。可再创建一个或继续。`,
       createAgent: '创建智能体',
       goLiveLead: '把智能体绑定到飞书机器人，然后确认其上线。',
@@ -1982,7 +2054,7 @@ function FeishuBotOnboardingPanel({
     },
     zh: {
       title: '飞书机器人接入',
-      subtitle: '一键申请机器人应用和智能体常用权限，然后绑定到 agent。',
+      subtitle: '一键申请机器人应用和智能体常用权限，然后绑定到智能体。',
       namePlaceholder: 'OpenClaudeTag 机器人',
       start: '一键申请机器人和权限',
       starting: '正在生成链接',
@@ -2234,14 +2306,14 @@ function buildAgentMachineOptions(
   canUseComputer: boolean,
   locale: Locale,
 ): { options: string[]; labels: Record<string, string>; defaultValue: string } {
-  const serverLocalLabel = locale === 'zh' ? '本机(服务器)' : 'Server-local';
+  const localServerLabel = serverLocalLabel(locale);
   const bindable = machines.filter((machine) => machine.status !== 'revoked');
   const options = [
     ...(canUseComputer ? [SERVER_LOCAL_MACHINE_VALUE] : []),
     ...bindable.map((machine) => machine.id),
   ];
   const labels: Record<string, string> = {
-    ...(canUseComputer ? { [SERVER_LOCAL_MACHINE_VALUE]: serverLocalLabel } : {}),
+    ...(canUseComputer ? { [SERVER_LOCAL_MACHINE_VALUE]: localServerLabel } : {}),
     ...Object.fromEntries(
       bindable.map((machine) => [machine.id, `${machine.name} · ${statusLabel(machine.status, locale)}`]),
     ),
@@ -2346,6 +2418,8 @@ function AgentCreateForm({
   const [submitted, setSubmitted] = useState(false);
   const displayNameLabel = locale === 'zh' ? '名称' : 'Name';
   const machineFieldLabel = locale === 'zh' ? '执行机器' : 'Machine';
+  const runtimeLabelText = runtimeFieldLabel(locale);
+  const envLabelText = envFieldLabel(locale);
   const effectiveMachineId = hideMachineSelect ? defaultMachineValue : form.machineId;
   const errors = validateAgentForm(
     {
@@ -2357,6 +2431,7 @@ function AgentCreateForm({
       locale,
       machineOptions: hideMachineSelect ? [defaultMachineValue] : machineOptions,
       displayNameLabel,
+      runtimeLabel: runtimeLabelText,
       machineLabel: machineFieldLabel,
     },
   );
@@ -2421,11 +2496,11 @@ function AgentCreateForm({
       <TextArea
         label={locale === 'zh' ? '系统提示词' : 'System Prompt'}
         value={form.systemPrompt}
-        placeholder={SYSTEM_PROMPT_PLACEHOLDER}
+        placeholder={systemPromptPlaceholder(locale)}
         onChange={(systemPrompt) => setForm({ ...form, systemPrompt })}
       />
       <Select
-        label="Runtime"
+        label={runtimeLabelText}
         value={form.defaultRuntime}
         onChange={(defaultRuntime) => setForm({ ...form, defaultRuntime })}
         options={AGENT_RUNTIME_OPTIONS}
@@ -2492,7 +2567,7 @@ function AgentCreateForm({
         </>
       ) : null}
       <TextArea
-        label="Env"
+        label={envLabelText}
         value={form.runtimeEnv}
         placeholder="KEY=value"
         onChange={(runtimeEnv) => setForm({ ...form, runtimeEnv })}
@@ -2528,6 +2603,7 @@ function AgentsView({
   runAction,
   isSuperadmin,
   canUseComputer,
+  localMode,
 }: {
   data: ConsoleData;
   busy: boolean;
@@ -2535,6 +2611,7 @@ function AgentsView({
   runAction: (label: string, action: () => Promise<unknown>) => Promise<void>;
   isSuperadmin: boolean;
   canUseComputer: boolean;
+  localMode: boolean;
 }) {
   const t = uiText[locale];
   const [isCreatingAgent, setIsCreatingAgent] = useState(false);
@@ -2564,7 +2641,7 @@ function AgentsView({
 
   // Machine selector (design D-A8): "server-local" + the owner's non-revoked
   // machines. data.machines is already platform-owner scoped by the admin API.
-  const serverLocalLabel = locale === 'zh' ? '本机(服务器)' : 'Server-local';
+  const localServerLabel = serverLocalLabel(locale);
   const bindableMachines = useMemo(
     () => data.machines.filter((machine) => machine.status !== 'revoked'),
     [data.machines],
@@ -2579,7 +2656,7 @@ function AgentsView({
   // buildAgentMachineOptions so both surfaces stay in lock-step.
   const { options: agentMachineOptions, labels: agentMachineLabels } = buildAgentMachineOptions(
     data.machines,
-    canUseComputer,
+    canUseComputer || localMode,
     locale,
   );
   // When editing an agent bound to a now-revoked machine, keep that value selectable
@@ -2604,11 +2681,24 @@ function AgentsView({
   // Single user-facing name (maps to displayName). The internal handle is now
   // derived server-side and never shown or entered.
   const agentDisplayNameLabel = locale === 'zh' ? '名称' : 'Name';
+  const runtimeLabelText = runtimeFieldLabel(locale);
+  const envLabelText = envFieldLabel(locale);
 
   // Group agents by their machine binding for the registry (design D-A8). Each
   // bound machine becomes a section; unbound agents fall under "Server-local".
   // Stable order: server-local first, then machines by name.
+  const showOwnerColumns = isSuperadmin && !localMode;
   const agentGroups = useMemo(() => {
+    if (localMode) {
+      return [
+        {
+          key: 'local',
+          title: '',
+          status: null,
+          agents: data.agents,
+        },
+      ];
+    }
     const byMachine = new Map<string, Agent[]>();
     for (const agent of data.agents) {
       const key = agent.machineId ?? SERVER_LOCAL_MACHINE_VALUE;
@@ -2620,7 +2710,7 @@ function AgentsView({
     if (byMachine.has(SERVER_LOCAL_MACHINE_VALUE)) {
       groups.push({
         key: SERVER_LOCAL_MACHINE_VALUE,
-        title: serverLocalLabel,
+        title: localServerLabel,
         status: null,
         agents: byMachine.get(SERVER_LOCAL_MACHINE_VALUE)!,
       });
@@ -2642,7 +2732,7 @@ function AgentsView({
       });
     }
     return groups;
-  }, [data.agents, machineById, serverLocalLabel]);
+  }, [data.agents, localMode, machineById, localServerLabel]);
   const editingAgent = useMemo(
     () => data.agents.find((agent) => agent.id === editingAgentId) ?? null,
     [data.agents, editingAgentId],
@@ -2691,20 +2781,21 @@ function AgentsView({
     setIsCreatingAgent(false);
   }
 
-  const editMachineSelect = editingAgent
+  const editMachineSelect = editingAgent && !localMode
     ? machineSelectFor(agentEdit.machineId)
     : { options: agentMachineOptions, labels: agentMachineLabels };
   const agentEditErrors = validateAgentForm(
     {
       displayName: agentEdit.displayName,
       defaultRuntime: agentEdit.defaultRuntime,
-      machineId: agentEdit.machineId,
+      machineId: localMode ? SERVER_LOCAL_MACHINE_VALUE : agentEdit.machineId,
       status: agentEdit.status,
     },
     {
       locale,
-      machineOptions: editMachineSelect.options,
+      machineOptions: localMode ? [SERVER_LOCAL_MACHINE_VALUE] : editMachineSelect.options,
       displayNameLabel: agentDisplayNameLabel,
+      runtimeLabel: runtimeLabelText,
       machineLabel: machineFieldLabel,
       statusLabel: locale === 'zh' ? '状态' : 'Status',
     },
@@ -2760,23 +2851,25 @@ function AgentsView({
           // machine + a "Server-local" section for unbound agents.
           agentGroups.map((group) => (
             <div className="agent-machine-group" key={group.key || 'server-local'}>
-              <div className="agent-machine-group-header">
-                <Laptop size={14} />
-                <span>{group.title}</span>
-                {group.status ? (
-                  <Badge value={group.status} label={statusLabel(group.status, locale)} />
-                ) : null}
-                <small>
-                  {locale === 'zh'
-                    ? `${group.agents.length} 个智能体`
-                    : `${group.agents.length} agent${group.agents.length === 1 ? '' : 's'}`}
-                </small>
-              </div>
+              {localMode ? null : (
+                <div className="agent-machine-group-header">
+                  <Laptop size={14} />
+                  <span>{group.title}</span>
+                  {group.status ? (
+                    <Badge value={group.status} label={statusLabel(group.status, locale)} />
+                  ) : null}
+                  <small>
+                    {locale === 'zh'
+                      ? `${group.agents.length} 个智能体`
+                      : `${group.agents.length} agent${group.agents.length === 1 ? '' : 's'}`}
+                  </small>
+                </div>
+              )}
               <DataTable
                 columns={[
                   locale === 'zh' ? '智能体' : 'Agent',
-                  'Runtime',
-                  ...(isSuperadmin ? [locale === 'zh' ? '所有者' : 'Owner'] : []),
+                  runtimeLabelText,
+                  ...(showOwnerColumns ? [locale === 'zh' ? '所有者' : 'Owner'] : []),
                   locale === 'zh' ? '状态' : 'Status',
                   '',
                 ]}
@@ -2786,7 +2879,7 @@ function AgentsView({
                   return [
                     <strong key="agent">{agent.displayName}<small>{agent.description ?? t.common.noDescription}</small></strong>,
                     runtimeLabel(agent.defaultRuntime ?? profile?.defaultRuntime ?? null, locale),
-                    ...(isSuperadmin
+                    ...(showOwnerColumns
                       ? [<span key="owner">{ownerLabel(agent.platformOwner, locale)}</span>]
                       : []),
                     <Badge key="status" value={agent.status} label={statusLabel(agent.status, locale)} />,
@@ -2815,6 +2908,7 @@ function AgentsView({
                   ];
                 })}
                 empty={locale === 'zh' ? '未找到智能体' : 'No agents found'}
+                tableClassName="agents-table"
               />
             </div>
           ))
@@ -2837,8 +2931,9 @@ function AgentsView({
         <AgentCreateForm
           data={data}
           locale={locale}
-          canUseComputer={canUseComputer}
+          canUseComputer={canUseComputer || localMode}
           busy={busy}
+          hideMachineSelect={localMode}
           onCancel={closeAgentCreator}
           onSubmit={(payload) =>
             void runAction(t.notices.agentCreated, async () => {
@@ -2902,9 +2997,9 @@ function AgentsView({
               )}
             />
             <Input label={locale === 'zh' ? '描述' : 'Description'} value={agentEdit.description} onChange={(description) => setAgentEdit({ ...agentEdit, description })} />
-            <TextArea label={locale === 'zh' ? '系统提示词' : 'System Prompt'} value={agentEdit.systemPrompt} placeholder={SYSTEM_PROMPT_PLACEHOLDER} onChange={(systemPrompt) => setAgentEdit({ ...agentEdit, systemPrompt })} />
+            <TextArea label={locale === 'zh' ? '系统提示词' : 'System Prompt'} value={agentEdit.systemPrompt} placeholder={systemPromptPlaceholder(locale)} onChange={(systemPrompt) => setAgentEdit({ ...agentEdit, systemPrompt })} />
             <Select
-              label="Runtime"
+              label={runtimeLabelText}
               value={agentEdit.defaultRuntime}
               onChange={(defaultRuntime) => setAgentEdit({ ...agentEdit, defaultRuntime })}
               options={AGENT_RUNTIME_OPTIONS}
@@ -2981,11 +3076,13 @@ function AgentsView({
               </>
             ) : null}
             <TextArea
-              label="Env"
+              label={envLabelText}
               value={agentEdit.runtimeEnv}
               placeholder={
                 editingAgent.runtimeEnvKeys.length > 0
-                  ? 'KEY=value (leave blank to keep existing env)'
+                  ? locale === 'zh'
+                    ? 'KEY=value（留空保留现有环境变量）'
+                    : 'KEY=value (leave blank to keep existing env)'
                   : 'KEY=value'
               }
               onChange={(runtimeEnv) =>
@@ -2994,8 +3091,9 @@ function AgentsView({
             />
             {editingAgent.runtimeEnvKeys.length > 0 ? (
               <p className="form-note">
-                Configured env: {editingAgent.runtimeEnvKeys.join(', ')}. Leave Env blank to keep
-                existing values.
+                {locale === 'zh'
+                  ? `已配置的环境变量：${editingAgent.runtimeEnvKeys.join(', ')}。留空可保留现有值。`
+                  : `Configured env: ${editingAgent.runtimeEnvKeys.join(', ')}. Leave Env blank to keep existing values.`}
               </p>
             ) : null}
             {editingAgent.runtimeEnvKeys.length > 0 ? (
@@ -3011,10 +3109,10 @@ function AgentsView({
                     })
                   }
                 />
-                <span>{locale === 'zh' ? '清空已配置的 Env' : 'Clear configured env'}</span>
+                <span>{locale === 'zh' ? '清空已配置的环境变量' : 'Clear configured env'}</span>
               </label>
             ) : null}
-            {(() => {
+            {localMode ? null : (() => {
               const { options, labels } = machineSelectFor(agentEdit.machineId);
               return (
                 <Select
@@ -3112,7 +3210,8 @@ function AgentsView({
                     // unchanged server-local agent must not re-trigger the
                     // server-side execution permission check on unrelated edits.
                     const nextMachineId = agentEdit.machineId || null;
-                    const machineChanged = nextMachineId !== (editingAgent.machineId ?? null);
+                    const machineChanged =
+                      !localMode && nextMachineId !== (editingAgent.machineId ?? null);
                     await updateAgent(editingAgent.id, {
                       displayName,
                       description: nullableText(agentEdit.description),
@@ -3317,7 +3416,7 @@ function BotsView({
         <section className="panel">
         <div className="panel-heading">
           <div className="panel-title">
-            <Bot size={18} /> Feishu Apps
+            <Bot size={18} /> {locale === 'zh' ? '飞书应用' : 'Feishu Apps'}
           </div>
           <button
             aria-label={locale === 'zh' ? '注册飞书应用' : 'Register Feishu App'}
@@ -3764,11 +3863,13 @@ function ChatsView({
   data,
   busy,
   locale,
+  localMode,
   runAction,
 }: {
   data: ConsoleData;
   busy: boolean;
   locale: Locale;
+  localMode: boolean;
   runAction: (label: string, action: () => Promise<unknown>) => Promise<void>;
 }) {
   const t = uiText[locale];
@@ -3778,9 +3879,9 @@ function ChatsView({
     [data.machines],
   );
   const machineOptions = [SERVER_LOCAL_MACHINE_VALUE, ...bindableMachines.map((machine) => machine.id)];
-  const serverLocalLabel = locale === 'zh' ? '本机(服务器)' : 'Server-local';
+  const localServerLabel = serverLocalLabel(locale);
   const machineLabels: Record<string, string> = {
-    [SERVER_LOCAL_MACHINE_VALUE]: serverLocalLabel,
+    [SERVER_LOCAL_MACHINE_VALUE]: localServerLabel,
     ...Object.fromEntries(bindableMachines.map((machine) => [machine.id, machine.name])),
   };
   // A revoked machine still bound to a chat should remain visible (read-only) so
@@ -3812,7 +3913,7 @@ function ChatsView({
         ) : null}
         {data.chats.map((chat) => {
           const key = `${chat.tenantKey}:${chat.chatId}`;
-          const machineSelect = machineOptionsForChat(chat);
+          const machineSelect = localMode ? null : machineOptionsForChat(chat);
           return (
             <article className="row-card" key={key}>
               <div className="resource-title">
@@ -4206,6 +4307,7 @@ function MachinesView({
             ),
           ])}
           empty={locale === 'zh' ? '暂无已配对的执行机器' : 'No paired machines found'}
+          tableClassName="machines-table"
         />
       </section>
       <DaemonInstallGuide
@@ -4222,10 +4324,12 @@ function SettingsView({
   locale,
   me,
   refreshConsole,
+  showAccountManagement,
 }: {
   locale: Locale;
   me: Me | null;
   refreshConsole: () => Promise<void>;
+  showAccountManagement: boolean;
 }) {
   const desktop = isDesktopApp();
   const isSuperadmin = me?.role === 'superadmin';
@@ -4262,7 +4366,7 @@ function SettingsView({
         'Enabled users can run agents on the server (server-local execution). Pairing machines and binding agents to their own machines is open to everyone.',
       user: 'User',
       role: 'Role',
-      serverSide: 'Server-side',
+      serverSide: 'Server-local',
       enabled: 'Enabled',
       disabled: 'Disabled',
       computerAccessSaved: 'Computer access updated',
@@ -4285,15 +4389,15 @@ function SettingsView({
       adminTokenCleared: '管理令牌已清除',
       saveToken: '保存令牌',
       clearToken: '清除令牌',
-      computerAccess: 'Computer 权限',
+      computerAccess: '本地服务器执行',
       computerAccessHint:
-        '开启后用户可以让智能体在服务器上运行（server-local 执行）。配对机器、绑定自己的机器对所有用户开放。',
+        '开启后用户可以让智能体在本地服务器上运行。配对执行机器、绑定自己的机器对所有用户开放。',
       user: '用户',
       role: '角色',
-      serverSide: 'Server-side',
+      serverSide: '可执行',
       enabled: '已开启',
       disabled: '已关闭',
-      computerAccessSaved: 'Computer 权限已更新',
+      computerAccessSaved: '本地服务器执行权限已更新',
       loadingUsers: '正在加载用户',
       noUsers: '暂无平台用户',
     },
@@ -4325,7 +4429,7 @@ function SettingsView({
   }, [desktop]);
 
   useEffect(() => {
-    if (!isSuperadmin) {
+    if (!showAccountManagement || !isSuperadmin) {
       setComputerUsers([]);
       return;
     }
@@ -4347,7 +4451,7 @@ function SettingsView({
     return () => {
       mounted = false;
     };
-  }, [isSuperadmin]);
+  }, [isSuperadmin, showAccountManagement]);
 
   async function saveApiUrl() {
     setApiUrlSubmitted(true);
@@ -4413,7 +4517,7 @@ function SettingsView({
     }
   }
 
-  const computerAccessPanel = isSuperadmin ? (
+  const computerAccessPanel = showAccountManagement && isSuperadmin ? (
     <section className="panel settings-panel">
       <div className="panel-title">
         <Laptop size={18} /> {copy.computerAccess}
@@ -4461,7 +4565,7 @@ function SettingsView({
     </section>
   ) : null;
 
-  const adminTokenPanel = (
+  const adminTokenPanel = showAccountManagement ? (
     <section className="panel settings-panel">
       <div className="panel-title"><Shield size={18} /> {copy.access}</div>
       <FormGrid>
@@ -4496,7 +4600,7 @@ function SettingsView({
         </div>
       </FormGrid>
     </section>
-  );
+  ) : null;
   const apiUrlValidation = httpUrlError(apiUrl, copy.apiServer, locale);
 
   if (!desktop) {
