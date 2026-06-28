@@ -1,5 +1,6 @@
 import { exec as execCb, execFile as execFileCb } from 'child_process';
 import { copyFile, stat, unlink } from 'fs/promises';
+import { createHash } from 'crypto';
 import { promisify } from 'util';
 import { existsSync } from 'fs';
 import { join } from 'path';
@@ -20,16 +21,42 @@ export interface WorktreeInfo {
   branchName: string;
 }
 
-function shortId(sessionId: string): string {
-  return sessionId.replace(/^session-/, '').slice(0, 8);
+/**
+ * Derive a stable, collision-resistant slug for a session's worktree dir/branch.
+ *
+ * The input — a UUID (`sessions.id`), or a composite multi-agent workspace key —
+ * is hashed in FULL, so two ids that merely share a prefix are now
+ * overwhelmingly unlikely to collide on path, branch, cleanup target, or
+ * persisted state. (The old `slice(0, 8)` kept just 32 bits of a UUID, and only
+ * 16 bits for multi-agent keys whose first 8 chars are agent4+session4 — a
+ * birthday collision around ~256 concurrent sessions per agent.) A readable
+ * prefix is retained for log/branch correlation, followed by 12 hex of sha256
+ * (48 bits, ~50% birthday near 16.7M concurrent) of the full cleaned input.
+ *
+ * Both `worktreeDir` (`dev-<slug>`) and `branchName` (`dev/<slug>`) derive from
+ * this, preserving the dir-vs-branch correspondence the cleanup module's orphan
+ * branch-guess relies on (`dev-<slug>` ⇒ `dev/<slug>`).
+ *
+ * Deliberate one-time migration cost: a session created under the old
+ * `dev-<8char>` scheme resolves to a new slug after deploy, so `getWorktree`
+ * misses and a fresh worktree is created once (the old one is GC'd by the
+ * cleanup module's orphan-disk scan). We accept this bounded cost rather than
+ * carry a permanent old-slug fallback; persisted-path reuse
+ * (`resolveExternalProjectWorkspace`'s `existingPath` check) is unaffected.
+ */
+function worktreeSlug(sessionId: string): string {
+  const cleaned = sessionId.replace(/^session-/, '');
+  const prefix = cleaned.replace(/[^a-zA-Z0-9]/g, '').slice(0, 8) || 'sess';
+  const hash = createHash('sha256').update(cleaned).digest('hex').slice(0, 12);
+  return `${prefix}-${hash}`;
 }
 
 function worktreeDir(repoRoot: string, sessionId: string): string {
-  return join(repoRoot, '.worktrees', `dev-${shortId(sessionId)}`);
+  return join(repoRoot, '.worktrees', `dev-${worktreeSlug(sessionId)}`);
 }
 
 function branchName(sessionId: string): string {
-  return `dev/${shortId(sessionId)}`;
+  return `dev/${worktreeSlug(sessionId)}`;
 }
 
 /**
@@ -172,7 +199,7 @@ export async function removeWorktree(
  * Remove a worktree by its absolute path and optional branch name.
  *
  * Derives the project root as the grandparent of worktreePath, relying on the
- * convention `<projectRoot>/.worktrees/dev-<shortId>` that is enforced by both
+ * convention `<projectRoot>/.worktrees/dev-<slug>` that is enforced by both
  * `createWorktree` (self-dev) and `resolveExternalProjectWorkspace` (external
  * projects).  Only call this with paths that follow that convention.
  *
@@ -186,7 +213,7 @@ export async function removeWorktreeAtPath(
   const projectRoot = join(worktreePath, '..', '..');
 
   if (existsSync(worktreePath)) {
-    // Derive a session hint from the worktree dir name (`dev-<shortId>`) so
+    // Derive a session hint from the worktree dir name (`dev-<slug>`) so
     // hook scripts get a stable SESSION_ID env var without changing the API.
     const baseName = worktreePath.split('/').pop() ?? '';
     const sessionHint = baseName.replace(/^dev-/, '');
@@ -242,7 +269,7 @@ export type PersistWorkspaceFn = (worktreePath: string, branchName: string | nul
  * Resolve (or create) a workspace for an external project session.
  *
  * - If the external project is a git repo: creates a worktree inside it at
- *   `<projectPath>/.worktrees/dev-<shortId>` and returns that path.
+ *   `<projectPath>/.worktrees/dev-<slug>` and returns that path.
  * - If the project is NOT a git repo: returns `projectPath` directly.
  *
  * @param sessionId     - Used to derive a stable branch/dir name
@@ -273,7 +300,7 @@ export async function resolveExternalProjectWorkspace(
   }
 
   // Try to create a git worktree inside the external repo
-  const wtPath = join(projectPath, '.worktrees', `dev-${shortId(sessionId)}`);
+  const wtPath = join(projectPath, '.worktrees', `dev-${worktreeSlug(sessionId)}`);
   const branch = branchName(sessionId);
 
   try {
