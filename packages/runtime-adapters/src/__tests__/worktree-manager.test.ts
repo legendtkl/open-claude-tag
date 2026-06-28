@@ -56,20 +56,25 @@ describe('WorktreeManager', () => {
   it('createWorktree creates branch and directory', async () => {
     const wt = await createWorktree('session-abc12345-rest', tempRepo);
     expect(existsSync(wt.worktreePath)).toBe(true);
-    expect(wt.branchName).toBe('dev/abc12345');
-    expect(wt.worktreePath).toContain('dev-abc12345');
+    // Readable prefix + 12-hex sha256 suffix of the full input (#22).
+    expect(wt.branchName).toMatch(/^dev\/abc12345-[0-9a-f]{12}$/);
+    expect(wt.worktreePath).toContain('dev-abc12345-');
+    // Invariant the cleanup orphan branch-guess relies on: branch === 'dev/' +
+    // worktree dir basename with the leading 'dev-' stripped.
+    const dir = wt.worktreePath.split('/').pop()!;
+    expect(wt.branchName).toBe(`dev/${dir.replace(/^dev-/, '')}`);
 
     const { stdout } = await execAsync('git worktree list', {
       cwd: tempRepo,
     });
-    expect(stdout).toContain('dev-abc12345');
+    expect(stdout).toContain('dev-abc12345-');
   });
 
   it('getWorktree returns info for existing worktree', async () => {
     await createWorktree('session-abc12345-rest', tempRepo);
     const wt = await getWorktree('session-abc12345-rest', tempRepo);
     expect(wt).not.toBeNull();
-    expect(wt!.branchName).toBe('dev/abc12345');
+    expect(wt!.branchName).toMatch(/^dev\/abc12345-[0-9a-f]{12}$/);
   });
 
   it('getWorktree returns null for non-existent worktree', async () => {
@@ -109,6 +114,34 @@ describe('WorktreeManager', () => {
 
     await removeWorktree('session-abc12345-rest', tempRepo);
     expect(existsSync(wt.worktreePath)).toBe(false);
+  });
+
+  // Regression for #22: two sessions sharing the first 8 chars (the old 32-bit
+  // discriminator) must NOT collide on path/branch, and removing one must leave
+  // the other intact.
+  it('does not collide for ids sharing the first 8 characters', async () => {
+    const a = await createWorktree('aabbccdd-1111-1111-1111-111111111111', tempRepo);
+    const b = await createWorktree('aabbccdd-2222-2222-2222-222222222222', tempRepo);
+    expect(a.worktreePath).not.toBe(b.worktreePath);
+    expect(a.branchName).not.toBe(b.branchName);
+    expect(existsSync(a.worktreePath)).toBe(true);
+    expect(existsSync(b.worktreePath)).toBe(true);
+
+    await removeWorktree('aabbccdd-1111-1111-1111-111111111111', tempRepo);
+    expect(existsSync(a.worktreePath)).toBe(false);
+    // The sibling worktree and its branch survive the removal.
+    expect(existsSync(b.worktreePath)).toBe(true);
+    const { stdout } = await execAsync('git branch', { cwd: tempRepo });
+    expect(stdout).toContain(b.branchName.replace(/^dev\//, 'dev/'));
+  });
+
+  it('derives a deterministic, idempotent slug from the full id', async () => {
+    const id = 'aabbccdd-1111-2222-3333-444455556666';
+    const first = await createWorktree(id, tempRepo);
+    const again = await createWorktree(id, tempRepo); // idempotent reuse
+    expect(again.worktreePath).toBe(first.worktreePath);
+    expect(again.branchName).toBe(first.branchName);
+    expect(first.branchName).toMatch(/^dev\/aabbccdd-[0-9a-f]{12}$/);
   });
 });
 
@@ -168,7 +201,7 @@ describe('createWorktree base branch detection', () => {
         );
         const wt = await createWorktree('session-base1234-x', repo);
         expect(existsSync(wt.worktreePath)).toBe(true);
-        expect(wt.branchName).toBe('dev/base1234');
+        expect(wt.branchName).toMatch(/^dev\/base1234-[0-9a-f]{12}$/);
       } finally {
         await execAsync('git worktree prune', { cwd: repo }).catch(() => {});
         await rm(repo, { recursive: true, force: true });
