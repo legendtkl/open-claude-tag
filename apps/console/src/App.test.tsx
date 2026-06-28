@@ -10,9 +10,6 @@ const fixtures = {
     devAuthEnabled: false,
     serverPublicUrl: 'http://10.37.206.226:3001',
     daemonVersion: '0.1.0',
-    // arm64 published, x64 not — exercises both enabled and disabled Mac buttons.
-    desktopArtifacts: { arm64: true, x64: false },
-    desktopVersion: '0.1.0',
   },
   '/admin/me': {
     id: 'pu-1',
@@ -566,6 +563,7 @@ describe('OpenClaudeTag Console', () => {
     expect(screen.getByText('Objects')).toBeInTheDocument();
     expect(screen.getByText('Bot Bindings')).toBeInTheDocument();
     expect(screen.getAllByText('Feishu Apps').length).toBeGreaterThan(0);
+    expect(screen.queryByText(/task boards/i)).not.toBeInTheDocument();
     expect(screen.queryByText('First Agent')).not.toBeInTheDocument();
     expect(screen.queryByText('Reviewer')).not.toBeInTheDocument();
     expect(container.querySelector('.overview-hero-copy')).toBeInTheDocument();

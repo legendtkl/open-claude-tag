@@ -189,16 +189,9 @@ const uiText = {
       tasks: 'tasks',
       tenant: 'tenant',
       taskList: 'Task list',
-      linkedTasks: 'linked tasks',
       empty: 'empty',
-      globalBoard: 'Global board',
-      statusField: 'Status field',
       botOpenIdPending: 'auto-discovered',
       noDescription: 'No description',
-      taskProgress: (shown: number, total: number) => `${shown} of ${total} tasks shown`,
-      loadMoreTasks: (count: number) => `Load ${count} more`,
-      loadingMore: 'Loading more',
-      notLoaded: 'not loaded yet',
       permissionCheckPassed: 'Permission check passed',
       permissionCheckFailed: 'Permission check failed',
       permissionMissing: 'Missing permissions',
@@ -302,16 +295,9 @@ const uiText = {
       tasks: '个任务',
       tenant: '租户',
       taskList: '任务清单',
-      linkedTasks: '个已关联任务',
       empty: '空',
-      globalBoard: '全局看板',
-      statusField: '状态字段',
       botOpenIdPending: '自动获取',
       noDescription: '暂无描述',
-      taskProgress: (shown: number, total: number) => `已显示 ${shown}/${total} 个任务`,
-      loadMoreTasks: (count: number) => `再加载 ${count} 个`,
-      loadingMore: '继续加载中',
-      notLoaded: '暂未加载',
       permissionCheckPassed: '权限检测通过',
       permissionCheckFailed: '权限检测失败',
       permissionMissing: '缺少权限',
@@ -1215,7 +1201,7 @@ function stableIndex(seed: string, size: number): number {
 const loginCopy = {
   en: {
     title: PRODUCT_FULL_NAME,
-    subtitle: 'Sign in to manage agents, bots, and task boards.',
+    subtitle: 'Sign in to manage agents, bots, and execution machines.',
     tokenTitle: 'Admin token',
     tokenHint:
       'Paste the break-glass admin token (OPEN_TAG_ADMIN_TOKEN). Stored locally in this browser. Loopback hosts are admitted without one.',
@@ -1231,7 +1217,7 @@ const loginCopy = {
   },
   zh: {
     title: `${PRODUCT_NAME} 控制台`,
-    subtitle: '登录后管理智能体、机器人和任务看板。',
+    subtitle: '登录后管理智能体、机器人和执行机器。',
     tokenTitle: '管理令牌',
     tokenHint:
       '粘贴应急管理令牌（OPEN_TAG_ADMIN_TOKEN）。仅保存在当前浏览器本地。回环主机无需令牌即可进入。',
@@ -2004,14 +1990,14 @@ function Overview({
       eyebrow: PRODUCT_FULL_NAME,
       title: 'A Feishu-native workspace for AI engineering collaboration.',
       intro:
-        'OpenClaudeTag connects machines, agent profiles, Feishu bot identities, group chats, and task boards. Operators prepare the runtime here, then teammates collaborate directly in Feishu while OpenClaudeTag routes work to the right agent and keeps task status visible.',
+        'OpenClaudeTag connects machines, agent profiles, Feishu bot identities, and group chats. Operators prepare the runtime here, then teammates collaborate directly in Feishu while OpenClaudeTag routes work to the right agent and keeps task status visible.',
       statusTitle: 'Current Status',
     },
     zh: {
       eyebrow: `${PRODUCT_NAME} 控制台`,
       title: '面向飞书群协作的 AI 工程工作台。',
       intro:
-        'OpenClaudeTag 串联执行机器、智能体配置、飞书机器人身份、群聊和任务看板。运维人员在这里完成运行环境和身份绑定，团队成员则直接在飞书群里协作，系统会把工作路由到合适的 agent，并持续回传任务状态。',
+        'OpenClaudeTag 串联执行机器、智能体配置、飞书机器人身份和群聊。运维人员在这里完成运行环境和身份绑定，团队成员则直接在飞书群里协作，系统会把工作路由到合适的 agent，并持续回传任务状态。',
       statusTitle: '当前状态',
     },
   }[locale];
@@ -2020,7 +2006,6 @@ function Overview({
     [locale === 'zh' ? '飞书应用' : 'Feishu Apps', data.summary.feishuApps],
     [locale === 'zh' ? '机器人绑定' : 'Bot Bindings', data.summary.botBindings],
     [viewLabels[locale].chats, data.summary.chats],
-    [locale === 'zh' ? '任务看板' : 'Task Boards', data.summary.taskBoards],
     [
       viewLabels[locale].machines,
       locale === 'zh'
@@ -4088,11 +4073,7 @@ function ChatsView({
       <div className="chat-list">
         {data.chats.length === 0 ? (
           <EmptyState
-            label={
-              locale === 'zh'
-                ? '暂无会话配置或任务看板'
-                : 'No chat configs or chat task boards found'
-            }
+            label={locale === 'zh' ? '暂无会话配置' : 'No chat configs found'}
           />
         ) : null}
         {data.chats.map((chat) => {
