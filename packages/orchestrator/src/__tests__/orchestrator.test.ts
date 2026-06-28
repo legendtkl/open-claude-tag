@@ -356,6 +356,64 @@ describe('handleEvent: task creation metadata', () => {
     expect(db._getMocks().mockSelect).toHaveBeenCalled();
   });
 
+  // Regression for #10: a recovery redelivery (task_duplicate) is re-enqueued on
+  // the neutral/Slack path using result.goal, so the duplicate branch must return
+  // the persisted goal (with referenced context), not the bare current text.
+  it('duplicate recovery returns the persisted goal incl. referenced context, not the bare text', async () => {
+    const bareText = '学习这些进度，给我下周计划';
+    const fullGoal = [
+      bareText,
+      ['[Referenced Feishu message: om_record_1]', '周俊戈: 第一条', '乐露薇: 第二条'].join('\n'),
+    ].join('\n\n');
+    const event = makeEvent({
+      content: {
+        type: 'text',
+        text: bareText,
+        referencedMessages: [
+          {
+            messageId: 'om_record_1',
+            contentType: 'rich_text',
+            entries: [
+              { author: '周俊戈', text: '第一条' },
+              { author: '乐露薇', text: '第二条' },
+            ],
+          },
+        ],
+        raw: {},
+      },
+    });
+    const db = createMockDb({
+      createdRows: [],
+      existingRows: [
+        {
+          id: 'task_ref_dup',
+          sessionId: 'session_1',
+          agentId: null,
+          feishuAppId: null,
+          taskType: IntentType.CHAT_REPLY,
+          goal: fullGoal,
+          runtimeHint: null,
+          status: TaskStatus.PENDING,
+          constraints: {
+            timeoutSec: 1800,
+            approvalRequired: false,
+            tenantKey: 'tenant_1',
+            chatId: 'chat_1',
+            userMessageId: 'msg_1',
+            requesterOpenId: 'user_1',
+          },
+        },
+      ],
+    });
+
+    const result = await dispatch(db, event, 'session_1', { taskId: 'task_ref_dup' });
+
+    expect(result.type).toBe('task_duplicate');
+    expect(result.goal).toBe(fullGoal);
+    expect(result.goal).toContain('[Referenced Feishu message: om_record_1]');
+    expect(result.goal).not.toBe(bareText);
+  });
+
 });
 
 describe('handleEvent: image message routing', () => {
