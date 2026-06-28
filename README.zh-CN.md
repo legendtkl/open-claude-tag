@@ -56,7 +56,7 @@ OpenClaudeTag 自带本地管理控制台，用于创建 agent、绑定飞书/La
 | Onboarding 向导 | 本地化的安装向导引导你连接飞书、创建 agent、绑定并上线。 |
 | Worktree 隔离 | 每个任务在独立的 git worktree 中运行，上下文互不干扰；过期 worktree 自动清理。 |
 | 按 agent 预算上限 | 按 identity 跟踪用量窗口并对照声明的上限强制执行（`@open-tag/registry`）。 |
-| Access-bundle 凭据插件 | 命名、带版本的凭据 bundle 在执行时注入 runtime 环境变量**名**；值来自 secret provider，从不落库。 |
+| Access-bundle 凭据插件 | 命名、带版本的凭据 bundle 在执行时注入 runtime 环境变量**名**；该路径的值在执行时来自 secret provider，从不落库。（per-agent `runtimeEnv` 是另一种模型——它的值会以明文存入数据库，API 响应中只回 key 名做脱敏。见 [ADR-0012](doc/decisions/0012-credential-storage-models.md)。） |
 | Ambient 主动发言 | 判别器门控的网关可在频道讨论到相关话题时主动发言。opt-in，默认关（`OPEN_TAG_AMBIENT`）。 |
 | 过期线程 nudge | primary API 后台扫描器可以提醒闲置线程。opt-in，默认关（`OPEN_TAG_STALE_THREAD_SCANNER_ENABLED`，ADR-0007）。 |
 | 跨 channel flag broker | 审计、`isPrivate`-safe 的跨 channel flag broker（ADR-0006）。Experimental，仅搭好骨架 —— 默认关闭，尚未接入实时事件路径。 |

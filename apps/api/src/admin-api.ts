@@ -839,6 +839,41 @@ function runtimeEnvKeys(value: unknown): string[] {
   return Object.keys(normalizeRuntimeEnv(value)).sort();
 }
 
+// runtimeEnv keys that look like secret material. Unlike access-bundle credentials
+// (env NAMES only; VALUES resolved from a SecretProvider at execution, never
+// persisted — see packages/registry/src/access-injection.ts), runtimeEnv VALUES are
+// STORED verbatim as plaintext in `agents.runtime_env` (ADR-0012). We WARN by name
+// when a write carries such a key — never reject, because per-agent custom Claude
+// credentials (ANTHROPIC_API_KEY) are a supported feature — and never log the VALUE.
+// `(^|_)` so a bare `API_KEY` / `TOKEN` / `SECRET` matches as well as suffixed names
+// like `ANTHROPIC_API_KEY` or `GITHUB_TOKEN`.
+const SENSITIVE_RUNTIME_ENV_KEY_PATTERN = /(^|_)(API_KEY|TOKEN|SECRET)$/i;
+
+function sensitiveRuntimeEnvKeys(runtimeEnv: Record<string, string> | undefined): string[] {
+  if (!runtimeEnv) return [];
+  return Object.keys(runtimeEnv)
+    .filter((key) => key === ANTHROPIC_API_KEY_KEY || SENSITIVE_RUNTIME_ENV_KEY_PATTERN.test(key))
+    .sort();
+}
+
+/**
+ * Emit a structured WARN (NAMES only, never VALUES) when an agent write persists
+ * sensitive-looking runtimeEnv keys as plaintext. No-op when there are none. See
+ * {@link sensitiveRuntimeEnvKeys} and ADR-0012.
+ */
+function warnSensitiveRuntimeEnv(
+  request: FastifyRequest,
+  agentId: string,
+  runtimeEnv: Record<string, string> | undefined,
+): void {
+  const keys = sensitiveRuntimeEnvKeys(runtimeEnv);
+  if (keys.length === 0) return;
+  request.log.warn(
+    { event: 'runtimeEnv.sensitive_key_stored', agentId, keys },
+    'Storing sensitive runtimeEnv keys as plaintext; prefer an access-bundle for secret values',
+  );
+}
+
 function shortenId(value: string, head = 8, tail = 6): string {
   if (value.length <= head + tail + 3) return value;
   return `${value.slice(0, head)}...${value.slice(-tail)}`;
@@ -4041,14 +4076,22 @@ export function registerAdminApiRoutes(
   app.post('/admin/agents', { preHandler }, async (request, reply) => {
     const body = parseWithReply(CreateAgentSchema, request.body, reply);
     if (!body) return;
-    return respond(reply, () => store.createAgent(requireIdentity(request).scope, body));
+    return respond(reply, async () => {
+      const agent = await store.createAgent(requireIdentity(request).scope, body);
+      warnSensitiveRuntimeEnv(request, agent.id, body.runtimeEnv);
+      return agent;
+    });
   });
 
   app.patch('/admin/agents/:id', { preHandler }, async (request, reply) => {
     const params = parseWithReply(IdParamsSchema, request.params, reply);
     const body = parseWithReply(PatchAgentSchema, request.body, reply);
     if (!params || !body) return;
-    return respond(reply, () => store.updateAgent(requireIdentity(request).scope, params.id, body));
+    return respond(reply, async () => {
+      const agent = await store.updateAgent(requireIdentity(request).scope, params.id, body);
+      warnSensitiveRuntimeEnv(request, params.id, body.runtimeEnv);
+      return agent;
+    });
   });
 
   app.delete('/admin/agents/:id', { preHandler }, async (request, reply) => {

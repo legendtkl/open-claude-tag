@@ -75,3 +75,4 @@ history of decisions stays auditable.
 | [0009](0009-embedded-postgres-db-provider.md) | DB-provider abstraction with an embedded-Postgres (zero-Docker) provider | Accepted |
 | [0010](0010-remove-coco-runtime.md) | Remove the Coco (TRAE CLI) runtime adapter | Accepted |
 | [0011](0011-remove-keyword-intent-classifier.md) | Remove the keyword intent classifier | Accepted |
+| [0012](0012-credential-storage-models.md) | Credential storage models: runtimeEnv (stored, masked) vs access-bundle (never stored) | Accepted |

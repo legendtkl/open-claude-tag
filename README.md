@@ -68,7 +68,7 @@ asks for confirmation when needed, and posts completion back to the same topic.
 | Onboarding wizard | A localhost setup wizard walks you through connecting Feishu, creating an agent, binding, and going live. |
 | Worktree isolation | Each task runs in its own git worktree with independent context; stale worktrees are auto-cleaned. |
 | Per-agent budget caps | Per-identity usage windows are tracked and enforced against declared caps (`@open-tag/registry`). |
-| Access-bundle credential plugins | Named, versioned credential bundles inject runtime env-var **names** at execution time; values come from a secret provider, never stored. |
+| Access-bundle credential plugins | Named, versioned credential bundles inject runtime env-var **names** at execution time; for this path the VALUES come from a secret provider at execution and are never persisted. (Per-agent `runtimeEnv` is the other model — its values ARE stored as plaintext in the DB, masked to key names in API responses. See [ADR-0012](doc/decisions/0012-credential-storage-models.md).) |
 | Ambient proactive posting | A judge-gated gate can proactively post when the channel is talking about something relevant. Opt-in, default off (`OPEN_TAG_AMBIENT`). |
 | Stale-thread nudges | A primary-API background scanner can nudge idle threads. Opt-in, default off (`OPEN_TAG_STALE_THREAD_SCANNER_ENABLED`, ADR-0007). |
 | Cross-channel flag broker | An audited, `isPrivate`-safe broker for flagging across channels (ADR-0006). Experimental and scaffolded — gated off by default and not yet wired into the live event path. |
