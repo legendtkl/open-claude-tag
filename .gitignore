@@ -12,3 +12,4 @@ workspaces/
 .worktrees/
 .worktree/
 .claude/worktrees/
+.claude/scheduled_tasks.lock
