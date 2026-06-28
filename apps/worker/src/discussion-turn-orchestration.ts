@@ -1,4 +1,4 @@
-import { stableUuidFromKey } from '@open-tag/core-types';
+import { stableUuidFromKey, normalizeRuntimeHint } from '@open-tag/core-types';
 import type { TaskJobData } from '@open-tag/queue';
 import type {
   AdvanceDiscussionInput,
@@ -217,7 +217,7 @@ function buildNextTurn(input: {
         nextRound,
         nextTurnIndex,
       }),
-      runtimeHint: input.currentTask.runtimeHint ?? 'auto',
+      runtimeHint: normalizeRuntimeHint(input.currentTask.runtimeHint),
       constraints,
     },
   };
@@ -231,7 +231,7 @@ function toJobData(nextTurn: NonNullable<AdvanceDiscussionInput['nextTurn']>): T
     feishuAppId: nextTurn.feishuAppId ?? undefined,
     taskType: nextTurn.taskType,
     goal: nextTurn.goal,
-    runtimeHint: nextTurn.runtimeHint ?? null,
+    runtimeHint: normalizeRuntimeHint(nextTurn.runtimeHint),
     constraints: nextTurn.constraints,
   };
 }

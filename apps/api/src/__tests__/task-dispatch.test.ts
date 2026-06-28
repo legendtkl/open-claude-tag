@@ -130,7 +130,9 @@ describe('buildQueuedTaskInput', () => {
     expect(isRuntimeSwitch).toBe(false);
     expect(job.runtimeBackend).toBe('codex');
     expect(job.sdkSessionId).toBe('sdk-codex-thread');
-    expect(job.runtimeHint).toBe('auto');
+    // 'auto' is persisted as null in the queue job (#12); runtime preservation
+    // rides on runtimeBackend above, so this is representation-only.
+    expect(job.runtimeHint).toBeNull();
   });
 
   it('explicit switch from codex to claude_code triggers isRuntimeSwitch', () => {
@@ -503,7 +505,7 @@ describe('buildDocumentCommentTaskInput', () => {
       agentId: 'agent_123',
       feishuAppId: 'app_123',
       taskType: IntentType.RESEARCH,
-      runtimeHint: 'auto',
+      runtimeHint: null,
       sdkSessionId: 'sdk-1',
       sdkSessionMachineId: 'machine-1',
       runtimeBackend: 'codex',

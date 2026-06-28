@@ -3,7 +3,7 @@ import type { Logger } from 'pino';
 import { desc, eq } from 'drizzle-orm';
 import { feishuCardActionReceipts, sessions, taskRuns, tasks } from '@open-tag/storage';
 import type { Database } from '@open-tag/storage';
-import { TaskStatus, errorMessage } from '@open-tag/core-types';
+import { TaskStatus, errorMessage, normalizeRuntimeHint } from '@open-tag/core-types';
 import type { IntentType } from '@open-tag/core-types';
 import {
   FeishuClient,
@@ -527,7 +527,7 @@ export function createTaskCardActionHandler(deps: TaskCardActionHandlerDeps) {
       parentTaskId: taskRecord.id,
       taskType: taskRecord.taskType,
       goal: taskRecord.goal,
-      runtimeHint: retryRuntime === 'auto' ? null : retryRuntime,
+      runtimeHint: normalizeRuntimeHint(retryRuntime),
       status: TaskStatus.PENDING,
       constraints: cloneTaskConstraints(taskRecord.constraints, taskRecord.id, actionValue.action),
       feedbackMessageId: ackMessageId || null,

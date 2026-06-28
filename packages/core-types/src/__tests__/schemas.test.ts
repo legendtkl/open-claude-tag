@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
+  normalizeRuntimeHint,
   NormalizedEventSchema,
   TaskSpecSchema,
   TaskResultSchema,
@@ -405,5 +406,19 @@ describe('RuntimeEventSchema', () => {
     });
 
     expect((event as any).reason).toBe('cancelled');
+  });
+});
+
+describe('normalizeRuntimeHint (#12)', () => {
+  it('collapses the auto/unspecified runtime to null for persistence', () => {
+    expect(normalizeRuntimeHint('auto')).toBeNull();
+    expect(normalizeRuntimeHint(null)).toBeNull();
+    expect(normalizeRuntimeHint(undefined)).toBeNull();
+    expect(normalizeRuntimeHint('')).toBeNull();
+  });
+
+  it('passes a concrete runtime name through unchanged', () => {
+    expect(normalizeRuntimeHint('codex')).toBe('codex');
+    expect(normalizeRuntimeHint('claude_code')).toBe('claude_code');
   });
 });

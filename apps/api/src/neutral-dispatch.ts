@@ -27,7 +27,7 @@
  * held dedup claim, two dispatches for one task can never run concurrently, so
  * the captured ack handle and the enqueued job stay consistent.
  */
-import { TaskStatus, stableUuidFromKey } from '@open-tag/core-types';
+import { TaskStatus, stableUuidFromKey, normalizeRuntimeHint } from '@open-tag/core-types';
 import type { ChannelKind, ConversationRef, InboundMessage } from '@open-tag/channel-core';
 import type { FeedbackChannelSender } from '@open-tag/feishu-adapter';
 import { isTerminal } from '@open-tag/orchestrator';
@@ -122,7 +122,7 @@ export function buildNeutralQueuedTask(
     sessionId,
     taskType: result.intent,
     goal: result.goal ?? message.content.text ?? '',
-    runtimeHint: runtime && runtime !== 'auto' ? runtime : null,
+    runtimeHint: normalizeRuntimeHint(runtime),
     constraints: {
       timeoutSec: 1800,
       tenantKey: message.scope.installationId,

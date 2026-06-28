@@ -1,6 +1,18 @@
 import { z } from 'zod';
 import { ReplyLanguageSchema } from './reply-language.js';
 
+/**
+ * `null` is the persisted encoding for the "auto" / inherit runtime: a task row's
+ * `runtimeHint` and a queue job's `runtimeHint` should both store `null` when the
+ * runtime is unspecified, NOT the literal string `'auto'`. The in-memory TaskSpec
+ * still uses `'auto'` (see the `runtimeHint` enum below) and the worker read-side
+ * accepts both for back-compat. This helper is the single source of truth for the
+ * collapse at every row/job WRITE boundary, so the two encodings cannot diverge.
+ */
+export function normalizeRuntimeHint(runtime?: string | null): string | null {
+  return runtime && runtime !== 'auto' ? runtime : null;
+}
+
 // ── NormalizedEvent ──
 export const MentionSchema = z.object({
   id: z.string(),

@@ -1,5 +1,5 @@
 import { randomUUID } from 'crypto';
-import { TaskStatus, IntentType, isObjectRecord } from '@open-tag/core-types';
+import { TaskStatus, IntentType, isObjectRecord, normalizeRuntimeHint } from '@open-tag/core-types';
 import type { InboundMessage, ReferencedMessage } from '@open-tag/channel-core';
 import type { Database } from '@open-tag/storage';
 import { tasks } from '@open-tag/storage';
@@ -176,7 +176,7 @@ export async function handleEvent(
     feishuAppId: options.feishuAppId,
     taskType: intent,
     goal: taskGoal,
-    runtimeHint: runtime === 'auto' ? null : runtime,
+    runtimeHint: normalizeRuntimeHint(runtime),
     status: TaskStatus.PENDING,
     constraints: {
       timeoutSec: 1800,
