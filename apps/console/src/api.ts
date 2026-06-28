@@ -6,7 +6,6 @@ export interface AdminSummary {
   enabledFeishuApps: number;
   botBindings: number;
   chats: number;
-  taskBoards: number;
   machines: number;
   onlineMachines: number;
 }
@@ -204,13 +203,6 @@ export interface Chat {
   memorySummaryLastStatus: string | null;
   memorySummaryLastError: string | null;
   agents: ChatAgent[];
-  taskBoard: {
-    id: string;
-    name: string;
-    tasklistGuid: string;
-    openTasklistUrl: string;
-    taskCount: number;
-  } | null;
   taskCount: number;
   lastTaskAt: string | null;
 }

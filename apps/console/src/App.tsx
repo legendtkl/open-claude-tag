@@ -333,7 +333,6 @@ const initialData: ConsoleData = {
     enabledFeishuApps: 0,
     botBindings: 0,
     chats: 0,
-    taskBoards: 0,
     machines: 0,
     onlineMachines: 0,
   },
