@@ -71,10 +71,12 @@ describe('LarkChannel', () => {
     expect(caps.supportsStreamingEdit).toBe(true);
     expect(caps.supportsThreads).toBe(true);
     expect(caps.supportsReactions).toBe(true);
-    expect(caps.supportsForms).toBe(true);
+    // renderForm is text-only and uploadArtifact is unimplemented, so those are
+    // honest-false; approval buttons stay true (card.action.trigger wired) (#13).
+    expect(caps.supportsForms).toBe(false);
     expect(caps.supportsApprovalButtons).toBe(true);
     expect(caps.supportsAttachmentsIn).toEqual(['image', 'file', 'audio']);
-    expect(caps.supportsAttachmentsOut).toEqual(['image', 'file']);
+    expect(caps.supportsAttachmentsOut).toEqual([]);
     expect(caps.maxOutboundChars).toBe(30000);
     expect(caps.maxOutboundElements).toBe(200);
     expect(caps.maxUpdateRateHz).toBe(5);

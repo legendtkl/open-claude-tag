@@ -81,10 +81,11 @@ describe('SlackChannel', () => {
     expect(caps.supportsStreamingEdit).toBe(true);
     expect(caps.supportsThreads).toBe(true);
     expect(caps.supportsReactions).toBe(true);
-    expect(caps.supportsForms).toBe(true);
-    expect(caps.supportsApprovalButtons).toBe(true);
+    // Honest until the stage-6 Slack interactive/upload work lands (#13).
+    expect(caps.supportsForms).toBe(false);
+    expect(caps.supportsApprovalButtons).toBe(false);
     expect(caps.supportsAttachmentsIn).toEqual(['image', 'file', 'audio']);
-    expect(caps.supportsAttachmentsOut).toEqual(['image', 'file']);
+    expect(caps.supportsAttachmentsOut).toEqual([]);
     expect(caps.maxOutboundChars).toBe(40000);
     expect(caps.maxOutboundElements).toBe(50);
     expect(caps.maxUpdateRateHz).toBe(1);
