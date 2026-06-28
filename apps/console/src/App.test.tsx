@@ -471,7 +471,6 @@ describe('OpenClaudeTag Console', () => {
 
     const navigation = await screen.findByRole('navigation', { name: 'Console sections' });
     expect(within(navigation).getAllByRole('button').map((button) => button.textContent)).toEqual([
-      'Overview',
       'Agents',
       'Bots',
       'Chats',
@@ -479,6 +478,7 @@ describe('OpenClaudeTag Console', () => {
       'Settings',
     ]);
 
+    expect(within(navigation).queryByRole('button', { name: /Overview/i })).toBeNull();
     expect(within(navigation).queryByRole('button', { name: /Project Guide/i })).toBeNull();
     expect(within(navigation).queryByRole('button', { name: /Release Notes/i })).toBeNull();
     expect(within(navigation).queryByRole('button', { name: /Downloads/i })).toBeNull();
@@ -493,8 +493,10 @@ describe('OpenClaudeTag Console', () => {
     expect(screen.queryByRole('button', { name: '项目手册' })).toBeNull();
     expect(screen.queryByRole('button', { name: '更新日志' })).toBeNull();
     expect(screen.queryByRole('button', { name: '下载' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '总览' })).toBeNull();
     expect(screen.queryByText('本地服务')).not.toBeInTheDocument();
-    expect(screen.getByText('面向飞书群协作的 AI 工程工作台。')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: '智能体' })).toBeInTheDocument();
+    expect(screen.queryByText('面向飞书群协作的 AI 工程工作台。')).not.toBeInTheDocument();
     expect(screen.queryByText('用户指南')).not.toBeInTheDocument();
     expect(screen.queryByText('1. 绑定机器')).not.toBeInTheDocument();
 
@@ -529,32 +531,34 @@ describe('OpenClaudeTag Console', () => {
     expect(screen.queryByRole('button', { name: /^Refresh$/i })).toBeNull();
   });
 
-  it('renders overview counts from the admin API', async () => {
+  it('opens on the operational Agents page without the old overview hero', async () => {
     const { container } = render(<App />);
 
     expect(await screen.findByText('OpenClaudeTag')).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Agents' })).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: 'Agent' })).toBeInTheDocument();
     expect(
-      await screen.findByText('A Feishu-native workspace for AI engineering collaboration.'),
-    ).toBeInTheDocument();
+      screen.queryByText('A Feishu-native workspace for AI engineering collaboration.'),
+    ).not.toBeInTheDocument();
     expect(screen.queryByText('User Guide')).not.toBeInTheDocument();
     expect(screen.queryByText('1. Bind a machine')).not.toBeInTheDocument();
     expect(screen.queryByText('2. Create an agent')).not.toBeInTheDocument();
     expect(screen.queryByText('3. Connect a Feishu bot')).not.toBeInTheDocument();
     expect(screen.queryByText('4. Collaborate in Feishu groups')).not.toBeInTheDocument();
     await waitFor(() => expect(screen.getAllByText('Agents').length).toBeGreaterThan(0));
-    expect(screen.getAllByText('Feishu Apps').length).toBeGreaterThan(0);
     expect(screen.queryByText('Objects')).not.toBeInTheDocument();
     expect(screen.queryByText('Bot Bindings')).not.toBeInTheDocument();
     expect(screen.queryByText(/task boards/i)).not.toBeInTheDocument();
     expect(screen.queryByText('First Agent')).not.toBeInTheDocument();
-    expect(screen.queryByText('Reviewer')).not.toBeInTheDocument();
-    expect(container.querySelector('.overview-hero-copy')).toBeInTheDocument();
-    expect(container.querySelector('.overview-status-meter span')).toHaveStyle({ width: '50%' });
+    expect(screen.getByText('Reviewer')).toBeInTheDocument();
+    expect(container.querySelector('.overview-hero-copy')).not.toBeInTheDocument();
+    expect(container.querySelector('.overview-status-meter')).not.toBeInTheDocument();
   });
 
-  it('starts one-click Feishu bot setup from the overview page', async () => {
+  it('starts one-click Feishu bot setup from the Bots page', async () => {
     render(<App />);
 
+    fireEvent.click(await screen.findByRole('button', { name: /Bots/i }));
     expect(await screen.findByText('Feishu Bot Setup')).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText('Bot Name'), {
       target: { value: 'Reviewer Platform Bot' },
@@ -586,6 +590,7 @@ describe('OpenClaudeTag Console', () => {
   it('prevents concurrent one-click Feishu bot setup starts', async () => {
     render(<App />);
 
+    fireEvent.click(await screen.findByRole('button', { name: /Bots/i }));
     const startButton = await screen.findByRole('button', { name: /Apply Bot And Scopes/i });
     fireEvent.click(startButton);
     fireEvent.click(startButton);
@@ -599,9 +604,10 @@ describe('OpenClaudeTag Console', () => {
     expect(startCalls).toHaveLength(1);
   });
 
-  it('polls one-click Feishu bot setup to completion from the overview page', async () => {
+  it('polls one-click Feishu bot setup to completion from the Bots page', async () => {
     render(<App />);
 
+    fireEvent.click(await screen.findByRole('button', { name: /Bots/i }));
     fireEvent.click(
       await screen.findByRole('button', { name: /Apply Bot And Scopes/i }),
     );
@@ -628,14 +634,15 @@ describe('OpenClaudeTag Console', () => {
       { timeout: 2500 },
     );
     expect(screen.getByText('Bot app registered')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: /Open Bots/i }));
-    expect(await screen.findByText('Feishu Apps')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Open Bots/i })).not.toBeInTheDocument();
+    expect(screen.getByText('Feishu Apps')).toBeInTheDocument();
   });
 
   it('allows retry when one-click Feishu bot setup polling loses the session', async () => {
     oneClickRegistrationPollMode = 'missing';
     render(<App />);
 
+    fireEvent.click(await screen.findByRole('button', { name: /Bots/i }));
     fireEvent.click(
       await screen.findByRole('button', { name: /Apply Bot And Scopes/i }),
     );

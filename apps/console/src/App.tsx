@@ -8,7 +8,6 @@ import {
   Compass,
   Copy,
   ExternalLink,
-  Home,
   Languages,
   Laptop,
   Link2,
@@ -82,7 +81,6 @@ import './styles.css';
 
 type View =
   | 'onboarding'
-  | 'overview'
   | 'agents'
   | 'bots'
   | 'chats'
@@ -105,18 +103,16 @@ const PRODUCT_FULL_NAME = `${PRODUCT_NAME} Console`;
 const PRODUCT_ICON_SRC = '/open-claude-tag-favicon.png?v=20260616';
 
 const navItems = [
-  { id: 'overview', icon: Home },
   { id: 'agents', icon: UserRound },
   { id: 'bots', icon: Bot },
   { id: 'chats', icon: MessageSquare },
   { id: 'machines', icon: Laptop },
   { id: 'settings', icon: Settings2 },
-] satisfies Array<{ id: View; icon: typeof Home }>;
+] satisfies Array<{ id: View; icon: typeof UserRound }>;
 
 const viewLabels: Record<Locale, Record<View, string>> = {
   en: {
     onboarding: 'Get Started',
-    overview: 'Overview',
     agents: 'Agents',
     bots: 'Bots',
     chats: 'Chats',
@@ -125,7 +121,6 @@ const viewLabels: Record<Locale, Record<View, string>> = {
   },
   zh: {
     onboarding: '快速开始',
-    overview: '总览',
     agents: '智能体',
     bots: '机器人',
     chats: '会话',
@@ -751,7 +746,7 @@ function detectInitialLocale(): Locale {
 }
 
 export function App() {
-  const [view, setView] = useState<View>('overview');
+  const [view, setView] = useState<View>('agents');
   const [locale, setLocale] = useState<Locale>(detectInitialLocale);
   const [data, setData] = useState<ConsoleData>(initialData);
   const [authConfig, setAuthConfig] = useState<AuthConfig | null>(null);
@@ -889,7 +884,7 @@ export function App() {
   function exitOnboardingToConsole() {
     writeOnboardingDismissed(true);
     setNotice(null);
-    setView('overview');
+    setView('agents');
   }
 
   if (needsLogin) {
@@ -984,14 +979,6 @@ export function App() {
             canUseComputer={canUseComputer}
             refreshConsole={refresh}
             onExitToConsole={exitOnboardingToConsole}
-          />
-        ) : null}
-        {!loading && view === 'overview' ? (
-          <Overview
-            data={data}
-            locale={locale}
-            onOpenBots={() => setView('bots')}
-            refreshConsole={refresh}
           />
         ) : null}
         {!loading && view === 'agents' ? (
@@ -1894,7 +1881,7 @@ function OnboardingWizard({
   return (
     <div className="onboarding-stack">
       <section className="panel onboarding-hero">
-        <div className="overview-hero-icon">
+        <div className="product-hero-icon">
           <img aria-hidden="true" src={PRODUCT_ICON_SRC} alt="" />
         </div>
         <div>
@@ -1944,84 +1931,6 @@ function OnboardingWizard({
           </button>
         )}
       </div>
-    </div>
-  );
-}
-
-function Overview({
-  data,
-  locale,
-  onOpenBots,
-  refreshConsole,
-}: {
-  data: ConsoleData;
-  locale: Locale;
-  onOpenBots: () => void;
-  refreshConsole: RefreshConsole;
-}) {
-  const copy = {
-    en: {
-      eyebrow: PRODUCT_FULL_NAME,
-      title: 'A Feishu-native workspace for AI engineering collaboration.',
-      intro:
-        'OpenClaudeTag connects machines, agent profiles, Feishu bot identities, and group chats. Operators prepare the runtime here, then teammates collaborate directly in Feishu while OpenClaudeTag routes work to the right agent and keeps task status visible.',
-      statusTitle: 'Current Status',
-    },
-    zh: {
-      eyebrow: `${PRODUCT_NAME} 控制台`,
-      title: '面向飞书群协作的 AI 工程工作台。',
-      intro:
-        'OpenClaudeTag 串联执行机器、智能体配置、飞书机器人身份和群聊。运维人员在这里完成运行环境和身份绑定，团队成员则直接在飞书群里协作，系统会把工作路由到合适的 agent，并持续回传任务状态。',
-      statusTitle: '当前状态',
-    },
-  }[locale];
-  const machineStatusPercent =
-    data.summary.machines > 0
-      ? Math.round((data.summary.onlineMachines / data.summary.machines) * 100)
-      : 0;
-
-  return (
-    <div className="overview-stack">
-      <section className="panel overview-hero">
-        <div className="overview-hero-copy">
-          <div className="overview-hero-icon">
-            <img aria-hidden="true" src={PRODUCT_ICON_SRC} alt="" />
-          </div>
-          <div>
-            <div className="panel-title">
-              <Home size={18} /> {copy.eyebrow}
-            </div>
-            <h2>{copy.title}</h2>
-            <p>{copy.intro}</p>
-          </div>
-        </div>
-        <div className="overview-hero-stats" aria-label={copy.statusTitle}>
-          <span>{copy.statusTitle}</span>
-          <strong>{uiText[locale].summary(data.summary.activeAgents, data.summary.botBindings)}</strong>
-          <small>
-            {locale === 'zh'
-              ? `${data.summary.onlineMachines}/${data.summary.machines} 台机器在线`
-              : `${data.summary.onlineMachines}/${data.summary.machines} machines online`}
-          </small>
-          <div
-            className="overview-status-meter"
-            aria-label={
-              locale === 'zh'
-                ? `机器在线进度 ${machineStatusPercent}%`
-                : `Machine online progress ${machineStatusPercent}%`
-            }
-          >
-            <span style={{ width: `${machineStatusPercent}%` }} />
-          </div>
-        </div>
-      </section>
-
-      <FeishuBotOnboardingPanel
-        data={data}
-        locale={locale}
-        onOpenBots={onOpenBots}
-        refreshConsole={refreshConsole}
-      />
     </div>
   );
 }

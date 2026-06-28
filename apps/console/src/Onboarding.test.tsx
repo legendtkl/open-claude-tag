@@ -144,7 +144,7 @@ describe('Onboarding wizard', () => {
     expect(await screen.findByText(/Get started with OpenClaudeTag/i)).toBeInTheDocument();
     // The personal-mode nav entry is present.
     expect(screen.getByRole('button', { name: /Get Started/i })).toBeInTheDocument();
-    // The normal Overview hero is not shown while the wizard is open.
+    // The old overview hero is not shown while the wizard is open.
     expect(screen.queryByText(/A Feishu-native workspace/i)).not.toBeInTheDocument();
   });
 
@@ -152,7 +152,8 @@ describe('Onboarding wizard', () => {
     installHandler({ personalMode: false, apps: [], agents: [] });
     render(<App />);
 
-    expect(await screen.findByText(/A Feishu-native workspace/i)).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Agents' })).toBeInTheDocument();
+    expect(screen.queryByText(/A Feishu-native workspace/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/Get started with OpenClaudeTag/i)).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Get Started/i })).not.toBeInTheDocument();
   });
@@ -167,7 +168,8 @@ describe('Onboarding wizard', () => {
     });
     render(<App />);
 
-    expect(await screen.findByText(/A Feishu-native workspace/i)).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Agents' })).toBeInTheDocument();
+    expect(screen.queryByText(/A Feishu-native workspace/i)).not.toBeInTheDocument();
     // Give the auto-route health probe a chance to resolve; it must not route.
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/health', expect.anything()));
     expect(screen.queryByText(/Get started with OpenClaudeTag/i)).not.toBeInTheDocument();
@@ -193,14 +195,16 @@ describe('Onboarding wizard', () => {
     const first = render(<App />);
 
     fireEvent.click(await screen.findByRole('button', { name: /Skip to console/i }));
-    // The normal Overview is now shown.
-    expect(await screen.findByText(/A Feishu-native workspace/i)).toBeInTheDocument();
+    // The normal console is now shown.
+    expect(await screen.findByRole('heading', { name: 'Agents' })).toBeInTheDocument();
+    expect(screen.queryByText(/A Feishu-native workspace/i)).not.toBeInTheDocument();
     first.unmount();
 
     // A fresh mount (same localStorage) must not re-route into the wizard.
     installHandler({ personalMode: true, apps: [], agents: [] });
     render(<App />);
-    expect(await screen.findByText(/A Feishu-native workspace/i)).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Agents' })).toBeInTheDocument();
+    expect(screen.queryByText(/A Feishu-native workspace/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/Get started with OpenClaudeTag/i)).not.toBeInTheDocument();
   });
 });
