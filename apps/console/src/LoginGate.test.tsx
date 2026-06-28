@@ -72,7 +72,7 @@ describe('Login gate', () => {
     // No SSO entry point remains.
     expect(screen.queryByRole('button', { name: /SSO/i })).not.toBeInTheDocument();
     // The console shell (nav) must not render behind the gate.
-    expect(screen.queryByRole('button', { name: /^Overview$/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^Agents$/i })).not.toBeInTheDocument();
   });
 
   it('applies a typed admin token and mounts the console', async () => {
@@ -100,7 +100,7 @@ describe('Login gate', () => {
     });
     fireEvent.click(screen.getByRole('button', { name: /Continue/i }));
 
-    expect(await screen.findByRole('button', { name: /^Overview$/i })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: /^Agents$/i })).toBeInTheDocument();
     // The token is attached to subsequent admin requests.
     await waitFor(() =>
       expect(
@@ -253,7 +253,7 @@ describe('Login gate', () => {
 
     render(<App />);
     // With a break-glass token the gate is bypassed even on a 403 /admin/me.
-    expect(await screen.findByRole('button', { name: /^Overview$/i })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: /^Agents$/i })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Continue/i })).not.toBeInTheDocument();
   });
 });
