@@ -37,7 +37,7 @@ The compose file runs Postgres (named volume `pgdata`), API, and Worker. Runtime
 | ----------------------------- | ---------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `SERVER_PUBLIC_URL`           | — (required for pairing)                       | Public base URL users' daemons dial, e.g. `https://your-server.example.com`. Surfaced via `GET /admin/auth/config` so the console's Machines install guide can substitute it into `--server-url <url>`.                                                                                         |
 | `DAEMON_GATEWAY_PORT`         | `3001`                                         | Port the worker's daemon gateway listens on.                                                                                                                                                                                                                                                 |
-| `DAEMON_ARTIFACT_PATH`        | —                                              | Absolute path to a packed daemon tarball (`.tgz`). When set, `GET /admin/daemon/artifact` streams it as `open-claude-tag-daemon.tgz` so the console "Download daemon" button works without a published registry. Unset ⇒ the endpoint returns 404 (the install guide still shows the npx method). |
+| `DAEMON_ARTIFACT_PATH`        | —                                              | Absolute path to a packed daemon tarball (`.tgz`). When set, `GET /admin/daemon/artifact` streams it as `open-claude-tag-daemon.tgz` for scripted or legacy downloads. The console install guide stays focused on the npx path. Unset ⇒ the endpoint returns 404. |
 | `DESKTOP_ARTIFACT_PATH_ARM64` | —                                              | Absolute path to the Apple Silicon macOS app DMG. When set, `GET /admin/desktop/artifact?arch=arm64` streams it for direct/scripted downloads. Unset ⇒ the API falls back to standard `apps/desktop/release` discovery before reporting the arch unavailable.                                  |
 | `DESKTOP_ARTIFACT_PATH_X64`   | —                                              | Absolute path to the Intel macOS app DMG (`arch=x64`). Same behavior as the arm64 path; each arch is independently optional.                                                                                                                                                                 |
 | `DAEMON_GATEWAY_PUBLIC`       | `false`                                        | When `false`, the gateway binds loopback only (localhost mode). Set `true` behind a reverse proxy.                                                                                                                                                                                           |
@@ -107,18 +107,7 @@ The admin console's **Machines** page renders an OS-specific install guide ("Con
 
 **2. Pairing token** — on the console's Machines page, click **Generate pairing token**. Use the one-time token (10 min TTL, single use) as `<TOKEN>` below.
 
-**3. Install and start** — two methods:
-
-_Method A — download from this server_ (works before publishing to a registry; requires `DAEMON_ARTIFACT_PATH` set, see below):
-
-```bash
-# Download the tarball from the console's "Download daemon" button, or:
-curl -fSL "$SERVER_PUBLIC_URL_OR_CONSOLE_ORIGIN/admin/daemon/artifact" -o open-claude-tag-daemon.tgz
-npm install -g ./open-claude-tag-daemon.tgz
-open-claude-tag-daemon install --server-url <SERVER_PUBLIC_URL> --token <TOKEN> --background
-```
-
-_Method B — npx (once published to your registry)_:
+**3. Install and start** — the console shows one npx pairing command:
 
 ```bash
 npm_config_registry=https://registry.example.com npx @open-tag/daemon@latest --server-url <SERVER_PUBLIC_URL> --token <TOKEN> --background
@@ -133,11 +122,6 @@ The no-subcommand npx form intentionally mirrors installers like `npx @your-org/
 npm_config_registry=https://registry.example.com npx @open-tag/daemon@latest status
 npm_config_registry=https://registry.example.com npx @open-tag/daemon@latest stop
 npm_config_registry=https://registry.example.com npx @open-tag/daemon@latest start --background
-
-# globally installed tarball path:
-open-claude-tag-daemon status
-open-claude-tag-daemon stop
-open-claude-tag-daemon start --background
 ```
 
 - Linux systemd **user** unit alternative:
@@ -165,9 +149,9 @@ open-claude-tag-daemon start --background
   ```
   `launchctl load ~/Library/LaunchAgents/com.open-claude-tag.daemon.plist`.
 
-### Producing the downloadable tarball
+### Legacy tarball artifact endpoint
 
-The download button (`GET /admin/daemon/artifact`) streams whatever `DAEMON_ARTIFACT_PATH` points at. The deploy must build it once and point the env at it:
+`GET /admin/daemon/artifact` still streams whatever `DAEMON_ARTIFACT_PATH` points at for scripted or legacy downloads. The console no longer presents this path in the Machines guide. To use the endpoint, build the artifact once and point the env at it:
 
 ```bash
 pnpm --filter @open-tag/daemon run pack:tgz   # runs prepack (clean + bundle) then `npm pack`
@@ -175,7 +159,7 @@ pnpm --filter @open-tag/daemon run pack:tgz   # runs prepack (clean + bundle) th
 export DAEMON_ARTIFACT_PATH="$PWD/apps/daemon/open-claude-tag-daemon-<version>.tgz"
 ```
 
-If `DAEMON_ARTIFACT_PATH` is unset (or the file is missing), the endpoint returns 404 with a JSON hint and the console install guide still works via the npx method.
+If `DAEMON_ARTIFACT_PATH` is unset (or the file is missing), the endpoint returns 404 with a JSON hint.
 
 ### Producing the optional macOS app (DMG)
 
@@ -417,4 +401,4 @@ npm login --registry=https://registry.example.com           # then: npm whoami -
 cd apps/daemon && pnpm publish --registry=https://registry.example.com --no-git-checks   # bump version first
 ```
 
-`pnpm publish` runs the tsup `prepack` (bundles workspace deps into `dist`) and rewrites the `workspace:*` devDeps; the published `dependencies` are all public packages the registry mirrors. The console install guide also offers a tarball fallback served from `GET /admin/daemon/artifact` (gated by `DAEMON_ARTIFACT_PATH`, produced by `pnpm --filter @open-tag/daemon run pack:tgz`).
+`pnpm publish` runs the tsup `prepack` (bundles workspace deps into `dist`) and rewrites the `workspace:*` devDeps; the published `dependencies` are all public packages the registry mirrors. Scripted or legacy tarball downloads can still use `GET /admin/daemon/artifact` when `DAEMON_ARTIFACT_PATH` points at an artifact produced by `pnpm --filter @open-tag/daemon run pack:tgz`.

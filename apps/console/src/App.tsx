@@ -9,7 +9,6 @@ import {
   Check,
   Compass,
   Copy,
-  Download,
   ExternalLink,
   Home,
   Languages,
@@ -41,7 +40,6 @@ import {
   cancelFeishuAppRegistration,
   checkFeishuAppPermissions,
   createAgent,
-  DAEMON_ARTIFACT_URL,
   deleteAgent,
   deleteFeishuApp,
   createFeishuApp,
@@ -213,7 +211,6 @@ const uiText = {
         'Run the OpenClaudeTag daemon on your machine so tasks can execute there. Pick your OS, get a pairing token, then run the one-command installer.',
       copy: 'Copy',
       copied: 'Copied',
-      download: 'Download daemon',
       serverPlaceholderNote:
         'The server has no SERVER_PUBLIC_URL configured yet. Replace <SERVER_PUBLIC_URL> with the daemon gateway URL (ask your deployer).',
       step1Title: '1. Install Node.js 20+',
@@ -238,9 +235,6 @@ const uiText = {
       devSignIn: 'Sign in as user',
       devSignInFailed: 'Could not sign in as the test user. Retry or check OPEN_TAG_DEV_AUTH.',
       step3Title: '3. Install and start',
-      methodADownload: 'Alternative — download from this server',
-      methodADownloadBody:
-        'If npx is unavailable, download the tarball, install it globally, then run the same installer:',
       methodBNpx: 'Recommended — one command from the internal registry',
       methodBNpxBody: 'npx fetches the daemon, pairs this machine, and starts it in the background:',
       step4Title: '4. Manage the daemon',
@@ -319,7 +313,6 @@ const uiText = {
         '在你的机器上运行 OpenClaudeTag daemon，任务即可在该机器执行。选择操作系统、获取配对令牌，然后执行一条命令完成安装启动。',
       copy: '复制',
       copied: '已复制',
-      download: '下载 daemon',
       serverPlaceholderNote:
         '服务端尚未配置 SERVER_PUBLIC_URL。请将 <SERVER_PUBLIC_URL> 替换为 daemon 网关地址（向部署者获取）。',
       step1Title: '1. 安装 Node.js 20+',
@@ -343,8 +336,6 @@ const uiText = {
       devSignIn: '以用户身份登录',
       devSignInFailed: '测试用户登录失败。请重试或检查 OPEN_TAG_DEV_AUTH。',
       step3Title: '3. 安装并启动',
-      methodADownload: '备选 — 从本服务器下载',
-      methodADownloadBody: '若无法使用 npx，下载 tarball、全局安装后执行同一个安装器：',
       methodBNpx: '推荐 — 从内部源一条命令安装',
       methodBNpxBody: 'npx 会拉取 daemon、完成配对，并在后台启动：',
       step4Title: '4. 管理 daemon',
@@ -4222,9 +4213,8 @@ function CommandBlock({ command, locale }: { command: string; locale: Locale }) 
 /**
  * The "Connect a machine" install guide on the Machines view. Shows an OS toggle
  * (Linux | macOS) and renders prereqs, a "Generate pairing token" step (design
- * D-A7 — pairing is console-only, no Feishu command), two install methods
- * (download-from-server and npx-via-registry), and background daemon management
- * commands. The daemon gateway URL (`--server-url`) is
+ * D-A7 — pairing is console-only, no Feishu command), the npx install command,
+ * and background daemon management commands. The daemon gateway URL (`--server-url`) is
  * substituted from `authConfig.serverPublicUrl`; when the server has not set it, a
  * `<SERVER_PUBLIC_URL>` placeholder is shown with a note. Once a token is
  * generated it is substituted into the connect commands in place of `<TOKEN>`.
@@ -4260,9 +4250,6 @@ function DaemonInstallGuide({
   // Substitute the generated token into the connect commands; before generation
   // the `<TOKEN>` placeholder is shown so the shape of the command is clear.
   const tokenArg = token ?? '<TOKEN>';
-  const installGlobalCmd =
-    `open-claude-tag-daemon install --server-url ${serverUrl} --token ${tokenArg} --background`;
-  const installCmd = 'npm install -g ./open-claude-tag-daemon.tgz';
   const npxInstallCmd =
     `npx ${npxSpec} --server-url ${serverUrl} --token ${tokenArg} --background`;
   const statusCmd = `npx ${npxSpec} status`;
@@ -4305,7 +4292,7 @@ function DaemonInstallGuide({
 
   return (
     <section className="panel daemon-guide">
-      <div className="panel-title"><Download size={18} /> {t.title}</div>
+      <div className="panel-title"><Laptop size={18} /> {t.title}</div>
       <p className="daemon-guide-subtitle">{t.subtitle}</p>
 
       <div className="segmented-control daemon-os-toggle" aria-label="OS">
@@ -4396,15 +4383,6 @@ function DaemonInstallGuide({
             <div className="daemon-method-title">{t.methodBNpx}</div>
             <p>{t.methodBNpxBody}</p>
             <CommandBlock command={npxInstallCmd} locale={locale} />
-          </div>
-          <div className="daemon-method">
-            <div className="daemon-method-title">{t.methodADownload}</div>
-            <p>{t.methodADownloadBody}</p>
-            <a className="primary daemon-download" href={DAEMON_ARTIFACT_URL} download>
-              <Download size={16} /> {t.download}
-            </a>
-            <CommandBlock command={installCmd} locale={locale} />
-            <CommandBlock command={installGlobalCmd} locale={locale} />
           </div>
           {serverIsPlaceholder ? (
             <p className="daemon-guide-note">{t.serverPlaceholderNote}</p>
