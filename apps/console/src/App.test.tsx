@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { App } from './App';
-import type { Chat, Me } from './api';
+import type { Me } from './api';
 
 const now = '2026-06-06T00:00:00.000Z';
 
@@ -2300,67 +2300,20 @@ describe('OpenClaudeTag Console', () => {
     await screen.findByText('Admin token cleared');
   });
 
-  it('toggles chat memory from the settings tab', async () => {
+  it('does not expose chat memory controls from the settings tab', async () => {
     render(<App />);
 
     fireEvent.click(await screen.findByRole('button', { name: /Settings/i }));
-    expect(await screen.findByText('Chat memory')).toBeInTheDocument();
-    const checkbox = screen.getByRole('checkbox', { name: 'Chat memory Engineering' });
-    expect(checkbox).not.toBeChecked();
-
-    fireEvent.click(checkbox);
-
-    await waitFor(() =>
-      expect(fetchMock).toHaveBeenCalledWith(
-        '/admin/chats/default/oc_test',
-        expect.objectContaining({ method: 'PATCH' }),
+    await screen.findByText('Access');
+    expect(screen.queryByText('Chat memory')).not.toBeInTheDocument();
+    expect(screen.queryByRole('checkbox', { name: 'Chat memory Engineering' })).not.toBeInTheDocument();
+    expect(
+      fetchMock.mock.calls.some(
+        ([input, init]) =>
+          input === '/admin/chats/default/oc_test' &&
+          (init as RequestInit | undefined)?.method === 'PATCH',
       ),
-    );
-    const patchCall = fetchMock.mock.calls.find(
-      ([input, init]) =>
-        input === '/admin/chats/default/oc_test' &&
-        (init as RequestInit | undefined)?.method === 'PATCH',
-    );
-    const body = JSON.parse(String((patchCall?.[1] as RequestInit | undefined)?.body));
-    expect(body).toEqual({ memoryEnabled: true });
-    expect(await screen.findByText('Chat memory updated')).toBeInTheDocument();
-  });
-
-  it('disables chat memory from the settings tab', async () => {
-    const chat = fixtures['/admin/chats'][0] as Chat;
-    const previousEnabled = chat.memoryEnabled;
-    const previousNextRunAt = chat.memorySummaryNextRunAt;
-    chat.memoryEnabled = true;
-    chat.memorySummaryNextRunAt = '2026-06-06T01:30:00.000Z';
-    try {
-      render(<App />);
-
-      fireEvent.click(await screen.findByRole('button', { name: /Settings/i }));
-      const checkbox = screen.getByRole('checkbox', { name: 'Chat memory Engineering' });
-      expect(checkbox).toBeChecked();
-
-      fireEvent.click(checkbox);
-
-      await waitFor(() =>
-        expect(fetchMock).toHaveBeenCalledWith(
-          '/admin/chats/default/oc_test',
-          expect.objectContaining({ method: 'PATCH' }),
-        ),
-      );
-      const patchCall = [...fetchMock.mock.calls]
-        .reverse()
-        .find(
-          ([input, init]) =>
-            input === '/admin/chats/default/oc_test' &&
-            (init as RequestInit | undefined)?.method === 'PATCH',
-        );
-      const body = JSON.parse(String((patchCall?.[1] as RequestInit | undefined)?.body));
-      expect(body).toEqual({ memoryEnabled: false });
-      expect(await screen.findByText('Chat memory updated')).toBeInTheDocument();
-    } finally {
-      chat.memoryEnabled = previousEnabled;
-      chat.memorySummaryNextRunAt = previousNextRunAt;
-    }
+    ).toBe(false);
   });
 
   it('lets a superadmin enable computer access from settings', async () => {
@@ -2452,7 +2405,8 @@ describe('OpenClaudeTag Console', () => {
     render(<App />);
 
     fireEvent.click(await screen.findByRole('button', { name: /Settings/i }));
-    expect(await screen.findByText('Chat memory')).toBeInTheDocument();
+    await screen.findByText('Access');
+    expect(screen.queryByText('Chat memory')).not.toBeInTheDocument();
     expect(screen.getByText('Access')).toBeInTheDocument();
     expect(
       screen.queryByText('Desktop settings are available in the macOS app'),
