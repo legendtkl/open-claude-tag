@@ -59,7 +59,7 @@ Execution flow:
 | --- | --- | --- |
 | Node.js `20+` | All source-based workflows | The repo currently uses `pnpm@9.15.4`. |
 | `pnpm` | All source-based workflows | Enable with `corepack enable`. |
-| Docker / Docker Compose | Local PostgreSQL and Docker deployment | Required unless you bring your own Postgres. |
+| Docker / Docker Compose | `OPEN_TAG_DB_MODE=docker` and Docker deployment | NOT required for the personal launcher, which provisions an embedded Postgres. |
 | Feishu self-built app | Real Feishu message handling | Required for API to connect to Feishu. |
 | Runtime credentials | Real task execution | Claude Code uses `ANTHROPIC_*`; Codex reads `~/.codex/config.toml`. |
 | PostgreSQL client tools (`psql`, `createdb`, `dropdb`) | Isolated worktree commands | Needed by `pnpm db:setup:isolated` and related isolated lifecycle commands. |
@@ -67,7 +67,28 @@ Execution flow:
 
 macOS or Linux is the easiest path for source development. On Windows, use WSL2 because several scripts assume a Unix-like shell environment.
 
-### Quick Start
+### Personal Quick Start (zero-Docker)
+
+Run the whole stack on your own machine with **no Docker**: an embedded PostgreSQL is provisioned automatically, and a localhost setup wizard walks you through connecting Feishu and creating your first agent. Only Node.js 20+ and pnpm (`corepack enable`) are required; for real task execution, have Claude Code (`~/.claude` / `ANTHROPIC_*`) or Codex (`~/.codex`) credentials on the host.
+
+```bash
+corepack enable
+pnpm install        # the embedded Postgres binary is fetched from public npm
+pnpm build          # builds all packages, including the launcher CLI
+pnpm personal:up    # embedded Postgres -> migrate + seed -> start API + Worker + Console -> open the browser
+```
+
+`pnpm personal:up` boots an embedded PostgreSQL (default `OPEN_TAG_DB_MODE=embedded`), runs migrations, starts the API + Worker + Console on `127.0.0.1`, waits for `/health`, and opens the onboarding wizard. Then follow the wizard: **connect Feishu → create an agent → bind → go live**.
+
+| Command | Action |
+| --- | --- |
+| `pnpm personal:up` | Start the full stack (idempotent) |
+| `pnpm personal:status` | Show DB / API / Worker / Console + `/health` |
+| `pnpm personal:down` | Stop everything, including the embedded Postgres |
+
+Pick the database backend with `OPEN_TAG_DB_MODE`: `embedded` (default, no Docker), `docker` (use `infra/docker-compose.yaml`), or `external` (point `DATABASE_URL` at your own Postgres). The embedded data directory is `~/.open-claude-tag/pgdata`. Once published to npm, the same launcher runs as `npx open-claude-tag up` (alias `oct up`).
+
+### Quick Start (Docker or your own Postgres)
 
 ```bash
 # 1. Enable pnpm and install dependencies

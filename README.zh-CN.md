@@ -20,7 +20,28 @@ channel adapter 把平台事件标准化成 neutral 的 `InboundMessage`（`pack
 
 Slack 路径有单元测试和基于 Postgres 的集成测试覆盖（通过同一个 vendor-clean 核心端到端驱动真实路由，Slack sender 用 stub 注入）；用真实 workspace 凭据的端到端 Slack 验证尚未跑过。
 
-## 快速开始（TL;DR）
+## 个人快速体验（零-Docker）
+
+在自己的机器上**无需 Docker** 跑起整个栈：自动内置一个 embedded PostgreSQL，并用本地 onboarding 向导引导你连接飞书、创建第一个 agent。只需 Node.js 20+ 和 pnpm（`corepack enable`）；真实执行任务需宿主机有 Claude Code（`~/.claude` / `ANTHROPIC_*`）或 Codex（`~/.codex`）凭证。
+
+```bash
+corepack enable
+pnpm install        # embedded Postgres 二进制从公共 npm 拉取
+pnpm build          # 构建全部包（含 launcher CLI）
+pnpm personal:up    # 内置 Postgres → migrate + seed → 起 API + Worker + Console → 自动开浏览器
+```
+
+`pnpm personal:up` 会启动一个 embedded PostgreSQL（默认 `OPEN_TAG_DB_MODE=embedded`）、执行 migration、在 `127.0.0.1` 起 API + Worker + Console、等待 `/health`，并打开 onboarding 向导。然后跟着向导走：**连接飞书 → 创建 agent → 绑定 → 上线**。
+
+| 命令 | 作用 |
+| --- | --- |
+| `pnpm personal:up` | 启动整个栈（幂等） |
+| `pnpm personal:status` | 查看 DB / API / Worker / Console + `/health` |
+| `pnpm personal:down` | 停止全部（含 embedded Postgres） |
+
+用 `OPEN_TAG_DB_MODE` 选数据库后端：`embedded`（默认，免 Docker）、`docker`（用 `infra/docker-compose.yaml`）、`external`（`DATABASE_URL` 指向你自己的 Postgres）。embedded 数据目录在 `~/.open-claude-tag/pgdata`。发布到 npm 后，同一启动器即 `npx open-claude-tag up`（别名 `oct up`）。
+
+## 快速开始（Docker 或自带 Postgres）
 
 ```bash
 # 1. 启用 pnpm 并安装依赖
@@ -51,6 +72,7 @@ curl -X POST http://localhost:3000/debug/simulate \
 
 ## 选择部署路径
 
+- 个人零-Docker 体验（`pnpm personal:up`）：最适合一条命令在本机起整套栈并跟向导接入飞书。
 - 本地源码安装：最适合贡献代码、调试和日常开发。
 - 单机 Docker 部署：最适合快速自托管试用。
 - 中心化部署(团队模式):一次部署服务全团队,用户机器按需通过 `@open-tag/daemon` 配对为执行节点。参见 `doc/deployment/server-mode.md`,在控制台 Machines 页面生成配对令牌。
@@ -62,7 +84,7 @@ curl -X POST http://localhost:3000/debug/simulate \
 | --- | --- | --- |
 | Node.js 20+ | 所有安装路径 | 当前仓库使用 `pnpm@9.15.4`。 |
 | pnpm | 所有源码工作流 | 先执行 `corepack enable`。 |
-| Docker / Docker Compose | 本地 Postgres 和 Docker 部署 | 本地开发默认依赖 Docker 提供 Postgres；如果你自带 Postgres 可以不使用。 |
+| Docker / Docker Compose | `OPEN_TAG_DB_MODE=docker` 和 Docker 部署 | 个人启动器（`pnpm personal:up`）内置 embedded Postgres，**无需 Docker**。 |
 | 飞书自建应用 | 真实飞书消息处理 | API 连接飞书所必需。 |
 | Runtime 凭证 | 真实任务执行 | Claude Code 使用 `ANTHROPIC_*`；Codex 使用 `~/.codex/config.toml`。 |
 | PostgreSQL 客户端工具（`psql`、`createdb`、`dropdb`） | 仅隔离 worktree 命令需要 | `pnpm db:setup:isolated` 及其他隔离生命周期命令会用到。 |
