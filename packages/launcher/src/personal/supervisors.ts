@@ -12,6 +12,7 @@ import { join } from 'path';
 import { pathToFileURL } from 'url';
 import type { PersonalConfig } from './config.js';
 import { PERSONAL_INSTANCE_ID } from './config.js';
+import { isHttpEndpointReachable } from './health.js';
 import { isProcessAlive, writePidRecord } from './process-control.js';
 
 interface StackConfig {
@@ -112,6 +113,10 @@ export async function startConsole(
   effectiveEnv: NodeJS.ProcessEnv,
 ): Promise<{ status: 'started' | 'already-running' }> {
   const serveScript = join(config.repoRoot, 'apps', 'console', 'serve-console.mjs');
+
+  if (await isHttpEndpointReachable(config.consoleUrl)) {
+    return { status: 'already-running' };
+  }
 
   mkdirSync(config.runtimeDir, { recursive: true });
   const logFd = openSync(config.consoleLogPath, 'a');
