@@ -5,7 +5,6 @@ import {
   ArrowRight,
   BookOpen,
   Bot,
-  Boxes,
   Check,
   Compass,
   Copy,
@@ -1992,18 +1991,6 @@ function Overview({
       statusTitle: '当前状态',
     },
   }[locale];
-  const counters = [
-    [viewLabels[locale].agents, data.summary.agents],
-    [locale === 'zh' ? '飞书应用' : 'Feishu Apps', data.summary.feishuApps],
-    [locale === 'zh' ? '机器人绑定' : 'Bot Bindings', data.summary.botBindings],
-    [viewLabels[locale].chats, data.summary.chats],
-    [
-      viewLabels[locale].machines,
-      locale === 'zh'
-        ? `${data.summary.machines} (${data.summary.onlineMachines} 在线)`
-        : `${data.summary.machines} (${data.summary.onlineMachines} online)`,
-    ],
-  ];
   const machineStatusPercent =
     data.summary.machines > 0
       ? Math.round((data.summary.onlineMachines / data.summary.machines) * 100)
@@ -2051,20 +2038,6 @@ function Overview({
         onOpenBots={onOpenBots}
         refreshConsole={refreshConsole}
       />
-
-      <section className="panel">
-        <div className="panel-title">
-          <Boxes size={18} /> {locale === 'zh' ? '对象统计' : 'Objects'}
-        </div>
-        <div className="counter-grid">
-          {counters.map(([label, value]) => (
-            <div className="counter" key={label}>
-              <span>{label}</span>
-              <strong>{value}</strong>
-            </div>
-          ))}
-        </div>
-      </section>
     </div>
   );
 }

@@ -560,9 +560,9 @@ describe('OpenClaudeTag Console', () => {
     expect(screen.queryByText('3. Connect a Feishu bot')).not.toBeInTheDocument();
     expect(screen.queryByText('4. Collaborate in Feishu groups')).not.toBeInTheDocument();
     await waitFor(() => expect(screen.getAllByText('Agents').length).toBeGreaterThan(0));
-    expect(screen.getByText('Objects')).toBeInTheDocument();
-    expect(screen.getByText('Bot Bindings')).toBeInTheDocument();
     expect(screen.getAllByText('Feishu Apps').length).toBeGreaterThan(0);
+    expect(screen.queryByText('Objects')).not.toBeInTheDocument();
+    expect(screen.queryByText('Bot Bindings')).not.toBeInTheDocument();
     expect(screen.queryByText(/task boards/i)).not.toBeInTheDocument();
     expect(screen.queryByText('First Agent')).not.toBeInTheDocument();
     expect(screen.queryByText('Reviewer')).not.toBeInTheDocument();
