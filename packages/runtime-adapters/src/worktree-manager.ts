@@ -31,6 +31,30 @@ function branchName(sessionId: string): string {
   return `dev/${shortId(sessionId)}`;
 }
 
+/**
+ * Resolve the base ref to create a worktree from.
+ *
+ * Prefers the repo's default branch (`origin/HEAD`), falls back to the current
+ * branch, then to `HEAD`. Centralizes the detection used by both
+ * `createWorktree` (self-dev) and `resolveExternalProjectWorkspace` (external
+ * projects) so neither hardcodes a branch name — this repo defaults to `master`,
+ * and others may use `develop` / `trunk`.
+ *
+ * Uses `execAsync` for the static `||` shell fallback; `repoRoot` is passed as
+ * `cwd`, never interpolated into the command string (see file header note).
+ */
+export async function resolveBaseBranch(repoRoot: string): Promise<string> {
+  try {
+    const { stdout } = await execAsync(
+      'git symbolic-ref refs/remotes/origin/HEAD --short 2>/dev/null || git rev-parse --abbrev-ref HEAD',
+      { cwd: repoRoot },
+    );
+    return stdout.trim().replace(/^origin\//, '') || 'HEAD';
+  } catch {
+    return 'HEAD';
+  }
+}
+
 export async function createWorktree(
   sessionId: string,
   repoRoot: string,
@@ -42,7 +66,8 @@ export async function createWorktree(
   const existing = await getWorktree(sessionId, repoRoot);
   if (existing) return existing;
 
-  await execFileAsync('git', ['worktree', 'add', wtPath, '-b', branch, 'main'], {
+  const base = await resolveBaseBranch(repoRoot);
+  await execFileAsync('git', ['worktree', 'add', wtPath, '-b', branch, base], {
     cwd: repoRoot,
   });
 
@@ -240,12 +265,7 @@ export async function resolveExternalProjectWorkspace(
   const branch = branchName(sessionId);
 
   try {
-    // Detect default branch (main or master)
-    const { stdout: defaultBranch } = await execAsync(
-      'git symbolic-ref refs/remotes/origin/HEAD --short 2>/dev/null || git rev-parse --abbrev-ref HEAD',
-      { cwd: projectPath },
-    );
-    const base = defaultBranch.trim().replace(/^origin\//, '');
+    const base = await resolveBaseBranch(projectPath);
     await execFileAsync('git', ['worktree', 'add', wtPath, '-b', branch, base], {
       cwd: projectPath,
     });
