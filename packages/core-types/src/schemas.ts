@@ -105,25 +105,11 @@ export const AgentProfileSchema = z.object({
   updatedAt: z.date().optional(),
 });
 
-export const AgentSchema = z.object({
-  id: z.string().uuid().optional(),
-  tenantKey: z.string().min(1).default('default'),
-  scopeType: z.enum(['system', 'tenant', 'chat', 'user']).default('system'),
-  scopeId: z.string().min(1).default('default'),
-  handle: z.string().min(1),
-  displayName: z.string().min(1),
-  description: z.string().nullable().optional(),
-  profileId: z.string().uuid(),
-  ownerUserId: z.string().uuid().nullable().optional(),
-  visibility: z.enum(['public', 'private', 'unlisted']).default('public'),
-  defaultRuntime: RuntimeBackendSchema.nullable().optional(),
-  defaultWorkDir: z.string().nullable().optional(),
-  projectId: z.string().uuid().nullable().optional(),
-  accessPolicy: z.record(z.unknown()).default({}),
-  status: AgentLifecycleStatusSchema.default('active'),
-  createdAt: z.date().optional(),
-  updatedAt: z.date().optional(),
-});
+// NOTE: there is deliberately no hand-maintained `AgentSchema` here. The
+// authoritative agent shape is the Drizzle `agents` row (storage), the API write
+// schema is admin-api's `CreateAgentObject`, and the API response is its
+// `AgentDto` (which exposes `runtimeEnvKeys`, not the secret-bearing
+// `runtimeEnv`). A duplicated core-types mirror only drifted (issue #17).
 
 export const FeishuAppRegistrationSchema = z.object({
   id: z.string().uuid().optional(),

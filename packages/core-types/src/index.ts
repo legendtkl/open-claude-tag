@@ -54,7 +54,6 @@ export {
   ToolUseStatusSchema,
   MemoryItemSchema,
   AgentProfileSchema,
-  AgentSchema,
   FeishuAppRegistrationSchema,
   AgentBotBindingSchema,
   AgentSessionStateSchema,
@@ -84,7 +83,6 @@ export type { MemoryItem } from './memory.js';
 export type { ReplyLanguage } from './reply-language.js';
 export type {
   AgentProfile,
-  Agent,
   FeishuAppRegistration,
   AgentBotBinding,
   AgentSessionState,
