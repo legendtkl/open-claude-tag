@@ -150,4 +150,13 @@ describe('transitionTask falsy result/errorMessage (issue #11)', () => {
     expect('result' in setCalls[0]).toBe(false);
     expect('errorMessage' in setCalls[0]).toBe(false);
   });
+
+  it('ignores inherited (non-own) properties on extra', async () => {
+    const { db, setCalls } = createDbMock([[{ status: TaskStatus.RUNNING }]], [[{ id: 't' }]]);
+    // Only inherited props — Object.hasOwn must treat this as "no fields set".
+    const inherited = Object.create({ result: 'inherited', errorMessage: 'inherited' });
+    await transitionTask(db, 't', TaskStatus.COMPLETED, inherited);
+    expect('result' in setCalls[0]).toBe(false);
+    expect('errorMessage' in setCalls[0]).toBe(false);
+  });
 });

@@ -254,14 +254,16 @@ export async function transitionTask(
       updatedAt: new Date(),
     };
 
-    // Use property-exists guards (not truthiness) so callers can persist or
-    // clear defined-but-falsy values ('' / null / false / 0). A key present
-    // with `undefined` stays a no-op because Drizzle's mapUpdateSet drops
-    // undefined values, preserving the COMPLETED/FAILED paths that pass
-    // `result: input.result` / `errorMessage: ... ?? undefined`.
-    if ('errorMessage' in (extra ?? {})) updateData.errorMessage = extra?.errorMessage;
-    if ('result' in (extra ?? {})) updateData.result = extra?.result;
-    if ('interactionReason' in (extra ?? {})) {
+    // Use own-property guards (not truthiness) so callers can persist or clear
+    // defined-but-falsy values ('' / null / false / 0). A key present with
+    // `undefined` stays a no-op because Drizzle's mapUpdateSet drops undefined
+    // values, preserving the COMPLETED/FAILED paths that pass `result:
+    // input.result` / `errorMessage: ... ?? undefined`. Object.hasOwn (not `in`)
+    // ignores the prototype chain — "did the caller explicitly set this field".
+    const extraFields = extra ?? {};
+    if (Object.hasOwn(extraFields, 'errorMessage')) updateData.errorMessage = extra?.errorMessage;
+    if (Object.hasOwn(extraFields, 'result')) updateData.result = extra?.result;
+    if (Object.hasOwn(extraFields, 'interactionReason')) {
       updateData.interactionReason = (
         extra as { interactionReason?: string | null }
       ).interactionReason;
