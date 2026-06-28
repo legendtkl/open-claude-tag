@@ -1,4 +1,4 @@
-import Fastify from 'fastify';
+import Fastify, { type FastifyBaseLogger } from 'fastify';
 import { mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -457,6 +457,49 @@ function makeApp(
 
 function tokenHeaders() {
   return { authorization: 'Bearer secret-token' };
+}
+
+interface CapturedWarn {
+  obj: unknown;
+  msg: unknown;
+}
+
+// A minimal pino-compatible logger that records `warn` calls so tests can assert on
+// the structured payload Fastify route handlers emit (NAMES only, never VALUES).
+function makeCapturingLogger(): { logger: FastifyBaseLogger; warnCalls: CapturedWarn[] } {
+  const warnCalls: CapturedWarn[] = [];
+  const noop = () => {};
+  const logger = {
+    level: 'info',
+    silent: noop,
+    trace: noop,
+    debug: noop,
+    info: noop,
+    warn: (obj: unknown, msg?: unknown) => {
+      warnCalls.push({ obj, msg });
+    },
+    error: noop,
+    fatal: noop,
+    child() {
+      return logger;
+    },
+  } as unknown as FastifyBaseLogger;
+  return { logger, warnCalls };
+}
+
+function sensitiveKeyWarnings(warnCalls: CapturedWarn[]) {
+  return warnCalls.filter(
+    (call) =>
+      typeof call.obj === 'object' &&
+      call.obj !== null &&
+      (call.obj as { event?: unknown }).event === 'runtimeEnv.sensitive_key_stored',
+  );
+}
+
+function makeAppWithLogger(loggerInstance: FastifyBaseLogger, store = makeStore()) {
+  const app = Fastify({ loggerInstance });
+  registerAdminApiRoutes(app, { store, adminToken: 'secret-token' });
+  return app;
 }
 
 describe('admin api routes', () => {
@@ -1745,6 +1788,169 @@ describe('admin api routes', () => {
       profile: { displayName: 'Reviewer' },
     });
     expect(response.json()).not.toHaveProperty('runtimeEnv');
+  });
+
+  it('warns by NAME (never value) when POST /admin/agents stores sensitive runtimeEnv keys', async () => {
+    const { logger, warnCalls } = makeCapturingLogger();
+    const createdId = '00000000-0000-4000-8000-0000000000c1';
+    const store = makeStore({
+      createAgent: vi.fn(async (_scope, input) =>
+        makeAgentDto({
+          id: createdId,
+          displayName: input.displayName,
+          defaultRuntime: input.defaultRuntime ?? null,
+          runtimeEnvKeys: Object.keys(input.runtimeEnv ?? {}).sort(),
+        }),
+      ),
+    });
+    const app = makeAppWithLogger(logger, store);
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/admin/agents',
+      payload: {
+        displayName: 'Codex Agent',
+        defaultRuntime: 'codex',
+        runtimeEnv: {
+          ANTHROPIC_API_KEY: 'sk-secret-value',
+          FOO_TOKEN: 'tok-secret-value',
+          BAR_SECRET: 'bar-secret-value',
+          FEATURE_FLAG: 'enabled',
+        },
+      },
+      headers: tokenHeaders(),
+    });
+
+    // Warn, NOT reject — the request still succeeds and masking still holds.
+    expect(response.statusCode).toBe(200);
+    expect(store.createAgent).toHaveBeenCalledTimes(1);
+    expect(response.json().runtimeEnvKeys).toEqual([
+      'ANTHROPIC_API_KEY',
+      'BAR_SECRET',
+      'FEATURE_FLAG',
+      'FOO_TOKEN',
+    ]);
+    expect(response.json()).not.toHaveProperty('runtimeEnv');
+
+    const warnings = sensitiveKeyWarnings(warnCalls);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0].obj).toMatchObject({
+      event: 'runtimeEnv.sensitive_key_stored',
+      agentId: createdId,
+      keys: ['ANTHROPIC_API_KEY', 'BAR_SECRET', 'FOO_TOKEN'],
+    });
+    // The secret VALUES are never present anywhere in any logged payload.
+    const serialized = JSON.stringify(warnCalls);
+    expect(serialized).not.toContain('sk-secret-value');
+    expect(serialized).not.toContain('tok-secret-value');
+    expect(serialized).not.toContain('bar-secret-value');
+  });
+
+  it('warns by NAME (never value) when PATCH /admin/agents stores sensitive runtimeEnv keys', async () => {
+    const { logger, warnCalls } = makeCapturingLogger();
+    const agentId = '00000000-0000-4000-8000-0000000000c2';
+    const store = makeStore({
+      updateAgent: vi.fn(async (_scope, id, input) =>
+        makeAgentDto({
+          id,
+          defaultRuntime: input.defaultRuntime ?? null,
+          runtimeEnvKeys: Object.keys(input.runtimeEnv ?? {}).sort(),
+        }),
+      ),
+    });
+    const app = makeAppWithLogger(logger, store);
+
+    const response = await app.inject({
+      method: 'PATCH',
+      url: `/admin/agents/${agentId}`,
+      payload: {
+        defaultRuntime: 'codex',
+        runtimeEnv: {
+          ANTHROPIC_API_KEY: 'sk-secret-value',
+          FOO_TOKEN: 'tok-secret-value',
+          BAR_SECRET: 'bar-secret-value',
+        },
+      },
+      headers: tokenHeaders(),
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(store.updateAgent).toHaveBeenCalledTimes(1);
+    expect(response.json()).not.toHaveProperty('runtimeEnv');
+
+    const warnings = sensitiveKeyWarnings(warnCalls);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0].obj).toMatchObject({
+      event: 'runtimeEnv.sensitive_key_stored',
+      agentId,
+      keys: ['ANTHROPIC_API_KEY', 'BAR_SECRET', 'FOO_TOKEN'],
+    });
+    const serialized = JSON.stringify(warnCalls);
+    expect(serialized).not.toContain('sk-secret-value');
+    expect(serialized).not.toContain('tok-secret-value');
+    expect(serialized).not.toContain('bar-secret-value');
+  });
+
+  it('does not warn when runtimeEnv has only non-sensitive keys', async () => {
+    const { logger, warnCalls } = makeCapturingLogger();
+    const store = makeStore({
+      createAgent: vi.fn(async (_scope, input) =>
+        makeAgentDto({
+          displayName: input.displayName,
+          defaultRuntime: input.defaultRuntime ?? null,
+          runtimeEnvKeys: Object.keys(input.runtimeEnv ?? {}).sort(),
+        }),
+      ),
+    });
+    const app = makeAppWithLogger(logger, store);
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/admin/agents',
+      payload: {
+        displayName: 'Codex Agent',
+        defaultRuntime: 'codex',
+        runtimeEnv: { FEATURE_FLAG: 'enabled' },
+      },
+      headers: tokenHeaders(),
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(sensitiveKeyWarnings(warnCalls)).toHaveLength(0);
+  });
+
+  it('warns on bare sensitive runtimeEnv key names (API_KEY / TOKEN / SECRET)', async () => {
+    const { logger, warnCalls } = makeCapturingLogger();
+    const store = makeStore({
+      createAgent: vi.fn(async (_scope, input) =>
+        makeAgentDto({
+          displayName: input.displayName,
+          defaultRuntime: input.defaultRuntime ?? null,
+          runtimeEnvKeys: Object.keys(input.runtimeEnv ?? {}).sort(),
+        }),
+      ),
+    });
+    const app = makeAppWithLogger(logger, store);
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/admin/agents',
+      payload: {
+        displayName: 'Codex Agent',
+        defaultRuntime: 'codex',
+        runtimeEnv: { API_KEY: 'v1', TOKEN: 'v2', SECRET: 'v3', FEATURE_FLAG: 'enabled' },
+      },
+      headers: tokenHeaders(),
+    });
+
+    expect(response.statusCode).toBe(200);
+    const warnings = sensitiveKeyWarnings(warnCalls);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0].obj).toMatchObject({ keys: ['API_KEY', 'SECRET', 'TOKEN'] });
+    const serialized = JSON.stringify(warnCalls);
+    expect(serialized).not.toContain('v1');
+    expect(serialized).not.toContain('v2');
+    expect(serialized).not.toContain('v3');
   });
 
   it('rejects invalid agent runtime env keys before calling the store', async () => {
