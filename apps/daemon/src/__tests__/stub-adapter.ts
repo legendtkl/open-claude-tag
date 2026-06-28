@@ -55,6 +55,7 @@ export class StubAdapter implements RuntimeAdapter {
       executionId: spec.taskId,
       workspacePath: workspace.workspacePath,
       cwd: workspace.cwd ?? workspace.workspacePath,
+      artifactsDir: workspace.artifactsDir,
       readOnly: Boolean(workspace.readOnly),
     };
   }
