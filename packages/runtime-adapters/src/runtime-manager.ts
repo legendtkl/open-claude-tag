@@ -9,10 +9,23 @@ import type {
 
 const logger = createLogger('runtime-manager');
 
+/**
+ * Result of {@link RuntimeManager.getHealthyFallback}. `requested` is the
+ * runtime the caller asked for; `selected` is the runtime actually returned.
+ * They differ only when `usedFallback` is true, in which case `reason` explains
+ * why the requested runtime was skipped. Callers persist `requested`/`selected`
+ * verbatim rather than inferring the substitution from the adapter name.
+ */
+export interface HealthyFallbackResult {
+  adapter: RuntimeAdapter;
+  requested: string;
+  selected: string;
+  usedFallback: boolean;
+  reason?: string;
+}
+
 export class RuntimeManager {
   private readonly adapters = new Map<string, RuntimeAdapter>();
-  private readonly healthCache = new Map<string, HealthStatus>();
-  private healthCheckInterval: ReturnType<typeof setInterval> | null = null;
 
   register(adapter: RuntimeAdapter): void {
     this.adapters.set(adapter.name(), adapter);
@@ -23,63 +36,78 @@ export class RuntimeManager {
     return this.adapters.get(name);
   }
 
-  getHealthy(preferred: string): RuntimeAdapter | undefined {
-    // Try preferred first
+  /** Run an adapter healthcheck, converting a thrown error into an unhealthy status. */
+  private async safeHealthcheck(adapter: RuntimeAdapter): Promise<HealthStatus> {
+    try {
+      return await adapter.healthcheck();
+    } catch (err) {
+      return {
+        healthy: false,
+        name: adapter.name(),
+        message: err instanceof Error ? err.message : 'Unknown error',
+        lastCheckedAt: new Date(),
+      };
+    }
+  }
+
+  /**
+   * Strict runtime resolution for an EXPLICITLY selected runtime. Returns the
+   * requested adapter only when it is registered AND its live healthcheck
+   * passes; otherwise throws. NEVER substitutes a different runtime — runtime is
+   * an execution-semantics boundary (permissions, sandbox, model, resume,
+   * cost), so an explicit choice must fail fast rather than silently change.
+   */
+  async requireHealthy(runtime: string): Promise<RuntimeAdapter> {
+    const adapter = this.adapters.get(runtime);
+    if (!adapter) {
+      throw new Error(`Requested runtime "${runtime}" is not registered`);
+    }
+    const health = await this.safeHealthcheck(adapter);
+    if (!health.healthy) {
+      throw new Error(
+        `Requested runtime "${runtime}" is unavailable: ${health.message ?? 'failed healthcheck'}`,
+      );
+    }
+    return adapter;
+  }
+
+  /**
+   * Tolerant runtime resolution for the auto/default/resume path: live-check the
+   * preferred runtime, and if it is missing or unhealthy fall back to the first
+   * other healthy adapter. Returns `undefined` only when nothing is healthy.
+   * Use {@link requireHealthy} for explicit user selections — this method may
+   * substitute a different runtime and reports it via `usedFallback`/`reason`.
+   */
+  async getHealthyFallback(preferred: string): Promise<HealthyFallbackResult | undefined> {
+    // Try the preferred runtime first with a LIVE healthcheck.
     const preferredAdapter = this.adapters.get(preferred);
+    let reason: string;
     if (preferredAdapter) {
-      const health = this.healthCache.get(preferred);
-      if (!health || health.healthy) {
-        return preferredAdapter;
+      const health = await this.safeHealthcheck(preferredAdapter);
+      if (health.healthy) {
+        return {
+          adapter: preferredAdapter,
+          requested: preferred,
+          selected: preferred,
+          usedFallback: false,
+        };
       }
+      reason = `requested runtime "${preferred}" is unhealthy: ${health.message ?? 'failed healthcheck'}`;
+    } else {
+      reason = `requested runtime "${preferred}" is not registered`;
     }
 
-    // Fallback: find any healthy adapter
+    // Fallback: find any other healthy adapter (live-checked).
     for (const [name, adapter] of this.adapters) {
       if (name === preferred) continue;
-      const health = this.healthCache.get(name);
-      if (!health || health.healthy) {
-        logger.warn({ preferred, fallback: name }, 'Using fallback runtime');
-        return adapter;
+      const health = await this.safeHealthcheck(adapter);
+      if (health.healthy) {
+        logger.warn({ preferred, fallback: name, reason }, 'Using fallback runtime');
+        return { adapter, requested: preferred, selected: name, usedFallback: true, reason };
       }
     }
 
     return undefined;
-  }
-
-  async checkHealth(): Promise<Map<string, HealthStatus>> {
-    const results = new Map<string, HealthStatus>();
-    for (const [name, adapter] of this.adapters) {
-      try {
-        const status = await adapter.healthcheck();
-        this.healthCache.set(name, status);
-        results.set(name, status);
-      } catch (err) {
-        const status: HealthStatus = {
-          healthy: false,
-          name,
-          message: err instanceof Error ? err.message : 'Unknown error',
-          lastCheckedAt: new Date(),
-        };
-        this.healthCache.set(name, status);
-        results.set(name, status);
-      }
-    }
-    return results;
-  }
-
-  startHealthChecks(intervalMs: number = 30000): void {
-    this.healthCheckInterval = setInterval(() => {
-      this.checkHealth().catch((err) => {
-        logger.error({ err }, 'Health check failed');
-      });
-    }, intervalMs);
-  }
-
-  stopHealthChecks(): void {
-    if (this.healthCheckInterval) {
-      clearInterval(this.healthCheckInterval);
-      this.healthCheckInterval = null;
-    }
   }
 
   /** Cancel a specific execution id across adapters. */

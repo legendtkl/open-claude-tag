@@ -219,10 +219,10 @@ export async function prepareDispatch(
   await applyWorkdirHints(frame.dispatchId, frame.workdirHints, workspace);
   const imagePaths = await materializeImages(frame.images, workspace);
 
-  const adapter = runtimeManager.getHealthy(frame.runtime);
-  if (!adapter) {
-    throw new Error(`No healthy runtime adapter available for "${frame.runtime}"`);
-  }
+  // The daemon must run EXACTLY the dispatched runtime (issue #8): the server
+  // already chose and validated it against this machine's capabilities, so a
+  // codex-less daemon must fail fast rather than silently substitute claude.
+  const adapter = await runtimeManager.requireHealthy(frame.runtime);
 
   return {
     dispatchId: frame.dispatchId,

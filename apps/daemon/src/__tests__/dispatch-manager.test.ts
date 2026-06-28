@@ -239,7 +239,7 @@ describe('DispatchManager', () => {
     expect(sink.byType('task_event')).toHaveLength(1);
   });
 
-  it('rejects when no adapter is available for the runtime', async () => {
+  it('rejects when the requested runtime is not registered (no substitution)', async () => {
     const frame = makeDispatchFrame();
     const sink = new RecordingSink();
     const mgr = new DispatchManager(stubRuntimeManager(undefined), sink);
@@ -249,7 +249,7 @@ describe('DispatchManager', () => {
 
     const rejected = sink.byType('task_rejected') as Array<{ reason: string }>;
     expect(rejected).toHaveLength(1);
-    expect(rejected[0].reason).toMatch(/No healthy runtime adapter/);
+    expect(rejected[0].reason).toMatch(/is not registered/);
   });
 
   it('emits a synthetic failed event when the runtime stream throws', async () => {

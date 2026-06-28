@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtemp, rm, readFile, readdir } from 'fs/promises';
 import { tmpdir } from 'os';
 import { join, resolve } from 'path';
-import { createWorkspace } from '@open-tag/runtime-adapters';
+import { createWorkspace, RuntimeManager } from '@open-tag/runtime-adapters';
 import {
   pickWorkdir,
   materializeImages,
@@ -172,6 +172,17 @@ describe('harness', () => {
 
       expect(adapter.lastExecuteHandle?.imagePaths).toHaveLength(1);
       expect(adapter.lastExecuteHandle?.imagePaths?.[0]).toContain('history.png');
+    });
+
+    it('fails fast for an unregistered dispatched runtime instead of substituting another', async () => {
+      // A codex-less daemon (only claude_code registered) must NOT silently run
+      // a codex-dispatched task on claude_code (issue #8).
+      const manager = new RuntimeManager();
+      manager.register(new StubAdapter([], { adapterName: 'claude_code' }));
+
+      await expect(
+        prepareDispatch(makeDispatchFrame({ runtime: 'codex' }), manager),
+      ).rejects.toThrow('Requested runtime "codex" is not registered');
     });
   });
 });

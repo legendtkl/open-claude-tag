@@ -34,15 +34,80 @@ function resolveDefaultRuntime(): RuntimeName {
   return 'claude_code';
 }
 
+/**
+ * Where the resolved runtime came from. This drives fail-fast vs logged-fallback
+ * behavior downstream: `confirmed` / `explicit_hint` are EXPLICIT user choices
+ * (must fail fast when unavailable), while `session_resume` / `agent_default` /
+ * `global_default` are auto/default selections (may fall back, but the switch is
+ * logged + persisted). It does NOT change which runtime wins — only how an
+ * unavailable runtime is handled.
+ */
+export type RuntimeSelectionSource =
+  | 'confirmed'
+  | 'explicit_hint'
+  | 'session_resume'
+  | 'agent_default'
+  | 'global_default';
+
+export interface RuntimeSelection {
+  runtime: RuntimeName;
+  source: RuntimeSelectionSource;
+}
+
+export interface RuntimeSelectionInput {
+  /** User-confirmed runtime for this turn (highest precedence). */
+  confirmedRuntime?: string | null;
+  /** Runtime backend carried from the previous turn (session resume). */
+  runtimeBackend?: string | null;
+  /** Raw per-message runtime hint; `null`/`'auto'` means no explicit choice. */
+  runtimeHint?: string | null;
+  /** Acting agent's default runtime, used only when no explicit hint is given. */
+  agentDefaultRuntime?: string | null;
+}
+
+/** `true` when the runtime was selected by an explicit user action this turn. */
+export function isExplicitRuntimeSource(source: RuntimeSelectionSource): boolean {
+  return source === 'confirmed' || source === 'explicit_hint';
+}
+
+/**
+ * Resolve the task runtime AND report its selection source. Precedence mirrors
+ * {@link resolveTaskRuntime} exactly (confirmed → session resume → explicit hint
+ * → agent default → global default), and reproduces the worker's historical
+ * behavior that the agent default is consulted ONLY when the raw hint is
+ * absent/`auto` — an explicitly provided but unknown hint still falls through to
+ * the global default rather than the agent default.
+ */
+export function resolveTaskRuntimeWithSource(input: RuntimeSelectionInput): RuntimeSelection {
+  const { confirmedRuntime, runtimeBackend, runtimeHint, agentDefaultRuntime } = input;
+
+  if (isRuntimeName(confirmedRuntime)) return { runtime: confirmedRuntime, source: 'confirmed' };
+  if (isRuntimeName(runtimeBackend)) return { runtime: runtimeBackend, source: 'session_resume' };
+
+  const hintIsAuto = runtimeHint == null || runtimeHint === 'auto';
+  if (!hintIsAuto) {
+    // An explicit hint was provided this turn. If it names a known runtime use
+    // it; if it is unknown, do NOT silently substitute the agent default —
+    // fall through to the global default (matches the prior worker behavior).
+    if (isRuntimeName(runtimeHint)) return { runtime: runtimeHint, source: 'explicit_hint' };
+    return { runtime: resolveDefaultRuntime(), source: 'global_default' };
+  }
+
+  // No explicit hint: consider the acting agent's default before the global one.
+  if (isRuntimeName(agentDefaultRuntime)) {
+    return { runtime: agentDefaultRuntime, source: 'agent_default' };
+  }
+  return { runtime: resolveDefaultRuntime(), source: 'global_default' };
+}
+
 export function resolveTaskRuntime(
   runtimeHint: string | null | undefined,
   runtimeBackend: string | null | undefined,
   confirmedRuntime?: string | null,
 ): RuntimeName {
-  if (isRuntimeName(confirmedRuntime)) return confirmedRuntime;
-  if (isRuntimeName(runtimeBackend)) return runtimeBackend;
-  if (isRuntimeName(runtimeHint)) return runtimeHint;
-  return resolveDefaultRuntime();
+  // Reimplemented on top of the source-aware resolver with no agent default, so
+  // it stays value-equivalent for existing callers/tests.
+  return resolveTaskRuntimeWithSource({ confirmedRuntime, runtimeBackend, runtimeHint }).runtime;
 }
 
 export function shouldSkipPromptMetadataExtraction(

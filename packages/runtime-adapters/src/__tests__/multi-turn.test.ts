@@ -213,62 +213,53 @@ describe('Multi-turn session resume', () => {
   });
 
   describe('RuntimeManager routing', () => {
-    it('returns preferred adapter when no health cache exists', () => {
+    const healthy = (name: string) =>
+      ({
+        name: () => name,
+        healthcheck: vi
+          .fn()
+          .mockResolvedValue({ healthy: true, name, lastCheckedAt: new Date() }),
+      }) as any;
+    const unhealthy = (name: string) =>
+      ({
+        name: () => name,
+        healthcheck: vi
+          .fn()
+          .mockResolvedValue({ healthy: false, name, lastCheckedAt: new Date() }),
+      }) as any;
+
+    it('returns the preferred adapter without fallback when it is live-healthy', async () => {
       const manager = new RuntimeManager();
-      const claude = { name: () => 'claude_code', healthcheck: vi.fn() } as any;
-      const codex = { name: () => 'codex', healthcheck: vi.fn() } as any;
+      const claude = healthy('claude_code');
+      const codex = healthy('codex');
       manager.register(claude);
       manager.register(codex);
 
-      // No health check run yet → should return preferred
-      expect(manager.getHealthy('claude_code')).toBe(claude);
-      expect(manager.getHealthy('codex')).toBe(codex);
+      const claudeResult = await manager.getHealthyFallback('claude_code');
+      expect(claudeResult?.adapter).toBe(claude);
+      expect(claudeResult?.usedFallback).toBe(false);
+
+      const codexResult = await manager.getHealthyFallback('codex');
+      expect(codexResult?.adapter).toBe(codex);
+      expect(codexResult?.usedFallback).toBe(false);
     });
 
-    it('does not fallback when preferred is healthy', async () => {
+    it('live-checks and falls back only when the preferred adapter is unhealthy', async () => {
       const manager = new RuntimeManager();
-      const claude = {
-        name: () => 'claude_code',
-        healthcheck: vi
-          .fn()
-          .mockResolvedValue({ healthy: true, name: 'claude_code', lastCheckedAt: new Date() }),
-      } as any;
-      const codex = {
-        name: () => 'codex',
-        healthcheck: vi
-          .fn()
-          .mockResolvedValue({ healthy: true, name: 'codex', lastCheckedAt: new Date() }),
-      } as any;
+      const claude = healthy('claude_code');
+      const codex = unhealthy('codex');
       manager.register(claude);
       manager.register(codex);
-      await manager.checkHealth();
-
-      // Should return claude_code, not fallback to codex
-      expect(manager.getHealthy('claude_code')).toBe(claude);
-    });
-
-    it('falls back only when preferred is explicitly unhealthy', async () => {
-      const manager = new RuntimeManager();
-      const claude = {
-        name: () => 'claude_code',
-        healthcheck: vi
-          .fn()
-          .mockResolvedValue({ healthy: true, name: 'claude_code', lastCheckedAt: new Date() }),
-      } as any;
-      const codex = {
-        name: () => 'codex',
-        healthcheck: vi
-          .fn()
-          .mockResolvedValue({ healthy: false, name: 'codex', lastCheckedAt: new Date() }),
-      } as any;
-      manager.register(claude);
-      manager.register(codex);
-      await manager.checkHealth();
 
       // codex unhealthy → fallback to claude
-      expect(manager.getHealthy('codex')).toBe(claude);
+      const fellBack = await manager.getHealthyFallback('codex');
+      expect(fellBack?.adapter).toBe(claude);
+      expect(fellBack?.usedFallback).toBe(true);
+
       // claude healthy → stays
-      expect(manager.getHealthy('claude_code')).toBe(claude);
+      const stayed = await manager.getHealthyFallback('claude_code');
+      expect(stayed?.adapter).toBe(claude);
+      expect(stayed?.usedFallback).toBe(false);
     });
   });
 
