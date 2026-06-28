@@ -102,9 +102,14 @@ export function shouldClearSdkSessionForRuntimeSwitch(
 export function buildWorkerWorkspaceKey(sessionId: string, agentId?: string): string {
   if (!agentId) return sessionId;
 
+  // Short prefix is for log/branch readability only; the FULL agentId and
+  // sessionId follow so the downstream worktree slug (which hashes the whole
+  // key) carries the entropy of both. Without the full agentId, two agents in
+  // one session whose ids share the first 4 hex chars would collide on the
+  // worktree path/branch (#22).
   const agentPart = agentId.replace(/-/g, '').slice(0, 4) || 'agent';
   const sessionPart = sessionId.replace(/-/g, '').slice(0, 4) || 'sess';
-  return `${agentPart}${sessionPart}-${sessionId}`;
+  return `${agentPart}${sessionPart}-${agentId}-${sessionId}`;
 }
 
 /**

@@ -156,6 +156,16 @@ describe('runtime switch and workspace locality', () => {
       buildWorkerWorkspaceKey(sessionId, 'bbbbbbbb-1111-2222-3333-444444444444'),
     );
   });
+
+  it('keeps the full agent id so agents sharing the first 4 hex do not collide (#22)', () => {
+    const sessionId = 'session-abcdef12-rest';
+    // Same session, agent ids identical in the first 4 hex but different overall:
+    // the workspace key (hashed downstream into the worktree slug) must differ.
+    const a = buildWorkerWorkspaceKey(sessionId, 'aaaa1111-1111-1111-1111-111111111111');
+    const b = buildWorkerWorkspaceKey(sessionId, 'aaaa2222-2222-2222-2222-222222222222');
+    expect(a).not.toBe(b);
+    expect(a).toContain('aaaa1111-1111-1111-1111-111111111111');
+  });
 });
 
 describe('deriveConversationThreadId', () => {
