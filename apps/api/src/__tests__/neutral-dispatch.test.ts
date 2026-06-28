@@ -13,6 +13,7 @@ import {
   buildNeutralQueuedTask,
   dispatchNeutralMessage,
   isMessageAddressedToBot,
+  type NeutralAckDelivery,
   type NeutralCreateTaskOptions,
   type NeutralDispatchContext,
 } from '../neutral-dispatch.js';
@@ -70,6 +71,8 @@ interface HarnessOptions {
   transitionImpl?: (taskId: string, status: TaskStatus) => Promise<void>;
   senderImpl?: FeedbackChannelSender;
   taskStatus?: string | null;
+  persistAckImpl?: (taskId: string, ack: NeutralAckDelivery) => Promise<void>;
+  loadAckImpl?: (taskId: string) => Promise<NeutralAckDelivery | null>;
 }
 
 function makeCtx(opts: HarnessOptions = {}) {
@@ -96,6 +99,8 @@ function makeCtx(opts: HarnessOptions = {}) {
   const enqueue = vi.fn(opts.enqueueImpl ?? (async () => 'job-1'));
   const sender = opts.senderImpl ?? recording.sender;
   const resolveSender = vi.fn(() => sender);
+  const persistAckDelivery = vi.fn(opts.persistAckImpl ?? (async () => {}));
+  const loadAckDelivery = vi.fn(opts.loadAckImpl ?? (async () => null));
   const ctx: NeutralDispatchContext = {
     resolveSession,
     createTask,
@@ -103,6 +108,8 @@ function makeCtx(opts: HarnessOptions = {}) {
     transitionTask,
     enqueue,
     resolveSender,
+    persistAckDelivery,
+    loadAckDelivery,
     logger: silentLogger,
   };
   return {
@@ -113,6 +120,8 @@ function makeCtx(opts: HarnessOptions = {}) {
     transitionTask,
     enqueue,
     resolveSender,
+    persistAckDelivery,
+    loadAckDelivery,
     sends: recording.sends,
     sendMock: recording.sendMock,
   };
@@ -259,6 +268,44 @@ describe('dispatchNeutralMessage — task_created (happy path, durable ordering)
     expect(out).toEqual({ type: 'task_created', taskId: createOpts.taskId });
   });
 
+  it('persists the captured ack handle before the enqueue (issue #14)', async () => {
+    const { ctx, createTask, persistAckDelivery, enqueue } = makeCtx();
+
+    await dispatchNeutralMessage(makeMessage(), ctx);
+
+    const createdTaskId = createTask.mock.calls[0][2].taskId;
+    // Persisted with the same handle the recording sender returned, keyed to the task.
+    expect(persistAckDelivery).toHaveBeenCalledTimes(1);
+    expect(persistAckDelivery).toHaveBeenCalledWith(createdTaskId, {
+      kind: 'slack',
+      scopeId: 'C_chat',
+      messageId: 'ack_ts',
+    });
+    // The persist must precede the durable enqueue so a recovery can rehydrate it.
+    expect(persistAckDelivery.mock.invocationCallOrder[0]).toBeLessThan(
+      enqueue.mock.invocationCallOrder[0],
+    );
+  });
+
+  it('treats a failed ack-handle persist as best-effort: still enqueues, no throw', async () => {
+    const { ctx, enqueue } = makeCtx({
+      persistAckImpl: async () => {
+        throw new Error('db write failed');
+      },
+    });
+    await expect(dispatchNeutralMessage(makeMessage(), ctx)).resolves.toMatchObject({
+      type: 'task_created',
+    });
+    // The handle still rides the job payload even though the DB backup failed.
+    expect(enqueue).toHaveBeenCalledTimes(1);
+    const job = enqueue.mock.calls[0][0] as { constraints: Record<string, unknown> };
+    expect(job.constraints.ackDelivery).toEqual({
+      kind: 'slack',
+      scopeId: 'C_chat',
+      messageId: 'ack_ts',
+    });
+  });
+
   it('derives disjoint task ids for the same dedupe key across two installations', async () => {
     const a = makeCtx();
     const b = makeCtx();
@@ -283,9 +330,15 @@ describe('dispatchNeutralMessage — non-creating and failure paths', () => {
     expect(sends).toHaveLength(0);
   });
 
-  it('re-enqueues a non-terminal task_duplicate (recovery) without re-ACKing', async () => {
-    const { ctx, enqueue, sends, getTaskStatus } = makeCtx({
+  it('rehydrates the persisted ack handle on a non-terminal task_duplicate, without re-ACKing', async () => {
+    const persisted: NeutralAckDelivery = {
+      kind: 'slack',
+      scopeId: 'C_chat',
+      messageId: 'orig_ack_ts',
+    };
+    const { ctx, enqueue, sends, getTaskStatus, loadAckDelivery } = makeCtx({
       taskStatus: 'queued',
+      loadAckImpl: async () => persisted,
       result: {
         type: 'task_duplicate',
         taskId: 'task-dupe',
@@ -299,7 +352,30 @@ describe('dispatchNeutralMessage — non-creating and failure paths', () => {
     expect(getTaskStatus).toHaveBeenCalledWith('task-dupe');
     expect(enqueue).toHaveBeenCalledTimes(1);
     // The original task_created dispatch already posted the one ACK; a recovery
-    // redelivery must not post a second, and threads no ack handle.
+    // redelivery must NOT post a second (issue #14 no-re-ACK invariant).
+    expect(sends).toHaveLength(0);
+    // ...but it rehydrates the persisted handle so the worker updates that first
+    // ACK message in place instead of orphaning it.
+    expect(loadAckDelivery).toHaveBeenCalledWith('task-dupe');
+    const job = enqueue.mock.calls[0][0] as { constraints: Record<string, unknown> };
+    expect(job.constraints.ackDelivery).toEqual(persisted);
+  });
+
+  it('threads no ack handle on a recovery when none was persisted (back-compat)', async () => {
+    const { ctx, enqueue, sends, loadAckDelivery } = makeCtx({
+      taskStatus: 'queued',
+      // Default loadAckImpl resolves null (e.g. the original ACK send failed).
+      result: {
+        type: 'task_duplicate',
+        taskId: 'task-dupe',
+        intent: IntentType.ANALYSIS,
+        runtime: 'codex',
+        goal: 'g',
+      },
+    });
+    await dispatchNeutralMessage(makeMessage(), ctx);
+    expect(loadAckDelivery).toHaveBeenCalledWith('task-dupe');
+    expect(enqueue).toHaveBeenCalledTimes(1);
     expect(sends).toHaveLength(0);
     const job = enqueue.mock.calls[0][0] as { constraints: Record<string, unknown> };
     expect(job.constraints).not.toHaveProperty('ackDelivery');
