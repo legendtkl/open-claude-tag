@@ -731,7 +731,7 @@ describe('OpenClaudeTag Console', () => {
     expect(bridge.setApiUrl).not.toHaveBeenCalled();
   });
 
-  it('shows chat and task board Feishu jump actions', async () => {
+  it('shows the chat Feishu jump action without task board controls', async () => {
     render(<App />);
 
     const navigation = await screen.findByRole('navigation', { name: 'Console sections' });
@@ -743,17 +743,13 @@ describe('OpenClaudeTag Console', () => {
     expect(screen.getByText('Reviewer')).toBeInTheDocument();
     expect(screen.getByText('active')).toBeInTheDocument();
     expect(screen.queryByText('Default agent')).not.toBeInTheDocument();
-    expect(screen.getByText(/Engineering任务看板/)).toBeInTheDocument();
+    expect(screen.queryByText(/Engineering任务看板/)).not.toBeInTheDocument();
     const openLink = await screen.findByRole('link', { name: /Open Feishu/i });
-    const boardLink = await screen.findByRole('link', { name: /Board/i });
+    expect(screen.queryByRole('link', { name: /Board/i })).toBeNull();
 
     expect(openLink).toHaveAttribute(
       'href',
       'https://applink.feishu.cn/client/chat/open?openChatId=oc_test',
-    );
-    expect(boardLink).toHaveAttribute(
-      'href',
-      'https://applink.feishu.cn/client/todo/task_list?guid=tl_test',
     );
   });
 

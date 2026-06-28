@@ -21,7 +21,6 @@ import {
   QrCode,
   RefreshCcw,
   Rocket,
-  Rows3,
   Save,
   Settings2,
   Shield,
@@ -148,7 +147,6 @@ const uiText = {
       `${activeAgents} active agents · ${botBindings} bindings`,
     actions: {
       openFeishu: 'Open Feishu',
-      board: 'Board',
       task: 'Task',
       topic: 'Topic',
       cancel: 'Cancel',
@@ -184,7 +182,6 @@ const uiText = {
       last: 'last',
       tasks: 'tasks',
       tenant: 'tenant',
-      taskList: 'Task list',
       empty: 'empty',
       botOpenIdPending: 'auto-discovered',
       noDescription: 'No description',
@@ -250,7 +247,6 @@ const uiText = {
       `${activeAgents} 个活跃智能体 · ${botBindings} 个绑定`,
     actions: {
       openFeishu: '打开飞书',
-      board: '看板',
       task: '任务',
       topic: '话题',
       cancel: '取消',
@@ -286,7 +282,6 @@ const uiText = {
       last: '最近',
       tasks: '个任务',
       tenant: '租户',
-      taskList: '任务清单',
       empty: '空',
       botOpenIdPending: '自动获取',
       noDescription: '暂无描述',
@@ -4056,14 +4051,6 @@ function ChatsView({
                     {t.common.last} {formatDate(chat.lastTaskAt, locale)}
                   </span>
                 </div>
-                {chat.taskBoard ? (
-                  <small>
-                    {t.common.taskList}: {chat.taskBoard.name} ·{' '}
-                    {locale === 'zh'
-                      ? `${chat.taskBoard.taskCount} 个已关联任务`
-                      : `${chat.taskBoard.taskCount} linked tasks`}
-                  </small>
-                ) : null}
               </div>
               <div
                 className="chat-agents"
@@ -4107,16 +4094,6 @@ function ChatsView({
                 <a className="secondary" href={chat.openFeishuUrl} target="_blank" rel="noreferrer">
                   <ExternalLink size={16} /> {t.actions.openFeishu}
                 </a>
-                {chat.taskBoard ? (
-                  <a
-                    className="secondary"
-                    href={chat.taskBoard.openTasklistUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    <Rows3 size={16} /> {t.actions.board}
-                  </a>
-                ) : null}
               </div>
             </article>
           );
