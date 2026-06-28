@@ -71,7 +71,7 @@ export class TaskLifecycleService {
   async transitionTask(
     taskId: string,
     newStatus: TaskStatus,
-    extra?: { errorMessage?: string; result?: unknown; interactionReason?: string | null },
+    extra?: { errorMessage?: string | null; result?: unknown; interactionReason?: string | null },
   ): Promise<void> {
     await transitionTask(this.db, taskId, newStatus, extra);
     await this.notifyTaskStatusChanged({

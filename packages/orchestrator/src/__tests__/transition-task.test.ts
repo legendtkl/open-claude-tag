@@ -111,3 +111,43 @@ describe('transitionTask compare-and-swap', () => {
     expect(updateMock).toHaveBeenCalledTimes(3);
   });
 });
+
+describe('transitionTask falsy result/errorMessage (issue #11)', () => {
+  it('persists an empty-string errorMessage', async () => {
+    const { db, setCalls } = createDbMock([[{ status: TaskStatus.RUNNING }]], [[{ id: 't' }]]);
+    await transitionTask(db, 't', TaskStatus.FAILED, { errorMessage: '' });
+    expect('errorMessage' in setCalls[0]).toBe(true);
+    expect(setCalls[0].errorMessage).toBe('');
+  });
+
+  it('persists a null result (clearing a prior value)', async () => {
+    const { db, setCalls } = createDbMock([[{ status: TaskStatus.RUNNING }]], [[{ id: 't' }]]);
+    await transitionTask(db, 't', TaskStatus.CANCELLED, { result: null });
+    expect('result' in setCalls[0]).toBe(true);
+    expect(setCalls[0].result).toBeNull();
+  });
+
+  it('persists falsy result values (false and 0)', async () => {
+    const m1 = createDbMock([[{ status: TaskStatus.RUNNING }]], [[{ id: 't' }]]);
+    await transitionTask(m1.db, 't', TaskStatus.COMPLETED, { result: false });
+    expect(m1.setCalls[0].result).toBe(false);
+
+    const m2 = createDbMock([[{ status: TaskStatus.RUNNING }]], [[{ id: 't' }]]);
+    await transitionTask(m2.db, 't', TaskStatus.COMPLETED, { result: 0 });
+    expect(m2.setCalls[0].result).toBe(0);
+  });
+
+  it('clears a prior errorMessage when explicitly passed null', async () => {
+    const { db, setCalls } = createDbMock([[{ status: TaskStatus.FAILED }]], [[{ id: 't' }]]);
+    await transitionTask(db, 't', TaskStatus.PENDING, { errorMessage: null });
+    expect('errorMessage' in setCalls[0]).toBe(true);
+    expect(setCalls[0].errorMessage).toBeNull();
+  });
+
+  it('does not write result/errorMessage when the caller omits them', async () => {
+    const { db, setCalls } = createDbMock([[{ status: TaskStatus.FAILED }]], [[{ id: 't' }]]);
+    await transitionTask(db, 't', TaskStatus.PENDING, {});
+    expect('result' in setCalls[0]).toBe(false);
+    expect('errorMessage' in setCalls[0]).toBe(false);
+  });
+});

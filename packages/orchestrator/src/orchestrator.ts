@@ -233,7 +233,7 @@ export async function transitionTask(
   db: Database,
   taskId: string,
   newStatus: TaskStatus,
-  extra?: { errorMessage?: string; result?: unknown; interactionReason?: string | null },
+  extra?: { errorMessage?: string | null; result?: unknown; interactionReason?: string | null },
 ): Promise<void> {
   for (let attempt = 0; attempt < MAX_TRANSITION_ATTEMPTS; attempt += 1) {
     const current = await db
@@ -254,8 +254,13 @@ export async function transitionTask(
       updatedAt: new Date(),
     };
 
-    if (extra?.errorMessage) updateData.errorMessage = extra.errorMessage;
-    if (extra?.result) updateData.result = extra.result;
+    // Use property-exists guards (not truthiness) so callers can persist or
+    // clear defined-but-falsy values ('' / null / false / 0). A key present
+    // with `undefined` stays a no-op because Drizzle's mapUpdateSet drops
+    // undefined values, preserving the COMPLETED/FAILED paths that pass
+    // `result: input.result` / `errorMessage: ... ?? undefined`.
+    if ('errorMessage' in (extra ?? {})) updateData.errorMessage = extra?.errorMessage;
+    if ('result' in (extra ?? {})) updateData.result = extra?.result;
     if ('interactionReason' in (extra ?? {})) {
       updateData.interactionReason = (
         extra as { interactionReason?: string | null }
