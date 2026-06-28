@@ -429,12 +429,6 @@ h2 {
   margin-top: 22px;
 }
 
-.counter-grid {
-  display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
-  gap: 12px;
-}
-
 .counter {
   display: grid;
   align-content: start;
@@ -1183,10 +1177,6 @@ textarea::placeholder {
   .bot-onboarding-status-grid,
   .row-card {
     grid-template-columns: 1fr;
-  }
-
-  .counter-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .bot-registration-card {
