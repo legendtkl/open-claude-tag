@@ -1973,28 +1973,27 @@ describe('OpenClaudeTag Console', () => {
     ).toBeTruthy();
   });
 
-  it('renders the daemon install guide with the server URL from config and a download link', async () => {
+  it('renders the daemon install guide as a single npx pairing path', async () => {
     render(<App />);
 
     fireEvent.click(await screen.findByRole('button', { name: /Machines/i }));
 
     // Guide card present.
     expect(await screen.findByText('Connect a machine')).toBeInTheDocument();
-    // serverPublicUrl from /admin/auth/config is substituted into --server-url.
-    expect(
-      screen.getByText(
-        'open-claude-tag-daemon install --server-url http://10.37.206.226:3001 --token <TOKEN> --background',
-      ),
-    ).toBeInTheDocument();
     // The npx spec always targets @latest regardless of daemonVersion.
     expect(
       screen.getByText(
         'npx @open-tag/daemon@latest --server-url http://10.37.206.226:3001 --token <TOKEN> --background',
       ),
     ).toBeInTheDocument();
-    // Download button points at the artifact endpoint.
-    const download = screen.getByRole('link', { name: /Download daemon/i });
-    expect(download).toHaveAttribute('href', '/admin/daemon/artifact');
+    expect(screen.queryByRole('link', { name: /Download daemon/i })).not.toBeInTheDocument();
+    expect(screen.queryByText('/admin/daemon/artifact')).not.toBeInTheDocument();
+    expect(screen.queryByText('npm install -g ./open-claude-tag-daemon.tgz')).not.toBeInTheDocument();
+    expect(
+      screen.queryByText(
+        /open-claude-tag-daemon install --server-url http:\/\/10\.37\.206\.226:3001/,
+      ),
+    ).not.toBeInTheDocument();
   });
 
   it('generates a pairing token and substitutes it into the connect command (D-A7)', async () => {
@@ -2021,14 +2020,14 @@ describe('OpenClaudeTag Console', () => {
     expect(await screen.findByText('pair-tok-abc123xyz')).toBeInTheDocument();
     expect(
       screen.getByText(
-        'open-claude-tag-daemon install --server-url http://10.37.206.226:3001 --token pair-tok-abc123xyz --background',
-      ),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByText(
         'npx @open-tag/daemon@latest --server-url http://10.37.206.226:3001 --token pair-tok-abc123xyz --background',
       ),
     ).toBeInTheDocument();
+    expect(
+      screen.queryByText(
+        /open-claude-tag-daemon install --server-url http:\/\/10\.37\.206\.226:3001/,
+      ),
+    ).not.toBeInTheDocument();
   });
 
   it('lets a break-glass admin switch to a dev user before issuing a pairing token', async () => {
@@ -2175,9 +2174,10 @@ describe('OpenClaudeTag Console', () => {
     await screen.findByText('Connect a machine');
     expect(
       screen.getByText(
-        'open-claude-tag-daemon install --server-url <SERVER_PUBLIC_URL> --token <TOKEN> --background',
+        'npx @open-tag/daemon@latest --server-url <SERVER_PUBLIC_URL> --token <TOKEN> --background',
       ),
     ).toBeInTheDocument();
+    expect(screen.queryByText(/open-claude-tag-daemon install --server-url/)).not.toBeInTheDocument();
     expect(screen.getByText(/no SERVER_PUBLIC_URL configured/)).toBeInTheDocument();
   });
 

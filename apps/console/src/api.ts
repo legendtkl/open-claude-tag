@@ -425,9 +425,6 @@ export interface AuthConfig {
   daemonVersion: string | null;
 }
 
-/** Endpoint that streams the packed daemon tarball (guard-light, see admin-api). */
-export const DAEMON_ARTIFACT_URL = '/admin/daemon/artifact';
-
 /**
  * Read the auth config (whether the local dev-auth mode is on, plus the
  * daemon-install hints for the Machines page). Falls back to dev-auth-OFF /
