@@ -162,18 +162,28 @@ export const OPEN_TAG_FEISHU_PERMISSION_INVENTORY: FeishuPermissionCapability[] 
 ];
 
 const FEISHU_TASK_TRACKING_CAPABILITY_IDS = new Set([
+  'read-chat-members',
   'tasklist-management',
   'custom-field-management',
   'section-management',
   'task-management',
 ]);
 
+const FEISHU_DOCUMENT_COMMENT_CAPABILITY_IDS = new Set([
+  'document-comment-events',
+  'document-comment-read',
+  'document-comment-reply',
+]);
+
 export function buildOpenClaudeTagFeishuPermissionInventory(input: {
   feishuTaskTrackingEnabled: boolean;
+  feishuDocumentCommentsEnabled?: boolean;
 }): FeishuPermissionCapability[] {
-  if (input.feishuTaskTrackingEnabled) return OPEN_TAG_FEISHU_PERMISSION_INVENTORY;
   return OPEN_TAG_FEISHU_PERMISSION_INVENTORY.filter(
-    (capability) => !FEISHU_TASK_TRACKING_CAPABILITY_IDS.has(capability.id),
+    (capability) =>
+      (input.feishuTaskTrackingEnabled || !FEISHU_TASK_TRACKING_CAPABILITY_IDS.has(capability.id)) &&
+      (input.feishuDocumentCommentsEnabled ||
+        !FEISHU_DOCUMENT_COMMENT_CAPABILITY_IDS.has(capability.id)),
   );
 }
 

@@ -70,6 +70,7 @@
     "lark:search": "lark-cli im +chat-search",
     "lark:test-card": "bash tools/lark/send-test-card.sh",
     "lark:setup-two-bot-e2e": "node tools/instance/run.mjs exec --ensure-db -- node tools/lark/setup-local-two-bot-e2e.mjs",
+    "lark:personal-two-bot-e2e": "node tools/lark/personal-two-bot-e2e.mjs",
     "ops:health-alert": "node tools/ops/service-health-alert.mjs",
     "ops:health-alert:test": "node --test tools/ops/service-health-alert.test.mjs"
   },

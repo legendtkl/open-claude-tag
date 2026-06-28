@@ -142,6 +142,19 @@ Hard rule: never point an isolated worktree at the production `FEISHU_APP_ID` â€
 
 Use this only when a change needs real same-topic behavior across two Feishu bot identities, such as multi-agent context sharing, quoted images, mention routing, or one agent reviewing another agent's output. This is not required for ordinary unit, integration, or `POST /debug/simulate` coverage.
 
+For the personal quick-start stack, prefer the stored-secret web-UI path:
+
+```bash
+API_URL=http://127.0.0.1:3820 pnpm lark:personal-two-bot-e2e
+```
+
+The default command is a no-side-effect readiness check over `/health`, the admin
+bot registry, and message-flow permissions. To run the visible Feishu E2E after
+operator confirmation, add `--execute`; it creates a private test chat, sends one
+`@bot` message, and prints the chat/message/task evidence.
+
+For isolated worktrees seeded from env credentials, use the legacy path below.
+
 1. Put the two local test bot credentials in the gitignored `.env` of the worktree, or in the main repo `.env` when the worktree `.env` is a symlink:
 
    ```bash

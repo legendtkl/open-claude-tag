@@ -28,19 +28,26 @@ The Feishu app must have:
 
 - Bot capability enabled.
 - Event delivery set to WebSocket.
-- Message receive, send, card update, reaction, chat metadata, and chat member
-  permissions required by the OpenClaudeTag permission inventory.
+- Message receive, send, card update, reaction, and chat metadata permissions
+  required by the default OpenClaudeTag permission inventory.
+- Chat member permission (`im:chat.members:read`) when Feishu task tracking is
+  enabled.
 - Document comment permissions:
   - `docs:event:subscribe`
   - `docs:document.comment:read`
   - `docs:document.comment:create`
 - The `drive.notice.comment_add_v1` event subscription.
 
+Document-comment permissions and event subscription are checked and auto-ensured
+only when `OPEN_TAG_FEISHU_DOCUMENT_COMMENTS=enabled`. The personal quick-start
+bot-message flow can pass with the default message-only permission inventory.
+
 Use the console "one-click Feishu bot" setup or the Feishu app permission check
 from the console. The generated permission-apply URL should include the
-document-comment scopes above when they are missing. The permission check covers
-application scopes only; it does not prove that event subscription, app
-publishing, installation, bot availability, or document ACLs are complete.
+document-comment scopes above when document-comment support is enabled and they
+are missing. The permission check covers application scopes only; it does not
+prove that event subscription, app publishing, installation, bot availability, or
+document ACLs are complete.
 
 ## Local Two-Bot Seed Path
 

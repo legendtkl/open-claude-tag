@@ -7,7 +7,9 @@ OpenClaudeTag can bind one internal agent to one Feishu app bot. The internal
 
 1. Create a Feishu app in the Feishu developer console.
 2. Enable bot capability and add required permissions for messaging and card
-   updates. Document-comment mention support also requires
+   updates. Feishu task tracking additionally requires chat-member and task
+   scopes. Document-comment mention support is opt-in with
+   `OPEN_TAG_FEISHU_DOCUMENT_COMMENTS=enabled` and also requires
    `docs:event:subscribe`, `docs:document.comment:read`, and
    `docs:document.comment:create`.
 3. Configure event delivery as WebSocket for the app.
