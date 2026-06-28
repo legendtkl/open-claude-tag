@@ -76,6 +76,7 @@ Monorepo using pnpm workspaces:
 | Unit tests | `pnpm test` |
 | Unit test, one package | `pnpm --filter @open-tag/<pkg> test` |
 | E2E, default env | `pnpm --filter @open-tag/api test:e2e` |
+| Live runtime e2e (opt-in) | `pnpm test:runtime:e2e` |
 | Integration, default env | `pnpm test:integration` |
 | DB setup | `pnpm db:setup` |
 | Dev API / Worker | `pnpm dev:api` / `pnpm dev:worker` |
@@ -105,6 +106,36 @@ Monorepo using pnpm workspaces:
   only modify prose documentation.
 - Mixed changes and any executable code, config, schema, or generated artifact
   change still require the normal gates.
+
+## Live Runtime E2E (opt-in)
+
+`pnpm test:runtime:e2e` runs ONE trivial `chat_reply` task through the REAL
+Codex and Claude Code runtime adapters (via the real `@openai/codex-sdk` and
+`@anthropic-ai/claude-agent-sdk`), asserting each runtime echoes a unique token
+and returns usage metrics. It proves the adapters actually execute end-to-end —
+beyond the mocked-SDK unit tests.
+
+- **It is NOT part of the default suite.** `pnpm test`, `pnpm -r run test:unit`,
+  and the existing `test:e2e` never run it. The test file is named
+  `*.runtime-e2e.ts` (not `*.test.ts`), so vitest's default include skips it; it
+  only runs via its own `--config vitest.runtime-e2e.config.ts`.
+- **When to run:** on-demand, when you have host credentials and want to confirm
+  real runtime execution. **Do NOT add it to CI** — it makes REAL, billable
+  model calls.
+- **Self-skipping per runtime:** a runtime with no credentials is reported as
+  skipped (exit 0), not failed. Only a runtime that has credentials, ran, and
+  did not return its token fails (exit non-zero).
+- **Per-runtime prerequisites** (the operator supplies these via ambient env;
+  no credentials or proxy are ever hardcoded in the test):
+  - **Codex** — `~/.codex` credentials (or `CODEX_API_KEY` / `OPENAI_API_KEY`)
+    and NO proxy (`unset HTTP_PROXY HTTPS_PROXY`).
+  - **Claude Code** — `~/.claude/.credentials.json` (or `ANTHROPIC_API_KEY` /
+    `ANTHROPIC_AUTH_TOKEN`) and an HTTPS proxy reachable to api.anthropic.com
+    (`export HTTPS_PROXY=… HTTP_PROXY=…`). Credentials present but no reachable
+    proxy is an operator misconfiguration that surfaces as a failure, not a skip.
+
+  Run each runtime in its own proxy context, e.g. Codex with proxy unset, then
+  Claude Code with the proxy exported.
 
 ## Local Runtime Notes
 
