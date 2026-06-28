@@ -105,17 +105,12 @@ export class StubAdapter implements RuntimeAdapter {
 /** Minimal `RuntimeManager` stand-in exposing only what DispatchManager uses. */
 export function stubRuntimeManager(adapter: RuntimeAdapter | undefined): RuntimeManager {
   return {
-    // Mirror the strict `requireHealthy` contract: fail fast (never substitute)
-    // when the requested runtime is unavailable.
+    // Mirror the strict `requireHealthy` contract: REGISTRATION is the
+    // availability signal — return the registered adapter, or fail fast (never
+    // substitute) when the requested runtime is not registered.
     requireHealthy: async (runtime: string) => {
       if (!adapter) {
         throw new Error(`Requested runtime "${runtime}" is not registered`);
-      }
-      const health = await adapter.healthcheck();
-      if (!health.healthy) {
-        throw new Error(
-          `Requested runtime "${runtime}" is unavailable: ${health.message ?? 'failed healthcheck'}`,
-        );
       }
       return adapter;
     },
