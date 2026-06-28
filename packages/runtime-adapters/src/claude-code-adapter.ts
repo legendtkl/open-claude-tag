@@ -142,6 +142,7 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
       handle.readOnly,
       handle.runtimeEnv,
       handle.imagePaths ?? [],
+      spec.model ?? this.config.model,
     );
   }
 
@@ -167,6 +168,7 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
       workspace.readOnly ?? false,
       workspace.runtimeEnv,
       options.imagePaths ?? [],
+      options.model ?? this.config.model,
     );
   }
 
@@ -207,6 +209,7 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
     readOnly = false,
     runtimeEnv: Record<string, string> | undefined = undefined,
     imagePaths: string[] = [],
+    model: string | undefined = undefined,
   ): AsyncGenerator<RuntimeEvent> {
     const abortController = new AbortController();
     this.executions.start(executionId, abortController);
@@ -274,8 +277,11 @@ export class ClaudeCodeAdapter implements RuntimeAdapter {
         };
       }
 
-      if (this.config.model) {
-        options.model = this.config.model;
+      // Per-task model (resolved by the caller as spec.model / options.model,
+      // falling back to the global config model) wins. The Claude adapter
+      // declares modelSelection: true, so the per-task model must reach the SDK.
+      if (model) {
+        options.model = model;
       }
 
       if (resumeSessionId) {
