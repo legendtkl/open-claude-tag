@@ -224,79 +224,12 @@ export interface ChatAgent {
   lastTaskAt: string | null;
 }
 
-export interface TaskBoardTask {
-  id: string;
-  taskId: string;
-  trackingSpaceId: string;
-  sessionId: string;
-  chatId: string;
-  title: string;
-  taskType: string;
-  localStatus: string;
-  trackingStatus: string;
-  runtimeHint: string | null;
-  feishuTaskGuid: string | null;
-  openTaskUrl: string | null;
-  sourceTopicUrl: string | null;
-  lastSyncError: string | null;
-  runs: TaskRun[];
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface TaskRun {
-  id: string;
-  taskId: string;
-  runtimeBackend: string;
-  mode: string;
-  workspacePath: string | null;
-  externalSessionRef: string | null;
-  status: string;
-  exitCode: number | null;
-  startedAt: string;
-  completedAt: string | null;
-  lastHeartbeatAt: string | null;
-  eventCount: number;
-  events: TaskRunEvent[];
-}
-
-export interface TaskRunEvent {
-  id: string;
-  runId: string;
-  taskId: string;
-  eventIndex: number;
-  eventType: string;
-  message: string | null;
-  progress: number | null;
-  payload: unknown;
-  createdAt: string;
-}
-
-export interface TaskBoard {
-  id: string;
-  name: string;
-  scopeType: string;
-  scopeId: string;
-  chatId: string | null;
-  chatDisplayName: string | null;
-  tasklistGuid: string;
-  openTasklistUrl: string;
-  openChatUrl: string | null;
-  statusFieldGuid: string;
-  statusOptions: unknown;
-  sections: unknown;
-  tasks: TaskBoardTask[];
-  taskCount: number;
-  statusCounts: Record<string, number>;
-}
-
 export interface ConsoleData {
   summary: AdminSummary;
   profiles: Profile[];
   agents: Agent[];
   apps: FeishuApp[];
   chats: Chat[];
-  taskBoards: TaskBoard[];
   machines: Machine[];
 }
 
@@ -312,8 +245,6 @@ export interface DesktopBridge {
   resetApiUrl: () => Promise<DesktopConfig>;
   setApiUrl: (apiUrl: string) => Promise<DesktopConfig>;
 }
-
-export const TASK_BOARD_TASK_PAGE_SIZE = 5;
 
 declare global {
   interface Window {
@@ -628,16 +559,15 @@ export async function loadConsoleData(
   options: { includeMachines?: boolean } = {},
 ): Promise<ConsoleData> {
   const includeMachines = options.includeMachines !== false;
-  const [summary, profiles, agents, apps, chats, taskBoards, machines] = await Promise.all([
+  const [summary, profiles, agents, apps, chats, machines] = await Promise.all([
     requestJson<AdminSummary>('/admin/summary'),
     requestJson<Profile[]>('/admin/profiles'),
     requestJson<Agent[]>('/admin/agents'),
     requestJson<FeishuApp[]>('/admin/feishu-apps'),
     requestJson<Chat[]>('/admin/chats'),
-    requestJson<TaskBoard[]>(`/admin/task-boards?taskLimit=${TASK_BOARD_TASK_PAGE_SIZE}`),
     includeMachines ? requestJson<Machine[]>('/admin/machines') : Promise.resolve([]),
   ]);
-  return { summary, profiles, agents, apps, chats, taskBoards, machines };
+  return { summary, profiles, agents, apps, chats, machines };
 }
 
 export async function listMachines(): Promise<Machine[]> {
@@ -696,20 +626,6 @@ export async function disconnectMachine(id: string): Promise<Machine> {
   return requestJson<Machine>(`/admin/machines/${encodeURIComponent(id)}/disconnect`, {
     method: 'POST',
   });
-}
-
-export async function loadTaskBoardTasks(
-  boardId: string,
-  options: { offset: number; limit?: number; status?: string },
-): Promise<TaskBoardTask[]> {
-  const query = new URLSearchParams({
-    offset: String(options.offset),
-    limit: String(options.limit ?? TASK_BOARD_TASK_PAGE_SIZE),
-  });
-  if (options.status) query.set('status', options.status);
-  return requestJson<TaskBoardTask[]>(
-    `/admin/task-boards/${encodeURIComponent(boardId)}/tasks?${query.toString()}`,
-  );
 }
 
 export async function createProfile(input: {

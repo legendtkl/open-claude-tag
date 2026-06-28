@@ -384,7 +384,6 @@ const initialData: ConsoleData = {
   agents: [],
   apps: [],
   chats: [],
-  taskBoards: [],
   machines: [],
 };
 
