@@ -480,7 +480,7 @@ The daemon holds no Feishu or database credentials, connects outbound only (work
 | Changes do not take effect | Feishu app version not republished | Create and publish a new version in **Version Management & Release** |
 | Tasks stay at `Request received` | Worker is not running | Start `pnpm dev:worker` in a second terminal or start the `worker` container |
 | E2E conflicts with another local instance | Shared port or DB collision | Use `pnpm dev:api:isolated`, `pnpm dev:worker:isolated`, and `pnpm test:e2e:isolated` |
-| Local bootstrap fails with Postgres auth errors after upgrading from older `legacy` defaults | Existing Docker volume still contains old database or user initialization | Run `docker compose -f infra/docker-compose.yaml down -v` once, then rerun `pnpm setup:local` or the Compose migration steps |
+| Local bootstrap fails with Postgres auth errors after upgrading from an older local Postgres setup | Existing Docker volume still contains old database or user initialization | Run `docker compose -f infra/docker-compose.yaml down -v` once, then rerun `pnpm setup:local` or the Compose migration steps |
 | `db:migrate` fails with `ECONNREFUSED` even though Postgres container is running | Container started but `pg_isready` not yet passing | Wait for `pg_isready` before running migrations: `until docker exec infra-postgres-1 pg_isready -U open-claude-tag; do sleep 1; done` |
 | `db:migrate` fails with `role "open-claude-tag" does not exist` | Postgres started with a stale volume from a different project | Run `docker compose -f infra/docker-compose.yaml down -v` to wipe the volume, then restart |
 | `DATABASE_URL` with `localhost` fails on Node.js 17+ | Node resolves `localhost` to `::1` (IPv6) but Docker only binds `127.0.0.1` | Change `localhost` to `127.0.0.1` in `DATABASE_URL` |
@@ -904,4 +904,4 @@ daemon 不持有任何飞书/数据库凭据,仅出站连接(支持 `HTTPS_PROXY
 | 配置修改后不生效 | 飞书应用版本未重新发布 | 在 **Version Management & Release** 中创建并发布新版本 |
 | 任务停留在 `Request received` | Worker 未启动 | 在另一个终端执行 `pnpm dev:worker` 或启动 `worker` 容器 |
 | E2E 与本地其他实例冲突 | 共享端口或数据库互相影响 | 使用 `pnpm dev:api:isolated`、`pnpm dev:worker:isolated` 与 `pnpm test:e2e:isolated` |
-| 从旧的 `legacy` 默认值升级后，本地初始化出现 Postgres 认证错误 | 现有 Docker volume 里仍保留旧数据库或用户初始化数据 | 先执行一次 `docker compose -f infra/docker-compose.yaml down -v`，再重新运行 `pnpm setup:local` 或 Compose 的 migration 步骤 |
+| 从旧版本的本地 Postgres 配置升级后，本地初始化出现 Postgres 认证错误 | 现有 Docker volume 里仍保留旧数据库或用户初始化数据 | 先执行一次 `docker compose -f infra/docker-compose.yaml down -v`，再重新运行 `pnpm setup:local` 或 Compose 的 migration 步骤 |

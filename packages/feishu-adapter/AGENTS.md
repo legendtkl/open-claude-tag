@@ -55,5 +55,5 @@ content: JSON.stringify({ text: 'hello' })  // BUG!
 - Bot open_id: `ou_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx`
 - Required: Bot capability, `im.message.receive_v1` subscription (long connection), `im:message.*` permissions
 - Required: `card.action.trigger` callback (long connection) for interactive card buttons
-- Republish app version after any config changes in [Feishu Developer Console](https://open.feishu.cn/app/cli_xxxxxxxxxxxxxxxx)
+- Republish app version after any config changes in [Feishu Developer Console](https://open.feishu.cn/app/YOUR_APP_ID)
 - Full setup guide: see `README.md` > Feishu App Setup

@@ -2244,7 +2244,7 @@ describe('admin api routes', () => {
         chatId: 'oc_test0000000000000000000000000000001',
         taskBoardName: 'oc_test0000000000000000000000000000001任务看板',
       }),
-    ).toBe('Chat oc_test001...550b2d');
+    ).toBe('Chat oc_test000...000001');
 
     const resolveFeishuChatDisplayName = vi.fn(async () => 'Engineering');
     await expect(
