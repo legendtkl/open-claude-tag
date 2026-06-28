@@ -2753,6 +2753,10 @@ async function dispatchInboundMessageViaFeishuNative(
       sessionId,
       intakeTaskConstraints,
     );
+    const normalMessageTaskConstraints = {
+      ...enrichedTaskConstraints,
+      ...(currentAppContext.persisted ? {} : { debugLoopback: true }),
+    };
     const taskEvent = await sanitizeAgentAssignedEvent(event, agentContext);
 
     // Store user message
@@ -2874,7 +2878,7 @@ async function dispatchInboundMessageViaFeishuNative(
           replyToMessageId,
           currentAppContext,
           agentContext,
-          enrichedTaskConstraints,
+          normalMessageTaskConstraints,
           explicitTaskId,
         );
       } else {
@@ -2906,7 +2910,7 @@ async function dispatchInboundMessageViaFeishuNative(
         replyToMessageId,
         currentAppContext,
         agentContext,
-        enrichedTaskConstraints,
+        normalMessageTaskConstraints,
         explicitTaskId,
       );
     }

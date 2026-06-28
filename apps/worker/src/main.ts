@@ -117,7 +117,7 @@ import { eq, and, desc, ne } from 'drizzle-orm';
 import { clearWorkerSdkSessionState, persistWorkerRuntimeState } from './session-persistence.js';
 import { registerWorkerProcess, unregisterWorkerProcess } from './process-registration.js';
 import { recoverStaleRunningTasks } from './startup-recovery.js';
-import { shouldSkipTaskExecution } from './debug-task-control.js';
+import { shouldSkipTaskExecution, shouldSuppressLoopbackFeishuFeedback } from './debug-task-control.js';
 import { prepareResumeImagePaths } from './runtime-image-prepare.js';
 import {
   appendReplyLanguageGuidance,
@@ -1280,11 +1280,17 @@ async function processTask(job: { id: string; data: TaskJobData }): Promise<void
     const taskIdentity = resolveTaskAgentIdentity(job.data, currentTask);
     taskAgentId = taskIdentity.agentId;
     taskFeishuAppId = taskIdentity.feishuAppId;
-    const feedbackClientResolution = await resolveTaskFeishuClient({
-      feishuAppId: taskFeishuAppId,
-      resolver: feishuClientRegistry,
-      defaultClient: feishuClient,
-    });
+    const suppressLoopbackFeedback = shouldSuppressLoopbackFeishuFeedback(
+      taskConstraints,
+      taskFeishuAppId,
+    );
+    const feedbackClientResolution = suppressLoopbackFeedback
+      ? { client: null, missingAppClient: false }
+      : await resolveTaskFeishuClient({
+          feishuAppId: taskFeishuAppId,
+          resolver: feishuClientRegistry,
+          defaultClient: feishuClient,
+        });
     taskFeishuClient = feedbackClientResolution.client;
     if (channelKind === 'lark') {
       // Lark path — unchanged. Route the primary task-feedback card through the

@@ -292,6 +292,28 @@ describe('buildQueuedTaskInput', () => {
     });
   });
 
+  it('propagates debug loopback isolation into queued task constraints', () => {
+    const { job } = buildQueuedTaskInput({
+      event: makeEvent(),
+      sessionId: 'session-1',
+      result: {
+        taskId: 'task-debug-loopback',
+        intent: IntentType.CHAT_REPLY,
+        runtime: 'codex',
+        goal: 'reply locally',
+        imageAttachment: undefined,
+      },
+      extraConstraints: {
+        debugLoopback: true,
+      },
+    });
+
+    expect(job.constraints).toMatchObject({
+      debugLoopback: true,
+      feishuAppId: undefined,
+    });
+  });
+
   it('propagates Feishu context into queued task constraints', () => {
     const { job } = buildQueuedTaskInput({
       event: makeEvent({
