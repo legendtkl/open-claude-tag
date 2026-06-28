@@ -25,6 +25,9 @@ vi.mock('../process-control.js', async (orig) => ({
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  // Restore spies (e.g. process.kill) and clear mock state even if a test threw
+  // before its own cleanup, so nothing leaks into later tests.
+  vi.restoreAllMocks();
   vi.mocked(spawn).mockReset();
 });
 
@@ -156,8 +159,9 @@ describe('startConsole', () => {
     }));
     vi.stubGlobal('fetch', fetchMock);
     // Spawn a fake child that immediately looks dead (isProcessAlive → false),
-    // so startConsole throws fast without real I/O, timers, or signals.
-    const killSpy = vi.spyOn(process, 'kill').mockImplementation(() => true as never);
+    // so startConsole throws fast without real I/O, timers, or signals. The kill
+    // spy is restored in afterEach (vi.restoreAllMocks).
+    vi.spyOn(process, 'kill').mockReturnValue(true);
     vi.mocked(spawn).mockReturnValue({ pid: 999_999, unref: vi.fn(), on: vi.fn() } as never);
 
     await expect(
@@ -182,6 +186,5 @@ describe('startConsole', () => {
       [join('/repo', 'apps', 'console', 'serve-console.mjs')],
       expect.objectContaining({ cwd: '/repo' }),
     );
-    killSpy.mockRestore();
   });
 });
