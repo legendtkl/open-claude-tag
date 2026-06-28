@@ -3,6 +3,9 @@ import type { RuntimeAdapter } from '@open-tag/runtime-adapters';
 /**
  * Minimal slice of `RuntimeManager` that local adapter selection needs. Keeping
  * it structural lets the selection logic be unit-tested with a fake manager.
+ * Both methods use REGISTRATION as the availability signal — no live
+ * healthcheck — so a runtime missing from the adapter map is the only "not
+ * available" case; credential problems surface at execution.
  */
 export interface LocalRuntimeSelector {
   requireHealthy(runtime: string): Promise<RuntimeAdapter>;
@@ -35,10 +38,10 @@ export interface LocalAdapterSelection {
  * contract (issue #8):
  *
  * - `explicit` selections (user-confirmed or an explicit hint) run EXACTLY the
- *   requested runtime — `requireHealthy` throws if it is unregistered or
- *   unhealthy, and we let that propagate so the task fails fast with a clear
- *   error rather than silently switching runtimes.
- * - auto/default/resume selections may fall back to another healthy runtime;
+ *   requested runtime — `requireHealthy` throws if it is not registered, and we
+ *   let that propagate so the task fails fast with a clear error rather than
+ *   silently switching runtimes.
+ * - auto/default/resume selections may fall back to another registered runtime;
  *   the substitution is reported via {@link LocalAdapterSelection.fallback} so
  *   the caller can log and persist it.
  */

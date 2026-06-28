@@ -213,50 +213,44 @@ describe('Multi-turn session resume', () => {
   });
 
   describe('RuntimeManager routing', () => {
-    const healthy = (name: string) =>
+    const adapter = (name: string) =>
       ({
         name: () => name,
         healthcheck: vi
           .fn()
           .mockResolvedValue({ healthy: true, name, lastCheckedAt: new Date() }),
       }) as any;
-    const unhealthy = (name: string) =>
-      ({
-        name: () => name,
-        healthcheck: vi
-          .fn()
-          .mockResolvedValue({ healthy: false, name, lastCheckedAt: new Date() }),
-      }) as any;
 
-    it('returns the preferred adapter without fallback when it is live-healthy', async () => {
+    it('returns the preferred adapter without fallback when it is registered (no live healthcheck)', async () => {
       const manager = new RuntimeManager();
-      const claude = healthy('claude_code');
-      const codex = healthy('codex');
+      const claude = adapter('claude_code');
+      const codex = adapter('codex');
       manager.register(claude);
       manager.register(codex);
 
       const claudeResult = await manager.getHealthyFallback('claude_code');
       expect(claudeResult?.adapter).toBe(claude);
       expect(claudeResult?.usedFallback).toBe(false);
+      // Registration is the availability signal — selection never live-checks.
+      expect(claude.healthcheck).not.toHaveBeenCalled();
 
       const codexResult = await manager.getHealthyFallback('codex');
       expect(codexResult?.adapter).toBe(codex);
       expect(codexResult?.usedFallback).toBe(false);
     });
 
-    it('live-checks and falls back only when the preferred adapter is unhealthy', async () => {
+    it('falls back to another registered adapter only when the preferred runtime is not registered', async () => {
       const manager = new RuntimeManager();
-      const claude = healthy('claude_code');
-      const codex = unhealthy('codex');
+      const claude = adapter('claude_code');
       manager.register(claude);
-      manager.register(codex);
 
-      // codex unhealthy → fallback to claude
+      // codex not registered → fallback to claude
       const fellBack = await manager.getHealthyFallback('codex');
       expect(fellBack?.adapter).toBe(claude);
       expect(fellBack?.usedFallback).toBe(true);
+      expect(fellBack?.reason).toMatch(/not registered/);
 
-      // claude healthy → stays
+      // claude registered → stays
       const stayed = await manager.getHealthyFallback('claude_code');
       expect(stayed?.adapter).toBe(claude);
       expect(stayed?.usedFallback).toBe(false);
