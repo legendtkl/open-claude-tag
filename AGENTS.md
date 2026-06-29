@@ -137,6 +137,38 @@ beyond the mocked-SDK unit tests.
   Run each runtime in its own proxy context, e.g. Codex with proxy unset, then
   Claude Code with the proxy exported.
 
+## Live Slack E2E (opt-in)
+
+`pnpm test:slack:e2e` runs ONE end-to-end flow through the REAL `SlackChannel`
+against a live Slack workspace + test channel: `healthcheck` (auth.test) →
+`send` a uniquely-tokened `result` message → `update` it in place →
+`uploadArtifact` a tiny temp file INTO that message's thread → `react` then
+`removeReaction`, with best-effort cleanup (temp file unlink + `chat.delete`). It
+proves the M1-M3 outbound stack actually round-trips — beyond the mocked-fetch
+unit tests.
+
+- **It is NOT part of the default suite.** `pnpm test` and `pnpm -r run
+  test:unit` never run it. The test file is named `*.slack-e2e.ts` (not
+  `*.test.ts`), so vitest's default include skips it; it only runs via its own
+  `--config vitest.slack-e2e.config.ts`.
+- **When to run:** on-demand, when you have a bot token + test channel and want
+  to confirm real Slack delivery. **Do NOT add it to CI** — it makes REAL Slack
+  Web API calls.
+- **Self-skipping:** with no credentials the single test is reported as skipped
+  (exit 0), not failed. It only runs when BOTH env vars below are set.
+- **Prerequisites** (the operator supplies these via ambient env; nothing is
+  hardcoded in the test):
+  - `SLACK_BOT_TOKEN` — an `xoxb-…` bot token whose scopes cover
+    `chat:write`, `reactions:write`, and `files:write`.
+  - `SLACK_E2E_CHANNEL_ID` — a test channel id the bot is ALREADY a member of
+    (invite the bot first; `chat.postMessage`/`files` fail otherwise).
+  - **Network** — slack.com is public internet. A host behind the bytedance
+    intranet must `export HTTPS_PROXY=…` reachable to slack.com; the injected
+    fetch then routes through undici's ProxyAgent (Node's global fetch ignores
+    proxy env). With no proxy set it talks to slack.com directly. Credentials
+    present but no reachable network is an operator misconfiguration that
+    surfaces as a failure, not a skip.
+
 ## Local Runtime Notes
 
 - Full task processing requires both API and Worker. Starting only the API

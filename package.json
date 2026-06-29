@@ -42,6 +42,7 @@
     "test:e2e": "pnpm -r run test:e2e",
     "test:e2e:isolated": "node tools/instance/run.mjs exec -- pnpm --filter @open-tag/api test:e2e",
     "test:runtime:e2e": "pnpm --filter @open-tag/runtime-adapters run test:runtime:e2e",
+    "test:slack:e2e": "pnpm --filter @open-tag/channel-slack run test:slack:e2e",
     "db:migrate": "pnpm --filter @open-tag/storage run db:migrate",
     "db:seed": "pnpm --filter @open-tag/storage run db:seed",
     "db:setup": "pnpm db:migrate && pnpm db:seed",
