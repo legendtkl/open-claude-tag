@@ -180,6 +180,7 @@ import {
   type TaskFeedback,
 } from './channel-sender.js';
 import { ChecklistFeedback } from './checklist-feedback.js';
+import { selectUploadableArtifacts } from './artifact-upload.js';
 import { runAdmissionReschedulerOnce as runAdmissionRescheduler } from './admission-rescheduler.js';
 import { runDelegationBarrierReconcilerOnce as runDelegationBarrierReconciler } from './delegation-barrier-reconciler.js';
 import { runWaitingContractReconcilerOnce } from './waiting-contract-reconciler.js';
@@ -3076,12 +3077,19 @@ async function processTask(job: { id: string; data: TaskJobData }): Promise<void
         },
       );
       if (feedback) {
+        // Thread worker-readable artifacts through the terminal options (D-S10).
+        // NeutralChannelFeedback (Slack) uploads them into the conversation thread
+        // before delivering the result text; the Lark ThreePhaseFeedback ignores
+        // the field, so its behavior is unchanged. Remote-dispatch paths whose
+        // bytes live on the daemon are filtered out by the readability guard.
+        const uploadableArtifacts = await selectUploadableArtifacts(collectedArtifacts, { logger });
         const doneResult = await feedback.updateDone(
           executionGoal,
           withMachineFooter(completionOutputText || undefined, remoteMachine),
           {
             completionText: finalReply.finalReplyText,
             allowedMentions: feishuRuntimeContext?.mentions ?? [],
+            ...(uploadableArtifacts.length > 0 ? { artifacts: uploadableArtifacts } : {}),
           },
         );
         await aliasSentFeedbackMessages(doneResult?.sentMessageIds);

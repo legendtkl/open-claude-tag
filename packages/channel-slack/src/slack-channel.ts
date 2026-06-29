@@ -32,6 +32,9 @@ import type {
 
 const SLACK = 'slack' as const;
 const DEFAULT_API_BASE = 'https://slack.com/api';
+// Block Kit caps a message at ~50 blocks (mirrors capabilities().maxOutboundElements).
+// The result body owns one block; the rest are available for artifact references.
+const MAX_BLOCKS = 50;
 
 /** Injected construction options. `fetch` is overridable so tests mock the wire. */
 export interface SlackChannelOptions {
@@ -181,6 +184,46 @@ interface RenderedContent {
   blocks?: SlackBlock[];
 }
 
+/**
+ * A human-readable name for an uploaded artifact reference. `RemoteAttachmentRef`
+ * carries no `name` field, so prefer the Slack file's `name`/`title` stashed under
+ * `native`, falling back to the opaque `ref` id.
+ */
+function artifactDisplayName(att: RemoteAttachmentRef): string {
+  const native = (att.native ?? {}) as { name?: string; title?: string };
+  return native.name || native.title || att.ref;
+}
+
+/**
+ * Render the result body PLUS a `:paperclip:`-prefixed reference per artifact (the
+ * bytes already posted into the thread via {@link SlackChannel.uploadArtifact};
+ * this is just a readable index). Each reference is its own Block Kit section, so
+ * the list is bounded by the ~50-block cap: when there are more artifacts than fit,
+ * the overflow is truncated with a VISIBLE `(+N more)` note — never a silent drop.
+ */
+function renderResult(markdown: string, artifacts: RemoteAttachmentRef[]): RenderedContent {
+  const bodyBlock = sectionBlock(markdown);
+  if (artifacts.length === 0) {
+    return { text: markdown, blocks: [bodyBlock] };
+  }
+  const names = artifacts.map(artifactDisplayName);
+  // Blocks left for references after the body; reserve one for the overflow note
+  // when the set does not fit.
+  const refBudget = MAX_BLOCKS - 1;
+  const truncated = names.length > refBudget;
+  const shown = truncated ? names.slice(0, refBudget - 1) : names;
+  const hidden = names.length - shown.length;
+
+  const blocks: SlackBlock[] = [bodyBlock, ...shown.map((name) => sectionBlock(`:paperclip: ${name}`))];
+  const fallbackLines = [markdown, ...shown.map((name) => `📎 ${name}`)];
+  if (truncated) {
+    const note = `_(+${hidden} more attachment${hidden === 1 ? '' : 's'})_`;
+    blocks.push(sectionBlock(note));
+    fallbackLines.push(`(+${hidden} more)`);
+  }
+  return { text: fallbackLines.join('\n'), blocks };
+}
+
 /** Render a neutral {@link OutboundMessage} (sans `native`) to Slack text+blocks. */
 function renderContent(msg: Exclude<OutboundMessage, { kind: 'native' }>): RenderedContent {
   switch (msg.kind) {
@@ -188,9 +231,7 @@ function renderContent(msg: Exclude<OutboundMessage, { kind: 'native' }>): Rende
     case 'discussion':
       return { text: msg.markdown, blocks: [sectionBlock(msg.markdown)] };
     case 'result':
-      // TODO(stage-6): render `msg.artifacts` as Block Kit file blocks once
-      // outbound upload is wired; for now the markdown body carries the result.
-      return { text: msg.markdown, blocks: [sectionBlock(msg.markdown)] };
+      return renderResult(msg.markdown, msg.artifacts ?? []);
     case 'error':
       return { text: msg.message, blocks: [sectionBlock(`:warning: ${msg.message}`)] };
     case 'checklist': {
@@ -259,12 +300,14 @@ export class SlackChannel implements Channel {
       //  - `supportsForms` stays false: a submittable modal is a separate
       //    `views.open`/`trigger_id` flow (deferred to M4), and form render here is
       //    still a read-only summary, not an input surface.
-      //  - uploadArtifact does not yet reach the thread (M3b), so result artifacts
-      //    are not delivered as files.
+      //  - uploadArtifact now reaches the thread (M3b): completeUploadExternal
+      //    shares the file into the target conversation/thread, so result
+      //    artifacts round-trip as in-thread files — hence supportsAttachmentsOut
+      //    advertises image+file.
       supportsForms: false,
       supportsApprovalButtons: false,
       supportsAttachmentsIn: ['image', 'file', 'audio'],
-      supportsAttachmentsOut: [],
+      supportsAttachmentsOut: ['image', 'file'],
       maxOutboundChars: 40000, // chat.postMessage text ~40k chars
       maxOutboundElements: 50, // Block Kit caps ~50 blocks per message
       maxUpdateRateHz: 1, // Slack chat.update ~1/s
@@ -450,11 +493,15 @@ export class SlackChannel implements Channel {
     });
   }
 
-  async uploadArtifact(file: LocalFile): Promise<RemoteAttachmentRef> {
+  async uploadArtifact(
+    file: LocalFile,
+    target?: { channel?: string; threadTs?: string },
+  ): Promise<RemoteAttachmentRef> {
     // The modern Slack upload is a three-step external flow; `files.upload` was
-    // sunset (2025-11-12). TODO(stage-6): set `channels`/`thread_ts` on
-    // completeUploadExternal so the file lands in the conversation, not just the
-    // workspace, once the worker threads a target through uploadArtifact.
+    // sunset (2025-11-12). When a `target.channel` is threaded in (M3b), step 3
+    // associates the file with that conversation (+ thread) so the bytes land in
+    // the thread, not just the workspace. With no target the file stays
+    // workspace-private (back-compat — satisfies the single-arg Channel contract).
     const buffer = await readFile(file.path);
 
     // 1) Reserve a signed upload URL + the pending file id.
@@ -474,10 +521,19 @@ export class SlackChannel implements Channel {
       throw new Error(`SlackChannel.uploadArtifact: byte upload failed with HTTP ${put.status}`);
     }
 
-    // 3) Finalize: associate the uploaded bytes with the file id.
-    const completed = await this.callFormEncoded('files.completeUploadExternal', {
+    // 3) Finalize: associate the uploaded bytes with the file id, and — when a
+    // target is given — share it into that conversation/thread. The modern
+    // external-upload flow uses `channel_id` (a SINGULAR conversation id) plus an
+    // optional `thread_ts`, NOT the legacy `files.upload` `channels` (plural).
+    // Source: https://docs.slack.dev/reference/methods/files.completeUploadExternal
+    const completeParams: Record<string, string> = {
       files: JSON.stringify([{ id: fileId, ...(file.name ? { title: file.name } : {}) }]),
-    });
+    };
+    if (target?.channel) {
+      completeParams.channel_id = target.channel;
+      if (target.threadTs) completeParams.thread_ts = target.threadTs;
+    }
+    const completed = await this.callFormEncoded('files.completeUploadExternal', completeParams);
     const uploaded = Array.isArray(completed.files)
       ? (completed.files[0] as SlackFile | undefined)
       : undefined;

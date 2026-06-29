@@ -12,11 +12,14 @@ import {
   removeAckReactionViaChannel,
   resolveTaskChannelSender,
   updateRunningFeedbackCard,
+  type ArtifactUploadTarget,
   type ChannelSender,
   type ConversationRef as WorkerConversationRef,
   type DeliveryRef,
+  type LocalFile,
   type OutboundMessage,
   type ReactionRef,
+  type RemoteAttachmentRef,
 } from '../channel-sender.js';
 
 interface FakeFeishuClient {
@@ -92,6 +95,16 @@ describe('LarkChannelSender', () => {
 
     expect(removeReaction).toHaveBeenCalledTimes(1);
     expect(removeReaction).toHaveBeenCalledWith('om_user_1', 'reaction_1');
+  });
+
+  it('uploadArtifact delegates to LarkChannel (not implemented yet → it throws)', async () => {
+    const fake = makeFakeClient();
+    const sender = createLarkChannelSender(asClient(fake));
+    // Delegation reaches LarkChannel.uploadArtifact, which is not implemented yet
+    // (it has no conversation-targeting and throws), proving the call passes through.
+    await expect(
+      sender.uploadArtifact!({ path: '/tmp/x.txt', name: 'x.txt' }, { channel: 'C1' }),
+    ).rejects.toThrow(/not implemented/i);
   });
 });
 
@@ -444,6 +457,194 @@ describe('NeutralChannelFeedback', () => {
     expect(send).not.toHaveBeenCalled();
     expect(updates).toHaveLength(0);
     expect(warn).toHaveBeenCalledTimes(1);
+  });
+});
+
+/** A recording ChannelSender that ALSO records uploadArtifact + a global event order. */
+function makeUploadingSender(
+  upload?: (file: LocalFile, target?: ArtifactUploadTarget) => Promise<RemoteAttachmentRef>,
+) {
+  const events: string[] = [];
+  const sends: Array<{ to: WorkerConversationRef; msg: OutboundMessage }> = [];
+  const updates: Array<{ ref: DeliveryRef; msg: OutboundMessage }> = [];
+  const uploads: Array<{ file: LocalFile; target?: ArtifactUploadTarget }> = [];
+  const uploadArtifact = vi.fn(
+    async (file: LocalFile, target?: ArtifactUploadTarget): Promise<RemoteAttachmentRef> => {
+      events.push(`upload:${file.name}`);
+      uploads.push({ file, target });
+      if (upload) return upload(file, target);
+      return { type: 'file', ref: `remote-${file.name}` };
+    },
+  );
+  const sender: ChannelSender = {
+    send: vi.fn(async (to: WorkerConversationRef, msg: OutboundMessage): Promise<DeliveryRef> => {
+      events.push('send');
+      sends.push({ to, msg });
+      return { kind: to.kind, logicalMessageId: 'ts-1', revision: 0, physicalIds: ['ts-1'] };
+    }),
+    update: vi.fn(async (ref: DeliveryRef, msg: OutboundMessage): Promise<DeliveryRef> => {
+      events.push('update');
+      updates.push({ ref, msg });
+      return ref;
+    }),
+    uploadArtifact,
+  };
+  return { sender, sends, updates, uploads, uploadArtifact, events };
+}
+
+describe('NeutralChannelFeedback artifact upload (Slack Milestone 3b)', () => {
+  const conversation: WorkerConversationRef = { kind: 'slack', scopeId: 'C_chat' };
+  const fileA: LocalFile = { path: '/w/a.txt', name: 'a.txt', mimeType: 'text/plain' };
+  const fileB: LocalFile = { path: '/w/b.md', name: 'b.md' };
+
+  it('uploads each artifact into the thread BEFORE delivering the result with the refs', async () => {
+    const threaded: WorkerConversationRef = { kind: 'slack', scopeId: 'C_chat', threadId: '171.50' };
+    const { sender, sends, uploads, uploadArtifact, events } = makeUploadingSender();
+    const feedback = new NeutralChannelFeedback({ sender, conversation: threaded });
+
+    const result = await feedback.updateDone('do the thing', 'detailed output', {
+      completionText: 'final reply',
+      artifacts: [fileA, fileB],
+    });
+
+    expect(uploadArtifact).toHaveBeenCalledTimes(2);
+    // Conversation-derived target: scopeId → channel, threadId → thread_ts.
+    expect(uploads.map((u) => u.target)).toEqual([
+      { channel: 'C_chat', threadTs: '171.50' },
+      { channel: 'C_chat', threadTs: '171.50' },
+    ]);
+    // Files post first, then the result text that references them.
+    expect(events).toEqual(['upload:a.txt', 'upload:b.md', 'send']);
+    expect(sends).toHaveLength(1);
+    expect(sends[0].msg).toEqual({
+      kind: 'result',
+      markdown: 'final reply',
+      artifacts: [
+        { type: 'file', ref: 'remote-a.txt' },
+        { type: 'file', ref: 'remote-b.md' },
+      ],
+    });
+    expect(result).toEqual({ sentMessageIds: [] });
+  });
+
+  it('targets only the channel when the conversation carries no thread', async () => {
+    const { sender, uploads } = makeUploadingSender();
+    const feedback = new NeutralChannelFeedback({ sender, conversation });
+
+    await feedback.updateDone('g', 'r', { artifacts: [fileA] });
+
+    expect(uploads[0].target).toEqual({ channel: 'C_chat' });
+  });
+
+  it('falls back to reply.rootId for the thread target when threadId is absent', async () => {
+    // A reply-in-thread conversation carries no explicit threadId but a reply root;
+    // the upload target must thread off that root so the file lands in the thread.
+    const replyThreaded: WorkerConversationRef = {
+      kind: 'slack',
+      scopeId: 'C_chat',
+      reply: { rootId: '169.01' },
+    };
+    const { sender, uploads } = makeUploadingSender();
+    const feedback = new NeutralChannelFeedback({ sender, conversation: replyThreaded });
+
+    await feedback.updateDone('g', 'r', { artifacts: [fileA] });
+
+    expect(uploads[0].target).toEqual({ channel: 'C_chat', threadTs: '169.01' });
+  });
+
+  it('skips a file that fails to upload (best-effort) and still delivers the result', async () => {
+    const upload = vi
+      .fn<(file: LocalFile) => Promise<RemoteAttachmentRef>>()
+      .mockResolvedValueOnce({ type: 'file', ref: 'remote-a' })
+      .mockRejectedValueOnce(new Error('upload failed'))
+      .mockResolvedValueOnce({ type: 'file', ref: 'remote-c' });
+    const { sender, sends, uploadArtifact } = makeUploadingSender((file) => upload(file));
+    const warn = vi.fn();
+    const feedback = new NeutralChannelFeedback({
+      sender,
+      conversation,
+      logger: { warn } as unknown as Logger,
+    });
+
+    await feedback.updateDone('g', 'r', {
+      artifacts: [fileA, fileB, { path: '/w/c.txt', name: 'c.txt' }],
+    });
+
+    // All three attempted; the failing one skipped, the result still delivered.
+    expect(uploadArtifact).toHaveBeenCalledTimes(3);
+    expect(sends).toHaveLength(1);
+    expect(sends[0].msg).toEqual({
+      kind: 'result',
+      markdown: 'r',
+      artifacts: [
+        { type: 'file', ref: 'remote-a' },
+        { type: 'file', ref: 'remote-c' },
+      ],
+    });
+    expect(warn).toHaveBeenCalledTimes(1);
+  });
+
+  it('still delivers the result text even when EVERY artifact upload fails', async () => {
+    const { sender, sends } = makeUploadingSender(async () => {
+      throw new Error('slack down');
+    });
+    const warn = vi.fn();
+    const feedback = new NeutralChannelFeedback({
+      sender,
+      conversation,
+      logger: { warn } as unknown as Logger,
+    });
+
+    await feedback.updateDone('g', 'r', { artifacts: [fileA, fileB] });
+
+    expect(sends).toHaveLength(1);
+    // No artifacts field when none uploaded — back-compat with the no-artifact shape.
+    expect(sends[0].msg).toEqual({ kind: 'result', markdown: 'r' });
+    expect(warn).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not call uploadArtifact when no artifacts option is given', async () => {
+    const { sender, sends, uploadArtifact } = makeUploadingSender();
+    const feedback = new NeutralChannelFeedback({ sender, conversation });
+
+    await feedback.updateDone('g', 'r');
+
+    expect(uploadArtifact).not.toHaveBeenCalled();
+    expect(sends[0].msg).toEqual({ kind: 'result', markdown: 'r' });
+  });
+
+  it('does not upload when the sender lacks uploadArtifact (Lark-style); result has no artifacts', async () => {
+    // makeRecordingSender returns a send/update-only sender (no uploadArtifact).
+    const { sender, sends } = makeRecordingSender();
+    const feedback = new NeutralChannelFeedback({ sender, conversation });
+
+    await feedback.updateDone('g', 'r', { artifacts: [fileA] });
+
+    expect(sends).toHaveLength(1);
+    expect(sends[0].msg).toEqual({ kind: 'result', markdown: 'r' });
+  });
+
+  it('uploads then UPDATES the ack message in place when an ack handle is threaded', async () => {
+    const ackRef: DeliveryRef = {
+      kind: 'slack',
+      logicalMessageId: 'ack-ts',
+      revision: 0,
+      physicalIds: ['ack-ts'],
+      native: { channel: 'C_chat' },
+    };
+    const { sender, sends, updates, events } = makeUploadingSender();
+    const feedback = new NeutralChannelFeedback({ sender, conversation, ackRef });
+
+    await feedback.updateDone('g', 'r', { artifacts: [fileA] });
+
+    expect(events).toEqual(['upload:a.txt', 'update']);
+    expect(sends).toHaveLength(0);
+    expect(updates).toHaveLength(1);
+    expect(updates[0].msg).toEqual({
+      kind: 'result',
+      markdown: 'r',
+      artifacts: [{ type: 'file', ref: 'remote-a.txt' }],
+    });
   });
 });
 
