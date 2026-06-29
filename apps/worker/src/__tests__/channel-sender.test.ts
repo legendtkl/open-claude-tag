@@ -447,6 +447,203 @@ describe('NeutralChannelFeedback', () => {
   });
 });
 
+describe('NeutralChannelFeedback running phase (Slack Milestone 2)', () => {
+  const conversation: WorkerConversationRef = { kind: 'slack', scopeId: 'C_chat' };
+
+  function slackAckRef(): DeliveryRef {
+    return {
+      kind: 'slack',
+      logicalMessageId: 'ack-ts',
+      revision: 0,
+      physicalIds: ['ack-ts'],
+      native: { channel: 'C_chat' },
+    };
+  }
+
+  it('updates the ack message in place for running then done — no fresh postMessage', async () => {
+    const { sender, sends, updates } = makeRecordingSender();
+    const ackRef = slackAckRef();
+    const feedback = new NeutralChannelFeedback({ sender, conversation, ackRef });
+
+    await feedback.updateRunning({
+      description: 'Executing with codex...',
+      progress: 42,
+      recentActivity: ['[stdout] building', 'running tests'],
+      workDir: '/work',
+    });
+    await feedback.updateDone('do the thing', undefined, { completionText: 'all done' });
+
+    // Both phases edited the SAME ack message; no fresh send was issued.
+    expect(sends).toHaveLength(0);
+    expect(updates).toHaveLength(2);
+    expect(updates[0].ref).toBe(ackRef);
+    expect(updates[1].ref).toBe(ackRef);
+
+    const running = updates[0].msg as { kind: string; markdown: string };
+    expect(running.kind).toBe('text');
+    expect(running.markdown).toContain('Working on the task');
+    expect(running.markdown).toContain('Executing with codex...');
+    expect(running.markdown).toContain('Progress: 42%');
+    expect(running.markdown).toContain('[stdout] building');
+    expect(running.markdown).toContain('/work');
+
+    expect(updates[1].msg).toEqual({ kind: 'result', markdown: 'all done' });
+  });
+
+  it('updates running then renders the error card on failure', async () => {
+    const { sender, sends, updates } = makeRecordingSender();
+    const ackRef = slackAckRef();
+    const feedback = new NeutralChannelFeedback({ sender, conversation, ackRef });
+
+    await feedback.updateRunning({ description: 'Working...', progress: 10 });
+    await feedback.updateFailed('do the thing', 'boom');
+
+    expect(sends).toHaveLength(0);
+    expect(updates).toHaveLength(2);
+    expect((updates[0].msg as { kind: string }).kind).toBe('text');
+    expect(updates[1].msg).toEqual({
+      kind: 'error',
+      message: 'Task failed\nTask: do the thing\n\nboom',
+    });
+  });
+
+  it('coalesces rapid running updates to <=1/s while the terminal always flushes', async () => {
+    const { sender, sends, updates } = makeRecordingSender();
+    const ackRef = slackAckRef();
+    let clock = 0;
+    const feedback = new NeutralChannelFeedback({
+      sender,
+      conversation,
+      ackRef,
+      now: () => clock,
+    });
+
+    await feedback.updateRunning({ description: 'step 1' }); // first ever → flush
+    clock = 200;
+    await feedback.updateRunning({ description: 'step 2' }); // within 1s window → dropped
+    clock = 999;
+    await feedback.updateRunning({ description: 'step 3' }); // still within window → dropped
+    expect(updates).toHaveLength(1);
+    expect((updates[0].msg as { markdown: string }).markdown).toContain('step 1');
+
+    clock = 1000;
+    await feedback.updateRunning({ description: 'step 4' }); // window elapsed → flush
+    expect(updates).toHaveLength(2);
+    expect((updates[1].msg as { markdown: string }).markdown).toContain('step 4');
+
+    // Terminal bypasses the running throttle even though only 100ms passed.
+    clock = 1100;
+    await feedback.updateDone('goal', 'final');
+    expect(updates).toHaveLength(3);
+    expect(updates[2].msg).toEqual({ kind: 'result', markdown: 'final' });
+    expect(sends).toHaveLength(0);
+  });
+
+  it('skips running updates entirely when there is no ack handle to edit', async () => {
+    const { sender, sends, updates } = makeRecordingSender();
+    const feedback = new NeutralChannelFeedback({ sender, conversation });
+
+    await feedback.updateRunning({ description: 'step', progress: 5 });
+    await feedback.updateRunning({ description: 'step again', progress: 6 });
+
+    // No ackRef → no in-place edits, and running never posts a fresh message.
+    expect(updates).toHaveLength(0);
+    expect(sends).toHaveLength(0);
+  });
+
+  it('swallows a thrown running update (best-effort) instead of failing the task', async () => {
+    const ackRef = slackAckRef();
+    const sender: ChannelSender = {
+      send: vi.fn(async (): Promise<DeliveryRef> => {
+        throw new Error('should not be called');
+      }),
+      update: vi.fn(async (): Promise<DeliveryRef> => {
+        throw new Error('chat.update failed');
+      }),
+    };
+    const warn = vi.fn();
+    const feedback = new NeutralChannelFeedback({
+      sender,
+      conversation,
+      ackRef,
+      logger: { warn } as unknown as Logger,
+    });
+
+    await expect(feedback.updateRunning({ description: 'step' })).resolves.toBeUndefined();
+    expect(sender.send).not.toHaveBeenCalled();
+    expect(warn).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps respecting the cap across failures (a failed attempt still consumes the window)', async () => {
+    const ackRef = slackAckRef();
+    let clock = 0;
+    const update = vi.fn(async (): Promise<DeliveryRef> => {
+      throw new Error('chat.update rate limited');
+    });
+    const sender: ChannelSender = {
+      send: vi.fn(async (): Promise<DeliveryRef> => {
+        throw new Error('should not be called');
+      }),
+      update,
+    };
+    const warn = vi.fn();
+    const feedback = new NeutralChannelFeedback({
+      sender,
+      conversation,
+      ackRef,
+      now: () => clock,
+      logger: { warn } as unknown as Logger,
+    });
+
+    await feedback.updateRunning({ description: 'a' }); // attempt 1 (fails, swallowed)
+    clock = 200;
+    await feedback.updateRunning({ description: 'b' }); // within window → not even attempted
+    clock = 999;
+    await feedback.updateRunning({ description: 'c' }); // still within window → not attempted
+    // A failing endpoint is NOT hammered at the event rate: at most one call/window.
+    expect(update).toHaveBeenCalledTimes(1);
+
+    clock = 1000;
+    await feedback.updateRunning({ description: 'd' }); // window elapsed → second attempt
+    expect(update).toHaveBeenCalledTimes(2);
+  });
+
+  it('drives a real SlackChannel.update (chat.update) at the ack channel + ts (no live creds)', async () => {
+    const calls: Array<{ url: string; body: Record<string, unknown> }> = [];
+    const fetchMock = vi.fn(async (url: string, init?: { body?: string }) => {
+      const body = init?.body ? (JSON.parse(init.body) as Record<string, unknown>) : {};
+      calls.push({ url, body });
+      return {
+        ok: true,
+        json: async () => ({ ok: true, ts: body.ts, channel: body.channel }),
+      } as unknown as Response;
+    });
+    const slack = new SlackChannel({ token: 'xoxb-test', fetch: fetchMock as unknown as typeof fetch });
+
+    const ackRef = reconstructAckDeliveryRef({
+      kind: 'slack',
+      scopeId: 'C_chat',
+      messageId: '1710000000.000200',
+    });
+    const feedback = new NeutralChannelFeedback({
+      sender: slack as unknown as ChannelSender,
+      conversation,
+      ackRef,
+    });
+
+    await feedback.updateRunning({ description: 'crunching', progress: 30 });
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0].url).toContain('chat.update');
+    expect(calls[0].body).toMatchObject({
+      channel: 'C_chat',
+      ts: '1710000000.000200',
+    });
+    expect(String(calls[0].body.text)).toContain('Working on the task');
+    expect(String(calls[0].body.text)).toContain('crunching');
+  });
+});
+
 describe('reconstructAckDeliveryRef', () => {
   it('rebuilds a DeliveryRef SlackChannel.update can consume from the serialized handle', () => {
     const ref = reconstructAckDeliveryRef({

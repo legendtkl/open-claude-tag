@@ -258,6 +258,53 @@ export interface NeutralChannelFeedbackOptions {
    */
   ackRef?: DeliveryRef;
   logger?: Logger;
+  /**
+   * Monotonic clock for the running-update rate gate; injectable so tests drive a
+   * deterministic window. Defaults to {@link Date.now}.
+   */
+  now?: () => number;
+}
+
+/** The live running-phase snapshot {@link NeutralChannelFeedback.updateRunning} renders. */
+export interface NeutralRunningFeedbackInput {
+  description: string;
+  progress?: number;
+  recentActivity?: string[];
+  workDir?: string;
+}
+
+/**
+ * Coalesce neutral running-card updates to the channel's `chat.update` cap
+ * (`SlackChannel.capabilities().maxUpdateRateHz` = 1, i.e. 1000ms / 1Hz). A
+ * leading-edge gate sends at most one running update per window and DROPS
+ * intermediate updates inside it (no trailing timer), mirroring the lark running
+ * card's `RUNNING_CARD_UPDATE_INTERVAL_MS` time-gate. The terminal update bypasses
+ * this gate and always flushes the final state (see {@link ThreePhaseFeedback}).
+ */
+export const NEUTRAL_RUNNING_UPDATE_MIN_INTERVAL_MS = 1000;
+
+/**
+ * Render the running-phase snapshot as a neutral markdown body (the same content
+ * the lark running card carries: description, progress, recent activity, workdir).
+ * Truncated to the single-message budget; delivered as a `text` outbound so the
+ * channel renders it through its existing markdown section path (no channel
+ * adapter change). Mirrors the terminal bodies built in {@link NeutralChannelFeedback}.
+ */
+function buildNeutralRunningBody(input: NeutralRunningFeedbackInput): string {
+  const lines: string[] = ['Working on the task...'];
+  const description = input.description?.trim();
+  lines.push(`Task: ${description || '(in progress)'}`);
+  if (typeof input.progress === 'number' && Number.isFinite(input.progress)) {
+    lines.push(`Progress: ${Math.round(input.progress)}%`);
+  }
+  const activity = (input.recentActivity ?? []).filter((line) => line && line.trim());
+  if (activity.length > 0) {
+    lines.push('', 'Recent activity:', ...activity.map((line) => `• ${line}`));
+  }
+  if (input.workDir?.trim()) {
+    lines.push('', `Working dir: ${input.workDir.trim()}`);
+  }
+  return truncateNeutralBody(lines.join('\n'));
 }
 
 /**
@@ -292,27 +339,69 @@ export function reconstructAckDeliveryRef(value: unknown): DeliveryRef | undefin
  * (`result` / `error` / `text`) through the kind-resolved {@link ChannelSender},
  * which the channel adapter renders natively (Slack → Block Kit section).
  *
- * Terminal delivery has two shapes (ADR-0008). When an {@link DeliveryRef}
- * `ackRef` is threaded in, it UPDATES that same ack message in place — like the
- * Lark {@link ThreePhaseFeedback} PATCHing its ack card — so a neutral task shows
- * one live-updating message instead of a separate terminal post. With no `ackRef`
- * (older jobs, or the ACK send failed) it falls back to posting a single terminal
- * message into the task's own conversation. Delivery is best-effort either way —
- * a failure is logged and swallowed so it never fails the already-completed task.
- * It reports no `sentMessageIds` on purpose: those ids must not enter the
- * Lark-shaped thread-key aliasing (neutral aliasing is deferred).
+ * Both a running phase and the terminal outcome share the in-place update
+ * (ADR-0008, Slack Milestone 2). When an {@link DeliveryRef} `ackRef` is threaded
+ * in, {@link updateRunning} edits that same ack message to a live progress card
+ * while the task runs (rate-limited to the channel cap), then the terminal
+ * `updateDone` / `updateFailed` edits it to the result/error — like the Lark
+ * {@link ThreePhaseFeedback} PATCHing its ack card — so a neutral task shows one
+ * live-updating message instead of a separate terminal post. With no `ackRef`
+ * (older jobs, or the ACK send failed) running updates are skipped and the
+ * terminal falls back to posting a single fresh message into the task's own
+ * conversation. Delivery is best-effort either way — a failure is logged and
+ * swallowed so it never fails the already-completed task. It reports no
+ * `sentMessageIds` on purpose: those ids must not enter the Lark-shaped
+ * thread-key aliasing (neutral aliasing is deferred).
  */
 export class NeutralChannelFeedback implements TaskFeedback {
   private readonly sender: ChannelSender;
   private readonly conversation: ConversationRef;
   private readonly ackRef?: DeliveryRef;
   private readonly logger?: Logger;
+  private readonly now: () => number;
+  /** Last running-update timestamp; `null` until the first one (which always flushes). */
+  private lastRunningUpdateAt: number | null = null;
 
   constructor(options: NeutralChannelFeedbackOptions) {
     this.sender = options.sender;
     this.conversation = options.conversation;
     this.ackRef = options.ackRef;
     this.logger = options.logger;
+    this.now = options.now ?? Date.now;
+  }
+
+  /**
+   * Edit the in-place ACK message to a live RUNNING snapshot (Slack Milestone 2).
+   * Skips entirely when there is no `ackRef`: running updates need a handle to
+   * edit, and the terminal path already owns the fresh-message fallback — so a
+   * running update NEVER posts a new message (no `chat.postMessage`). Coalesced to
+   * the channel cap by {@link NEUTRAL_RUNNING_UPDATE_MIN_INTERVAL_MS}: a
+   * leading-edge gate drops updates that arrive inside the open window (keeping the
+   * first of each window, not a trailing-latest). Best-effort / no-throw via the
+   * shared {@link deliver} — a thrown or rate-limited running update never fails
+   * the task and never blocks the terminal update.
+   */
+  async updateRunning(input: NeutralRunningFeedbackInput): Promise<void> {
+    if (!this.ackRef) return;
+    const now = this.now();
+    if (
+      this.lastRunningUpdateAt !== null &&
+      now - this.lastRunningUpdateAt < NEUTRAL_RUNNING_UPDATE_MIN_INTERVAL_MS
+    ) {
+      return;
+    }
+    await this.deliver(
+      { kind: 'text', markdown: buildNeutralRunningBody(input) },
+      'running',
+      input.description,
+    );
+    // Advance the window on every gated ATTEMPT (success or swallowed failure),
+    // not only on success: each `deliver` is a real `chat.update` call against the
+    // cap, and the common failure here is being rate-limited — retrying it at the
+    // full runtime-event rate would hammer the very endpoint the cap protects. The
+    // worst case is a ~1s cosmetic delay before the next attempt; the terminal
+    // update always flushes the true final state regardless.
+    this.lastRunningUpdateAt = now;
   }
 
   async updateDone(
@@ -340,13 +429,15 @@ export class NeutralChannelFeedback implements TaskFeedback {
 
   private async deliver(
     msg: OutboundMessage,
-    phase: 'done' | 'failed' | 'quota',
+    phase: 'running' | 'done' | 'failed' | 'quota',
     description: string,
   ): Promise<void> {
     try {
       // With a threaded ack handle, update that message in place (single live
       // message); otherwise post a fresh terminal message. An update failure is
       // swallowed (not retried as a send) so a partial edit can't double-post.
+      // (A `running` phase only reaches here with an ackRef — updateRunning
+      // returns early without one — so running never posts a fresh message.)
       if (this.ackRef) {
         await this.sender.update(this.ackRef, msg);
       } else {

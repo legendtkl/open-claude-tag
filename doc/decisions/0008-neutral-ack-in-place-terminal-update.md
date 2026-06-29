@@ -42,8 +42,9 @@ the job so the worker updates that same message in place.
   terminal `deliver()` calls `sender.update(ackRef, msg)` when present, else
   `sender.send(conversation, msg)`. Both are best-effort (warn + swallow); an
   `update` failure is NOT retried as a send, so a partial edit can't double-post.
-  Only the single in-place TERMINAL update is added (respecting Slack's
-  `maxUpdateRateHz: 1`); intermediate running updates stay lark-only for now.
+  This decision added only the single in-place TERMINAL update; intermediate
+  running updates were deferred. See the Slack Milestone 2 amendment below, which
+  adds the running phase on the same handle.
 
 ### Durability + the orphan edge
 
@@ -64,6 +65,47 @@ handle) → the worker posts a fresh terminal message and the first "Task queued
 is left orphaned. This is rare (enqueue is a local insert), cosmetic, and the
 task still completes correctly. Closing it would require persisting the handle on
 the task row; a DB column was deliberately avoided for a cosmetic edge.
+
+### Amendment (Slack Milestone 2): running-phase in-place updates
+
+This decision originally added only the terminal in-place update and left
+intermediate running updates lark-only. Milestone 2 reverses that deferral: the
+worker now also updates the SAME ack message to a live RUNNING card while the task
+runs, so a neutral task shows the full queued → running → done/failed lifecycle on
+one message (a neutral equivalent of lark's `ThreePhaseFeedback`).
+
+- **Seam.** `NeutralChannelFeedback` gains `updateRunning(snapshot)`, driven from
+  the worker's existing runtime-event loop (the `updateRunningCard` closure, which
+  already maintains the running description / progress / recent-activity / workdir
+  snapshot). It renders the snapshot as a `text` outbound (reusing the channel's
+  markdown section path — no channel-adapter change) and edits it onto the ackRef
+  via the same no-throw `deliver()`. The lark `ThreePhaseFeedback` /
+  `updateRunningFeedbackCard` path is untouched.
+- **Rate cap (leading-edge).** Running updates are coalesced to the channel's
+  `maxUpdateRateHz` (Slack = 1, i.e. ≥1000ms between running edits) by a
+  leading-edge gate: the first update in each open window is sent and intermediate
+  updates are DROPPED — there is no trailing timer, so it never queues work or
+  exceeds the cap. This drops intermediate running snapshots rather than always
+  showing the latest; that is an accepted tradeoff (it mirrors lark's existing
+  `RUNNING_CARD_UPDATE_INTERVAL_MS` time-gate and avoids trailing-timer/cleanup
+  complexity), and the terminal update always reflects the true final state. The
+  window advances on every gated ATTEMPT, not only on success: each `chat.update`
+  counts against the cap, and the common failure mode here is being rate-limited,
+  so retrying a failed update at the full event rate would hammer the very endpoint
+  the cap protects.
+- **Terminal bypasses the gate.** `updateDone` / `updateFailed` do NOT consult the
+  running rate gate — the terminal update always flushes. A terminal `chat.update`
+  can therefore immediately follow a running one; if Slack rate-limits that
+  terminal edit, the pre-existing best-effort/no-retry contract (above) leaves the
+  card on the last running snapshot. This is an accepted, rare, cosmetic edge
+  (no worse than a lost terminal pre-M2, which left the stale "Task queued"); a
+  delayed terminal retry is deliberately deferred.
+- **No handle / no sender.** With no `ackRef` (no ACK posted) `updateRunning`
+  no-ops and the terminal still falls back to a fresh send; with no per-team Slack
+  sender the worker never builds the feedback, so there are no running updates and
+  the terminal is skipped — both unchanged from the M1 behavior.
+- **No capability change.** The running card is markdown via `text`
+  (`supportsStreamingEdit` is already true); no channel capability flag flips.
 
 ## Consequences
 
