@@ -25,6 +25,12 @@ import { resolveTaskFeishuClient, type TaskFeishuClientResolver } from './agent-
 export type OutboundMessage = Parameters<LarkChannel['send']>[1];
 /** A handle over the physical message(s) a logical send produced. */
 export type DeliveryRef = Awaited<ReturnType<LarkChannel['send']>>;
+/** A local file staged for outbound upload (derived from the channel contract). */
+export type LocalFile = Parameters<LarkChannel['uploadArtifact']>[0];
+/** A handle over a file uploaded into the channel (derived from the contract). */
+export type RemoteAttachmentRef = Awaited<ReturnType<LarkChannel['uploadArtifact']>>;
+/** Where an outbound artifact upload should land: a conversation + optional thread. */
+export type ArtifactUploadTarget = { channel?: string; threadTs?: string };
 /** Optional send controls; carries the exactly-once `idempotencyKey`. */
 export type SendOptions = Parameters<LarkChannel['send']>[2];
 type UpdateOptions = Parameters<LarkChannel['update']>[2];
@@ -64,6 +70,15 @@ export interface ChannelSender {
    * {@link removeAckReactionViaChannel}.
    */
   removeReaction?(ref: ReactionRef): Promise<void>;
+  /**
+   * Upload a local file into the channel, optionally targeting a conversation +
+   * thread so the bytes post in-thread (Slack M3b). Optional: a send/update-only
+   * sender omits it, and {@link NeutralChannelFeedback} only uploads when the
+   * resolved sender implements it (the Slack `SlackChannel` does). The `target`
+   * is the wider signature the `SlackChannel` accepts; it still satisfies the
+   * single-arg `Channel.uploadArtifact` contract.
+   */
+  uploadArtifact?(file: LocalFile, target?: ArtifactUploadTarget): Promise<RemoteAttachmentRef>;
 }
 
 /** A {@link ChannelSender} backed by a {@link LarkChannel}. */
@@ -80,6 +95,14 @@ export class LarkChannelSender implements ChannelSender {
 
   removeReaction(ref: ReactionRef): Promise<void> {
     return this.channel.removeReaction(ref);
+  }
+
+  uploadArtifact(file: LocalFile, _target?: ArtifactUploadTarget): Promise<RemoteAttachmentRef> {
+    // LarkChannel.uploadArtifact has no conversation-targeting parameter (a Lark
+    // artifact does not post into a thread today; the method currently throws),
+    // so the target is dropped and the call stays byte-identical to the single-arg
+    // contract. Conversation-thread upload is the Slack sender's behavior.
+    return this.channel.uploadArtifact(file);
   }
 }
 
@@ -219,6 +242,13 @@ export interface TaskFeedbackDoneResult {
 export interface TaskFeedbackDoneOptions {
   completionText?: string;
   allowedMentions?: Array<{ openId: string; name: string; isBot?: boolean }>;
+  /**
+   * Worker-readable local files to upload into the conversation thread before the
+   * terminal result is delivered (Slack M3b, decision D-S10). Consumed only by
+   * {@link NeutralChannelFeedback} (whose sender can upload); the Lark
+   * {@link ThreePhaseFeedback} ignores it, so its terminal behavior is unchanged.
+   */
+  artifacts?: LocalFile[];
 }
 
 /**
@@ -417,8 +447,54 @@ export class NeutralChannelFeedback implements TaskFeedback {
   ): Promise<TaskFeedbackDoneResult | undefined> {
     const body =
       options.completionText?.trim() || result?.trim() || `Task complete\nTask: ${description}`;
-    await this.deliver({ kind: 'result', markdown: truncateNeutralBody(body) }, 'done', description);
+    // Upload artifacts FIRST so the file messages already exist in-thread when the
+    // result text (which references them) is delivered. Best-effort: a per-file
+    // failure is logged + skipped and NEVER blocks the terminal delivery.
+    const artifacts = await this.uploadArtifacts(options.artifacts ?? []);
+    const msg: OutboundMessage = {
+      kind: 'result',
+      markdown: truncateNeutralBody(body),
+      ...(artifacts.length > 0 ? { artifacts } : {}),
+    };
+    await this.deliver(msg, 'done', description);
     return { sentMessageIds: [] };
+  }
+
+  /** The thread root a file/reply targets: explicit threadId, else the reply root. */
+  private threadTarget(): string | undefined {
+    return this.conversation.threadId ?? this.conversation.reply?.rootId;
+  }
+
+  /**
+   * Best-effort upload of each artifact into the conversation thread. Returns only
+   * the refs that uploaded successfully; a sender without `uploadArtifact` (e.g. a
+   * Lark-style stub) uploads nothing. A single file's failure is logged and
+   * skipped — it must never throw or block the terminal text delivery (Codex
+   * RISK-3).
+   */
+  private async uploadArtifacts(files: LocalFile[]): Promise<RemoteAttachmentRef[]> {
+    if (files.length === 0 || !this.sender.uploadArtifact) return [];
+    const target: ArtifactUploadTarget = {
+      channel: this.conversation.scopeId,
+      ...(this.threadTarget() ? { threadTs: this.threadTarget() } : {}),
+    };
+    const refs: RemoteAttachmentRef[] = [];
+    for (const file of files) {
+      try {
+        refs.push(await this.sender.uploadArtifact(file, target));
+      } catch (err) {
+        this.logger?.warn(
+          {
+            err,
+            fileName: file.name,
+            channelKind: this.conversation.kind,
+            scopeId: this.conversation.scopeId,
+          },
+          'Failed to upload task artifact to conversation thread (skipped)',
+        );
+      }
+    }
+    return refs;
   }
 
   async updateFailed(description: string, error: string): Promise<void> {

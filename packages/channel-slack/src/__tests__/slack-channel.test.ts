@@ -81,11 +81,12 @@ describe('SlackChannel', () => {
     expect(caps.supportsStreamingEdit).toBe(true);
     expect(caps.supportsThreads).toBe(true);
     expect(caps.supportsReactions).toBe(true);
-    // Honest until the stage-6 Slack interactive/upload work lands (#13).
+    // Honest until the stage-6 Slack interactive work lands (#13).
     expect(caps.supportsForms).toBe(false);
     expect(caps.supportsApprovalButtons).toBe(false);
     expect(caps.supportsAttachmentsIn).toEqual(['image', 'file', 'audio']);
-    expect(caps.supportsAttachmentsOut).toEqual([]);
+    // M3b: outbound artifacts now reach the conversation thread.
+    expect(caps.supportsAttachmentsOut).toEqual(['image', 'file']);
     expect(caps.maxOutboundChars).toBe(40000);
     expect(caps.maxOutboundElements).toBe(50);
     expect(caps.maxUpdateRateHz).toBe(1);
@@ -329,7 +330,117 @@ describe('SlackChannel', () => {
     expect(urls[0]).toContain('https://slack.com/api/files.getUploadURLExternal?');
     expect(urls[1]).toBe('https://files.slack.com/upload/v1/ABC');
     expect(urls[2]).toBe('https://slack.com/api/files.completeUploadExternal');
+
+    // With no target the completeUploadExternal body never associates a
+    // conversation: no `channel_id`/`thread_ts` (file stays workspace-private).
+    const completeBody = new URLSearchParams(
+      (seq.calls.mock.calls[2][1] as RequestInit).body as string,
+    );
+    expect(completeBody.has('channel_id')).toBe(false);
+    expect(completeBody.has('thread_ts')).toBe(false);
+    expect(completeBody.has('channels')).toBe(false);
     await rm(dir, { recursive: true, force: true });
+  });
+
+  it('shares the artifact into a conversation thread when a target is given (M3b)', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'slack-up-'));
+    const src = join(dir, 'note.txt');
+    await writeFile(src, 'payload');
+
+    const seq = mockFetchSeq([
+      { ok: true, upload_url: 'https://files.slack.com/upload/v1/ABC', file_id: 'F123' },
+      { ok: true },
+      { ok: true, files: [{ id: 'F123', name: 'note.txt' }] },
+    ]);
+    const ch = new SlackChannel({ token: 'xoxb-test', fetch: seq.fetch });
+
+    await ch.uploadArtifact(
+      { path: src, name: 'note.txt' },
+      { channel: 'C_chat', threadTs: '1710000000.000050' },
+    );
+
+    // The modern external flow uses `channel_id` (singular) + `thread_ts`, NOT the
+    // legacy `files.upload` `channels` (plural).
+    const completeBody = new URLSearchParams(
+      (seq.calls.mock.calls[2][1] as RequestInit).body as string,
+    );
+    expect(completeBody.get('channel_id')).toBe('C_chat');
+    expect(completeBody.get('thread_ts')).toBe('1710000000.000050');
+    expect(completeBody.has('channels')).toBe(false);
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it('shares into the conversation without a thread_ts when none is given', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'slack-up-'));
+    const src = join(dir, 'note.txt');
+    await writeFile(src, 'payload');
+
+    const seq = mockFetchSeq([
+      { ok: true, upload_url: 'https://files.slack.com/upload/v1/ABC', file_id: 'F123' },
+      { ok: true },
+      { ok: true, files: [{ id: 'F123', name: 'note.txt' }] },
+    ]);
+    const ch = new SlackChannel({ token: 'xoxb-test', fetch: seq.fetch });
+
+    await ch.uploadArtifact({ path: src, name: 'note.txt' }, { channel: 'C_chat' });
+
+    const completeBody = new URLSearchParams(
+      (seq.calls.mock.calls[2][1] as RequestInit).body as string,
+    );
+    expect(completeBody.get('channel_id')).toBe('C_chat');
+    expect(completeBody.has('thread_ts')).toBe(false);
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it('renders a result with artifacts as :paperclip: reference blocks + fallback names', async () => {
+    await channel.send(TO, {
+      kind: 'result',
+      markdown: 'All done',
+      artifacts: [
+        { type: 'file', ref: 'F1', native: { id: 'F1', name: 'report.md' } },
+        { type: 'image', ref: 'F2', native: { id: 'F2', title: 'chart.png' } },
+        // No native name/title → falls back to the opaque ref id.
+        { type: 'file', ref: 'F3' },
+      ],
+    });
+    const body = lastBody(fetchMock.calls);
+    const blocks = body.blocks as { type: string; text?: { text: string } }[];
+    // body block + one section per artifact.
+    expect(blocks).toHaveLength(4);
+    expect(blocks[0].text?.text).toBe('All done');
+    expect(blocks[1].text?.text).toBe(':paperclip: report.md');
+    expect(blocks[2].text?.text).toBe(':paperclip: chart.png');
+    expect(blocks[3].text?.text).toBe(':paperclip: F3');
+    // Fallback text lists the file names so notification surfaces stay readable.
+    expect(body.text).toContain('All done');
+    expect(body.text).toContain('report.md');
+    expect(body.text).toContain('chart.png');
+  });
+
+  it('leaves a result without artifacts unchanged (regression)', async () => {
+    await channel.send(TO, { kind: 'result', markdown: '# Answer\nAll done' });
+    const body = lastBody(fetchMock.calls);
+    const blocks = body.blocks as unknown[];
+    expect(blocks).toHaveLength(1);
+    expect(body.text).toBe('# Answer\nAll done');
+  });
+
+  it('truncates a large artifact set against the ~50-block cap with a visible (+N more) note', async () => {
+    const artifacts = Array.from({ length: 60 }, (_, i) => ({
+      type: 'file' as const,
+      ref: `F${i}`,
+      native: { id: `F${i}`, name: `file-${i}.txt` },
+    }));
+    await channel.send(TO, { kind: 'result', markdown: 'Done', artifacts });
+    const body = lastBody(fetchMock.calls);
+    const blocks = body.blocks as { type: string; text?: { text: string } }[];
+    // Never exceeds the Block Kit cap.
+    expect(blocks.length).toBeLessThanOrEqual(50);
+    expect(blocks).toHaveLength(50);
+    // body(1) + shown refs(48) + overflow note(1) = 50; 60 - 48 = 12 hidden.
+    const note = blocks[blocks.length - 1].text?.text ?? '';
+    expect(note).toContain('+12 more');
+    expect(body.text).toContain('(+12 more)');
   });
 
   it('fetchAttachment downloads url_private and sanitizes a traversal-laden name', async () => {
