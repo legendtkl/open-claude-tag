@@ -138,6 +138,11 @@ import {
   createSlackEventsHandler,
   createSlackInboundDispatch,
 } from './slack-events.js';
+import {
+  SLACK_INTERACTIVE_PATH,
+  createSlackInteractiveHandler,
+  createSlackInteractionDispatch,
+} from './slack-interactive.js';
 import { dispatchNeutralMessage } from './neutral-dispatch.js';
 import type { NeutralAckDelivery } from './neutral-dispatch.js';
 import { createSlackInstallationResolver } from './slack-installation-resolver.js';
@@ -3009,11 +3014,30 @@ function isSlackEventsPath(url: string): boolean {
   return SLACK_SIGNING_SECRET !== '' && (url.split('?')[0] ?? '') === SLACK_EVENTS_PATH;
 }
 
+function isSlackInteractivePath(url: string): boolean {
+  return SLACK_SIGNING_SECRET !== '' && (url.split('?')[0] ?? '') === SLACK_INTERACTIVE_PATH;
+}
+
+// Slack interactivity (`/slack/interactive`) is `application/x-www-form-urlencoded`,
+// for which Fastify has no built-in parser (it would 415). Register a thin
+// passthrough ONCE so the route is reachable; the interactive handler reads
+// `request.rawBody` (captured by the preParsing hook below) for BOTH the signature
+// and the `payload` field, so the parsed string body is intentionally unused.
+app.addContentTypeParser(
+  'application/x-www-form-urlencoded',
+  { parseAs: 'string' },
+  (_req, body, done) => done(null, body),
+);
+
 app.addHook('preParsing', async (request, _reply, payload) => {
-  // Both the Feishu webhook and the Slack Events API need the EXACT raw bytes for
-  // signature verification, so capture them here and re-stream so Fastify still
-  // JSON-parses. This only ADDS the Slack path; Feishu paths are unchanged.
-  if (!isFeishuWebhookPath(request.url) && !isSlackEventsPath(request.url)) {
+  // The Feishu webhook, the Slack Events API, and Slack interactivity all need the
+  // EXACT raw bytes for signature verification, so capture them here and re-stream
+  // so Fastify still parses. This only ADDS the Slack paths; Feishu is unchanged.
+  if (
+    !isFeishuWebhookPath(request.url) &&
+    !isSlackEventsPath(request.url) &&
+    !isSlackInteractivePath(request.url)
+  ) {
     return payload;
   }
 
@@ -3470,6 +3494,30 @@ if (SLACK_SIGNING_SECRET) {
   });
   app.post(SLACK_EVENTS_PATH, { bodyLimit: FEISHU_WEBHOOK_MAX_BODY_BYTES }, slackHandler);
   logger.info({ path: SLACK_EVENTS_PATH }, 'Slack Events API inbound route registered');
+
+  // Slack interactivity (Block Kit `block_actions`) callback transport (#21 M3a).
+  // Same signing-secret gate as the events route; verification runs on the raw
+  // bytes captured by the preParsing hook BEFORE any payload is trusted. An
+  // accepted interaction is deduped (composite key) and handed to the optional
+  // consumer seam, which stays UNSET in M3a (no neutral approval consumer exists
+  // yet, design D-S6 / Codex FLAW-1) — the request still verifies, dedupes, and
+  // acks an empty 200 so Slack stops retrying.
+  const slackInteractiveHandler = createSlackInteractiveHandler({
+    signingSecret: SLACK_SIGNING_SECRET,
+    dispatch: (message) =>
+      createSlackInteractionDispatch({
+        db,
+        logger,
+        // onInteraction intentionally unset until a neutral approval consumer lands.
+      })(message),
+    logger,
+  });
+  app.post(
+    SLACK_INTERACTIVE_PATH,
+    { bodyLimit: FEISHU_WEBHOOK_MAX_BODY_BYTES },
+    slackInteractiveHandler,
+  );
+  logger.info({ path: SLACK_INTERACTIVE_PATH }, 'Slack interactivity inbound route registered');
 }
 
 app.get('/health', async () => {
