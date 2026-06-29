@@ -281,6 +281,13 @@
       "when": 1783209600000,
       "tag": "0039_channel_observation_retention",
       "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1783296000000,
+      "tag": "0040_slack_installations",
+      "breakpoints": true
     }
   ]
 }

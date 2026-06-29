@@ -90,7 +90,6 @@ import {
   createFeishuTaskTrackingConfigFromEnv,
   normalizeInteractionReason,
 } from '@open-tag/feishu-adapter';
-import { SlackChannel } from '@open-tag/channel-slack';
 import { createLlmClientFromEnv } from '@open-tag/llm-client';
 import type { LlmClient } from '@open-tag/llm-client';
 import {
@@ -165,6 +164,10 @@ import {
   createWorkerFeishuClientRegistry,
   type WorkerFeishuClientRegistry,
 } from './feishu-client-registry.js';
+import {
+  createWorkerSlackClientRegistry,
+  type WorkerSlackClientRegistry,
+} from './slack-client-registry.js';
 import {
   buildTaskConversationRef,
   createLarkChannelSender,
@@ -385,8 +388,11 @@ const DAEMON_GATEWAY_PUBLIC = process.env.DAEMON_GATEWAY_PUBLIC === 'true';
 let db: Database;
 let feishuClient: FeishuClient | null = null;
 let feishuClientRegistry: WorkerFeishuClientRegistry | null = null;
-// Worker-held Slack sender (a SlackChannel) for non-Lark terminal feedback,
-// built in main() from SLACK_BOT_TOKEN. Null when no token is configured.
+// Per-team Slack sender registry for non-Lark terminal feedback (Slack Milestone
+// 1a, ADR-0013). Resolves a SlackChannel by the task's team_id from the
+// slack_installations store; the env SLACK_BOT_TOKEN is the single-workspace
+// fallback (registry.primarySender). Null until built in main().
+let slackClientRegistry: WorkerSlackClientRegistry | null = null;
 let slackSender: ChannelSender | null = null;
 let runtimeManager: RuntimeManager;
 let daemonGateway: DaemonGateway | null = null;
@@ -1337,7 +1343,16 @@ async function processTask(job: { id: string; data: TaskJobData }): Promise<void
       // handle (constraints.ackDelivery, ADR-0008), the terminal state UPDATES
       // that same ack message in place; otherwise a fresh terminal message is
       // sent. Running-card live updates + full Block Kit parity are deferred.
-      const neutralSender = resolveTaskChannelSender(channelKind, { slackSender });
+      // Resolve the Slack sender by the task's team_id (Slack Milestone 1a): the
+      // neutral dispatch stamps constraints.tenantKey = the Slack team_id, so the
+      // registry returns ITS workspace's SlackChannel (env fallback only in
+      // single-workspace mode). getClient never throws; a null keeps the existing
+      // no-throw/null-skip contract below. Non-slack kinds keep the env slackSender.
+      const teamSlackSender =
+        channelKind === 'slack' && slackClientRegistry
+          ? await slackClientRegistry.getClient(tenantKey)
+          : slackSender;
+      const neutralSender = resolveTaskChannelSender(channelKind, { slackSender: teamSlackSender });
       const ackDeliveryRef = reconstructAckDeliveryRef(taskConstraints.ackDelivery);
       if (chatId && neutralSender) {
         feedback = new NeutralChannelFeedback({
@@ -3297,13 +3312,23 @@ async function main(): Promise<void> {
     logger,
   });
   feishuClient = feishuClientRegistry.primaryClient;
-  // Slack sender (optional): a SlackChannel doubles as the worker's ChannelSender,
-  // so a Slack-dispatched task's terminal feedback reaches its own channel. Built
-  // from env, mirroring how the API wires its Slack sender from SLACK_BOT_TOKEN.
-  slackSender = SLACK_BOT_TOKEN ? new SlackChannel({ token: SLACK_BOT_TOKEN }) : null;
-  if (slackSender) {
-    logger.info('Slack channel sender configured for non-lark task feedback delivery');
-  }
+  // Slack senders (optional): a per-team SlackChannel registry resolves a
+  // Slack-dispatched task's terminal feedback to ITS OWN workspace's channel by
+  // team_id (Slack Milestone 1a). The env SLACK_BOT_TOKEN is the single-workspace
+  // fallback (registry.primarySender); both API and worker read the same store.
+  slackClientRegistry = await createWorkerSlackClientRegistry({
+    db,
+    primaryToken: SLACK_BOT_TOKEN,
+    logger,
+  });
+  slackSender = slackClientRegistry.primarySender;
+  logger.info(
+    {
+      registeredTeamCount: slackClientRegistry.registeredTeamIds().length,
+      hasEnvFallback: Boolean(slackSender),
+    },
+    'Slack client registry configured for non-lark task feedback delivery',
+  );
   if (FEISHU_ACCESS_DISABLED) {
     logger.info(
       { instanceId: INSTANCE_ID, instanceRole: INSTANCE_ROLE },

@@ -62,7 +62,15 @@ export interface NeutralDispatchContext {
   getTaskStatus(taskId: string): Promise<string | null>;
   transitionTask(taskId: string, status: TaskStatus): Promise<void>;
   enqueue(job: TaskJobData): Promise<string>;
-  resolveSender(kind: ChannelKind): FeedbackChannelSender;
+  /**
+   * Resolve the outbound ACK sender for `kind`, scoped to `installationId` (the
+   * Slack `team_id` / Lark tenant key) so a per-team bot token is chosen (Slack
+   * Milestone 1a). Async because the per-team token is resolved from the
+   * installation store. The Lark path ignores `installationId` (its sender is the
+   * per-request Feishu app context). May throw/return an unconfigured sender for a
+   * team with no token — `sendNeutralAck` treats that as a best-effort no-ACK.
+   */
+  resolveSender(kind: ChannelKind, installationId?: string): Promise<FeedbackChannelSender>;
   /**
    * Persist the captured ACK-message handle for `taskId` (issue #14) so a recovery
    * redelivery can rehydrate it. Called best-effort at the call site: a failure
@@ -215,7 +223,7 @@ async function sendNeutralAck(
   result: NeutralQueuedTaskResult,
 ): Promise<NeutralAckDelivery | undefined> {
   try {
-    const sender = ctx.resolveSender(message.channel.kind);
+    const sender = await ctx.resolveSender(message.channel.kind, message.scope.installationId);
     const conversation = neutralAckConversation(message);
     const ref = await sender.send(conversation, {
       kind: 'text',

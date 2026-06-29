@@ -10,5 +10,6 @@ export * from './admission-lease-repository.js';
 export * from './waiting-contract-repository.js';
 export * from './discussion-repository.js';
 export * from './task-ack-delivery-repository.js';
+export * from './slack-installation-repository.js';
 export * from './machines.js';
 export * from './platform-users.js';

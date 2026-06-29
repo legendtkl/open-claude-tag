@@ -71,7 +71,6 @@ import {
 } from '@open-tag/feishu-adapter';
 import type {
   CreateTrackedTaskInput,
-  FeedbackChannelSender,
   NormalizedDocumentCommentEvent,
   NormalizerConfig,
 } from '@open-tag/feishu-adapter';
@@ -140,6 +139,7 @@ import {
 } from './slack-events.js';
 import { dispatchNeutralMessage } from './neutral-dispatch.js';
 import type { NeutralAckDelivery } from './neutral-dispatch.js';
+import { createSlackInstallationResolver } from './slack-installation-resolver.js';
 import { WorkerHealthMonitor } from './worker-health-monitor.js';
 import {
   WorktreeRetentionCleanupService,
@@ -256,7 +256,7 @@ const FEISHU_DOCUMENT_COMMENTS_ENABLED = process.env.OPEN_TAG_FEISHU_DOCUMENT_CO
 // signing secret is configured, so an unconfigured instance exposes no Slack
 // endpoint at all (404). The bot token is optional for inbound-only use.
 const SLACK_SIGNING_SECRET = process.env.SLACK_SIGNING_SECRET?.trim() ?? '';
-const SLACK_BOT_TOKEN = process.env.SLACK_BOT_TOKEN ?? '';
+const SLACK_BOT_TOKEN = process.env.SLACK_BOT_TOKEN?.trim() ?? '';
 // Opt-in @-mention addressing gate for Slack task dispatch (ADR-0005). Unset ⇒
 // Slack stays observation-only (no task dispatch), so production behavior is
 // unchanged by default.
@@ -3375,19 +3375,26 @@ if (SLACK_SIGNING_SECRET) {
   // `db` is assigned during async startup (below), after this synchronous route
   // registration, so build the dispatcher per-call to read `db` at request time
   // — the same deferred-`db` pattern the Feishu webhook handler uses.
+  // `slackChannel` only needs to `normalize()` inbound (no token required). The
+  // per-team bot token for the ACK sender + the per-team bot_user_id for the
+  // @-mention gate are resolved per request from the slack_installations store,
+  // with the env SLACK_BOT_TOKEN / SLACK_BOT_USER_ID acting as a synthetic
+  // single-workspace install (Slack Milestone 1a, ADR-0013).
   const slackChannel = new SlackChannel({ token: SLACK_BOT_TOKEN });
-  // `SlackChannel` implements send/update, so it doubles as the neutral ACK
-  // sender once a bot token is configured. With no token the slot stays
-  // unconfigured (the resolver throws and the neutral path's best-effort ACK
-  // swallows it), so an enabled-without-token instance degrades to no-ACK rather
-  // than losing tasks — warned at startup so the misconfig is not silent.
-  const slackFeedbackSender: FeedbackChannelSender | undefined = SLACK_BOT_TOKEN
-    ? slackChannel
-    : undefined;
-  if (SLACK_BOT_USER_ID && !slackFeedbackSender) {
+  const slackInstallationResolver = createSlackInstallationResolver({
+    getDb: () => db,
+    defaultBotToken: SLACK_BOT_TOKEN || undefined,
+    defaultBotUserId: SLACK_BOT_USER_ID || undefined,
+    logger,
+  });
+  // With no per-team rows AND no env token, an enabled-without-token instance
+  // degrades to no-ACK (the resolver returns undefined, resolveChannelSender
+  // throws, and the neutral path's best-effort ACK swallows it) rather than losing
+  // tasks — warned at startup so the single-workspace misconfig is not silent.
+  if (SLACK_BOT_USER_ID && !SLACK_BOT_TOKEN) {
     logger.warn(
       { path: SLACK_EVENTS_PATH },
-      'Slack task dispatch is enabled (SLACK_BOT_USER_ID set) but no SLACK_BOT_TOKEN is configured; queued Slack tasks will not receive an ACK until a bot token is set',
+      'Slack task dispatch is enabled (SLACK_BOT_USER_ID set) but no SLACK_BOT_TOKEN is configured; single-workspace queued Slack tasks will not receive an ACK until a bot token (env or a per-team installation) is set',
     );
   }
   const slackHandler = createSlackEventsHandler({
@@ -3397,7 +3404,10 @@ if (SLACK_SIGNING_SECRET) {
       createSlackInboundDispatch({
         db,
         logger,
-        botUserId: SLACK_BOT_USER_ID || undefined,
+        // Per-team @-mention gate (Slack Milestone 1a): resolve the bot user id by
+        // the message's team_id, env SLACK_BOT_USER_ID only as single-workspace fallback.
+        resolveBotUserId: (installationId) =>
+          slackInstallationResolver.resolveBotUserId(installationId),
         // Neutral (ADR-0005) task dispatch for messages addressed to the bot.
         // db/queue are read at request time (assigned during async startup).
         dispatchTask: async (inbound) => {
@@ -3414,7 +3424,18 @@ if (SLACK_SIGNING_SECRET) {
             },
             transitionTask: (taskId, status) => transitionTask(db, taskId, status),
             enqueue: (job) => queue.enqueue(job),
-            resolveSender: (kind) => resolveChannelSender(kind, { slackSender: slackFeedbackSender }),
+            // Resolve the ACK sender by the message's team_id (Slack Milestone 1a):
+            // a per-team SlackChannel from the stored token, env SLACK_BOT_TOKEN
+            // only as single-workspace fallback. Lark is unaffected (it never enters
+            // the neutral path). An unknown team in multi-workspace mode resolves to
+            // no sender ⇒ best-effort no-ACK.
+            resolveSender: async (kind, installationId) => {
+              const slackSender =
+                kind === 'slack'
+                  ? await slackInstallationResolver.resolveSender(installationId)
+                  : undefined;
+              return resolveChannelSender(kind, { slackSender });
+            },
             // Persist/rehydrate the ACK handle through the task's existing
             // constraints jsonb (issue #14) so a recovery redelivery updates the
             // original ACK message in place instead of orphaning it.

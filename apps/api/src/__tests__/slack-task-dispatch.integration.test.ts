@@ -121,7 +121,7 @@ describePg('Slack neutral task dispatch (Postgres)', () => {
         db,
         logger: noopLogger,
         channelMemoryEnabled: false, // isolate the task path from observation memory
-        botUserId: BOT_USER_ID,
+        resolveBotUserId: async () => BOT_USER_ID,
         dispatchTask: async (message) => {
           await dispatchNeutralMessage(message, {
             resolveSession: (m) => resolveSession(db, m),
@@ -136,7 +136,7 @@ describePg('Slack neutral task dispatch (Postgres)', () => {
             },
             transitionTask: (taskId, status) => transitionTask(db, taskId, status),
             enqueue: (job) => enqueueFn(job as { taskId: string }),
-            resolveSender: (kind) => resolveChannelSender(kind, { slackSender: stubSender }),
+            resolveSender: async (kind) => resolveChannelSender(kind, { slackSender: stubSender }),
             persistAckDelivery: (taskId, ack) => setTaskAckDelivery(db, taskId, ack),
             loadAckDelivery: (taskId) => getTaskAckDelivery<NeutralAckDelivery>(db, taskId),
             logger: noopLogger,
