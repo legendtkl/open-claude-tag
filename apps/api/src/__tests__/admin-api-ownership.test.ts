@@ -17,6 +17,7 @@ import {
   machines,
   platformUsers,
   sessions,
+  slackInstallations,
   tasks,
 } from '@open-tag/storage';
 import type { Database } from '@open-tag/storage';
@@ -52,6 +53,13 @@ describePg('admin api store ownership matrix', () => {
   const legacyAppId = randomUUID();
   const aliceSharedAppId = randomUUID();
   const bobSharedAppId = randomUUID();
+  // Slack installations (ADR-0013): one each for Alice / Bob / a legacy NULL-owner.
+  const aliceSlackId = randomUUID();
+  const bobSlackId = randomUUID();
+  const legacySlackId = randomUUID();
+  const aliceSlackTeam = `TS_alice_${randomUUID().slice(0, 8)}`;
+  const bobSlackTeam = `TS_bob_${randomUUID().slice(0, 8)}`;
+  const legacySlackTeam = `TS_legacy_${randomUUID().slice(0, 8)}`;
   const aliceAgentId = randomUUID();
   const bobAgentId = randomUUID();
   const legacyAgentId = randomUUID();
@@ -123,6 +131,11 @@ describePg('admin api store ownership matrix', () => {
       { id: aliceSharedAppId, tenantKey: sharedTenant, appId: `cli_sa_${aliceSharedAppId}`, appSecretRef: 'env:SA', platformOwnerId: aliceId },
       { id: bobSharedAppId, tenantKey: sharedTenant, appId: `cli_sb_${bobSharedAppId}`, appSecretRef: 'env:SB', platformOwnerId: bobId },
     ]);
+    await db.insert(slackInstallations).values([
+      { id: aliceSlackId, teamId: aliceSlackTeam, botTokenRef: 'stored', botToken: 'xoxb-alice', botUserId: 'U_alice', platformOwnerId: aliceId },
+      { id: bobSlackId, teamId: bobSlackTeam, botTokenRef: 'stored', botToken: 'xoxb-bob', botUserId: 'U_bob', platformOwnerId: bobId },
+      { id: legacySlackId, teamId: legacySlackTeam, botTokenRef: 'env:SLACK_LEGACY', botToken: null, botUserId: 'U_legacy', platformOwnerId: null },
+    ]);
     await db.insert(agents).values([
       { id: aliceAgentId, tenantKey: aliceTenant, handle: `a_${aliceAgentId.slice(0, 8)}`, displayName: 'Alice Agent', profileId: sharedProfileId, platformOwnerId: aliceId },
       { id: bobAgentId, tenantKey: bobTenant, handle: `b_${bobAgentId.slice(0, 8)}`, displayName: 'Bob Agent', profileId: sharedProfileId, platformOwnerId: bobId },
@@ -168,6 +181,7 @@ describePg('admin api store ownership matrix', () => {
     await db.delete(agents).where(inArray(agents.id, allAgentIds));
     await db.delete(machines).where(inArray(machines.id, [aliceMachineId, bobMachineId, legacyMachineId, aliceRevokedMachineId]));
     await db.delete(feishuApps).where(inArray(feishuApps.id, [aliceAppId, bobAppId, legacyAppId, aliceSharedAppId, bobSharedAppId]));
+    await db.delete(slackInstallations).where(inArray(slackInstallations.id, [aliceSlackId, bobSlackId, legacySlackId]));
     await db.delete(chatConfigs).where(inArray(chatConfigs.tenantKey, [aliceTenant, bobTenant, legacyTenant, sharedTenant]));
     await db.delete(agentProfiles).where(inArray(agentProfiles.id, [sharedProfileId, aliceProfileId, builtinProfileId]));
     await db.delete(platformUsers).where(inArray(platformUsers.id, [aliceId, bobId]));
@@ -505,6 +519,110 @@ describePg('admin api store ownership matrix', () => {
     await db.delete(tasks).where(eq(tasks.id, taskId));
     await db.delete(sessions).where(eq(sessions.id, sessionId));
     await db.delete(feishuApps).where(eq(feishuApps.id, createdApp.id));
+  });
+
+  // ── Slack installations: per-creator ownership, fail-closed, token masking (ADR-0013) ──
+  it('lists only an owner-scoped user own Slack installations; superadmin sees all incl. legacy', async () => {
+    const aliceInstalls = await store().listSlackInstallations(aliceScope);
+    const aliceIds = new Set(aliceInstalls.map((i) => i.id));
+    expect(aliceIds.has(aliceSlackId)).toBe(true);
+    expect(aliceIds.has(bobSlackId)).toBe(false);
+    expect(aliceIds.has(legacySlackId)).toBe(false);
+
+    const superInstalls = await store().listSlackInstallations(superScope);
+    const superIds = new Set(superInstalls.map((i) => i.id));
+    expect(superIds.has(aliceSlackId)).toBe(true);
+    expect(superIds.has(bobSlackId)).toBe(true);
+    expect(superIds.has(legacySlackId)).toBe(true);
+  });
+
+  it('masks the bot token in the DTO: only hasStoredToken, never the token', async () => {
+    const installs = await store().listSlackInstallations(superScope);
+    const alice = installs.find((i) => i.id === aliceSlackId);
+    expect(alice).toBeTruthy();
+    expect(alice).not.toHaveProperty('botToken');
+    // Alice's row stores a token; the legacy row carries only an env ref.
+    expect(alice?.hasStoredToken).toBe(true);
+    const legacy = installs.find((i) => i.id === legacySlackId);
+    expect(legacy?.hasStoredToken).toBe(false);
+    expect(legacy?.botTokenRef).toBe('env:SLACK_LEGACY');
+  });
+
+  it('stamps the creating SSO user as owner and resolves env-ref vs stored token state', async () => {
+    const stored = await store().createSlackInstallation(aliceScope, {
+      teamId: `TS_created_${randomUUID().slice(0, 8)}`,
+      botToken: 'xoxb-created',
+      botUserId: 'U_created',
+      status: 'enabled',
+    });
+    expect(stored.platformOwnerId).toBe(aliceId);
+    expect(stored.hasStoredToken).toBe(true);
+    expect(stored.botTokenRef).toBe('stored');
+
+    const envRef = await store().createSlackInstallation(aliceScope, {
+      teamId: `TS_env_${randomUUID().slice(0, 8)}`,
+      botTokenRef: 'env:SLACK_CREATED',
+      botUserId: 'U_env',
+      status: 'enabled',
+    });
+    expect(envRef.hasStoredToken).toBe(false);
+    expect(envRef.botTokenRef).toBe('env:SLACK_CREATED');
+
+    await db.delete(slackInstallations).where(inArray(slackInstallations.id, [stored.id, envRef.id]));
+  });
+
+  it('forbids patching another user Slack installation (404), allows own', async () => {
+    await expect(
+      store().updateSlackInstallation(aliceScope, bobSlackId, { status: 'disabled' }),
+    ).rejects.toMatchObject({ statusCode: 404 });
+    const patched = await store().updateSlackInstallation(bobScope, bobSlackId, {
+      teamName: 'Bob Workspace v2',
+    });
+    expect(patched.teamName).toBe('Bob Workspace v2');
+  });
+
+  it('rejects enabling a Slack installation with no usable token (Codex finding 3)', async () => {
+    const created = await store().createSlackInstallation(aliceScope, {
+      teamId: `TS_dead_${randomUUID().slice(0, 8)}`,
+      botToken: 'xoxb-temp',
+      status: 'disabled',
+    });
+    // Clearing the token source (ref back to 'stored', no env) while enabling is
+    // rejected: an enabled-but-tokenless install would be silently dead.
+    await expect(
+      store().updateSlackInstallation(aliceScope, created.id, {
+        status: 'enabled',
+        botTokenRef: 'stored',
+      }),
+    ).rejects.toMatchObject({ statusCode: 400 });
+    await db.delete(slackInstallations).where(eq(slackInstallations.id, created.id));
+  });
+
+  it('soft-deletes only owned Slack installations: frees team_id, wipes the token, disables', async () => {
+    const created = await store().createSlackInstallation(aliceScope, {
+      teamId: `TS_del_${randomUUID().slice(0, 8)}`,
+      botToken: 'xoxb-del',
+      botUserId: 'U_del',
+      status: 'enabled',
+    });
+
+    await expect(store().deleteSlackInstallation(bobScope, created.id)).rejects.toMatchObject({
+      statusCode: 404,
+    });
+    const deleted = await store().deleteSlackInstallation(aliceScope, created.id);
+    expect(deleted.id).toBe(created.id);
+    expect(
+      (await store().listSlackInstallations(aliceScope)).some((i) => i.id === created.id),
+    ).toBe(false);
+
+    const [row] = await db
+      .select()
+      .from(slackInstallations)
+      .where(eq(slackInstallations.id, created.id));
+    expect(row).toMatchObject({ status: 'disabled', botToken: null, botTokenRef: 'deleted' });
+    expect(row?.teamId.startsWith('__deleted__')).toBe(true);
+
+    await db.delete(slackInstallations).where(eq(slackInstallations.id, created.id));
   });
 
   // ── B5: a duplicate active binding is a 409, not a raw 500 ──

@@ -76,3 +76,4 @@ history of decisions stays auditable.
 | [0010](0010-remove-coco-runtime.md) | Remove the Coco (TRAE CLI) runtime adapter | Accepted |
 | [0011](0011-remove-keyword-intent-classifier.md) | Remove the keyword intent classifier | Accepted |
 | [0012](0012-credential-storage-models.md) | Credential storage models: runtimeEnv (stored, masked) vs access-bundle (never stored) | Accepted |
+| [0013](0013-per-team-slack-token-model.md) | Per-team Slack bot-token model (one app, one signing secret, many bot tokens) | Accepted |

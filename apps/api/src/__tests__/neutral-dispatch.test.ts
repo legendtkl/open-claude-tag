@@ -98,7 +98,7 @@ function makeCtx(opts: HarnessOptions = {}) {
   const transitionTask = vi.fn(opts.transitionImpl ?? (async () => {}));
   const enqueue = vi.fn(opts.enqueueImpl ?? (async () => 'job-1'));
   const sender = opts.senderImpl ?? recording.sender;
-  const resolveSender = vi.fn(() => sender);
+  const resolveSender = vi.fn(async () => sender);
   const persistAckDelivery = vi.fn(opts.persistAckImpl ?? (async () => {}));
   const loadAckDelivery = vi.fn(opts.loadAckImpl ?? (async () => null));
   const ctx: NeutralDispatchContext = {
@@ -250,7 +250,8 @@ describe('dispatchNeutralMessage — task_created (happy path, durable ordering)
 
     // ACK sent through the kind-resolved sender, BEFORE enqueue (so its handle
     // can be threaded), as neutral text into the message's conversation.
-    expect(resolveSender).toHaveBeenCalledWith('slack');
+    // Resolved by kind AND the message's Slack team_id (per-team token, M1a).
+    expect(resolveSender).toHaveBeenCalledWith('slack', 'T_team');
     expect(sends).toHaveLength(1);
     expect(sends[0].msg).toMatchObject({ kind: 'text' });
     expect(sends[0].to).toMatchObject({ kind: 'slack', scopeId: 'C_chat' });

@@ -20,6 +20,7 @@ import {
   type FeishuAppPermissionCheckDto,
   type FeishuAppRegistrationDto,
   type OwnerScope,
+  type SlackInstallationDto,
 } from '../admin-api.js';
 import type { Database } from '@open-tag/storage';
 
@@ -70,6 +71,28 @@ function makeAppDto(overrides: Partial<FeishuAppDto> = {}): FeishuAppDto {
     platformOwnerId: null,
     platformOwner: null,
     binding: null,
+    createdAt: now,
+    updatedAt: now,
+    ...overrides,
+  };
+}
+
+function makeSlackInstallationDto(
+  overrides: Partial<SlackInstallationDto> = {},
+): SlackInstallationDto {
+  return {
+    id: '00000000-0000-4000-8000-0000000000c1',
+    teamId: 'T_reviewer',
+    slackAppId: 'A_reviewer',
+    botTokenRef: 'stored',
+    hasStoredToken: true,
+    botUserId: 'U_bot',
+    teamName: 'Reviewer Workspace',
+    botName: 'Reviewer Bot',
+    status: 'enabled',
+    tenantKey: null,
+    platformOwnerId: null,
+    platformOwner: null,
     createdAt: now,
     updatedAt: now,
     ...overrides,
@@ -232,6 +255,22 @@ function makeStore(overrides: Partial<AdminApiStore> = {}): AdminApiStore {
       makeAppDto({ id, botName: 'Synced Reviewer Bot' }),
     ),
     deleteFeishuApp: vi.fn(async (_scope, id) => makeAppDto({ id })),
+    listSlackInstallations: vi.fn(async () => [makeSlackInstallationDto()]),
+    createSlackInstallation: vi.fn(async (_scope, input) =>
+      makeSlackInstallationDto({
+        id: '00000000-0000-4000-8000-0000000000c2',
+        teamId: input.teamId,
+        slackAppId: input.slackAppId ?? null,
+        botTokenRef: input.botTokenRef ?? 'stored',
+        hasStoredToken: Boolean(input.botToken),
+        botUserId: input.botUserId ?? null,
+        teamName: input.teamName ?? null,
+        botName: input.botName ?? null,
+        status: input.status,
+      }),
+    ),
+    updateSlackInstallation: vi.fn(async (_scope, id) => makeSlackInstallationDto({ id })),
+    deleteSlackInstallation: vi.fn(async (_scope, id) => makeSlackInstallationDto({ id })),
     checkFeishuAppPermissions: vi.fn(
       async (_scope, id): Promise<FeishuAppPermissionCheckDto> => ({
         feishuAppId: id,
@@ -612,6 +651,129 @@ describe('admin api routes', () => {
     expect(bodyText).toContain('"hasStoredSecret":true');
     expect(bodyText).not.toContain('appSecret"');
     expect(bodyText).not.toContain('plain_secret');
+  });
+
+  // ── Slack installations (per-team bot-token store, ADR-0013) ──
+  it('creates a Slack installation and never echoes the stored bot token', async () => {
+    const store = makeStore();
+    const app = makeApp(store);
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/admin/slack-installations',
+      headers: tokenHeaders(),
+      payload: {
+        teamId: 'T_new',
+        botToken: 'xoxb-super-secret',
+        botUserId: 'U_new',
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(store.createSlackInstallation).toHaveBeenCalledWith(
+      SUPERADMIN_SCOPE,
+      expect.objectContaining({ teamId: 'T_new', botToken: 'xoxb-super-secret', botUserId: 'U_new' }),
+    );
+    const body = response.body;
+    // The token must NEVER round-trip back to the client: only hasStoredToken.
+    expect(body).toContain('"hasStoredToken":true');
+    expect(body).not.toContain('xoxb-super-secret');
+    expect(body).not.toContain('botToken"');
+    expect(JSON.parse(body)).not.toHaveProperty('botToken');
+  });
+
+  it('records an env botTokenRef without a stored token (hasStoredToken=false)', async () => {
+    const store = makeStore();
+    const app = makeApp(store);
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/admin/slack-installations',
+      headers: tokenHeaders(),
+      payload: { teamId: 'T_env', botTokenRef: 'env:SLACK_TEAM_TOKEN', botUserId: 'U_env' },
+    });
+
+    expect(response.statusCode).toBe(200);
+    const dto = JSON.parse(response.body);
+    expect(dto.botTokenRef).toBe('env:SLACK_TEAM_TOKEN');
+    expect(dto.hasStoredToken).toBe(false);
+  });
+
+  it('rejects a create with neither an env botTokenRef nor a stored token (400)', async () => {
+    const store = makeStore();
+    const app = makeApp(store);
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/admin/slack-installations',
+      headers: tokenHeaders(),
+      payload: { teamId: 'T_no_token' },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(store.createSlackInstallation).not.toHaveBeenCalled();
+  });
+
+  it('rejects a stored bot token that does not look like a Slack bot token (400)', async () => {
+    const store = makeStore();
+    const app = makeApp(store);
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/admin/slack-installations',
+      headers: tokenHeaders(),
+      payload: { teamId: 'T_bad', botToken: 'not-a-slack-token' },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(store.createSlackInstallation).not.toHaveBeenCalled();
+  });
+
+  it('lists Slack installations through the admin route (token masked)', async () => {
+    const store = makeStore({
+      listSlackInstallations: vi.fn(async () => [
+        makeSlackInstallationDto({ botTokenRef: 'stored', hasStoredToken: true }),
+      ]),
+    });
+    const app = makeApp(store);
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/admin/slack-installations',
+      headers: tokenHeaders(),
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(store.listSlackInstallations).toHaveBeenCalledWith(SUPERADMIN_SCOPE);
+    expect(response.body).toContain('"hasStoredToken":true');
+    expect(response.body).not.toContain('botToken"');
+  });
+
+  it('patches and deletes a Slack installation through the admin routes', async () => {
+    const store = makeStore();
+    const app = makeApp(store);
+    const id = '00000000-0000-4000-8000-0000000000c1';
+
+    const patched = await app.inject({
+      method: 'PATCH',
+      url: `/admin/slack-installations/${id}`,
+      headers: tokenHeaders(),
+      payload: { status: 'disabled' },
+    });
+    expect(patched.statusCode).toBe(200);
+    expect(store.updateSlackInstallation).toHaveBeenCalledWith(
+      SUPERADMIN_SCOPE,
+      id,
+      expect.objectContaining({ status: 'disabled' }),
+    );
+
+    const deleted = await app.inject({
+      method: 'DELETE',
+      url: `/admin/slack-installations/${id}`,
+      headers: tokenHeaders(),
+    });
+    expect(deleted.statusCode).toBe(200);
+    expect(store.deleteSlackInstallation).toHaveBeenCalledWith(SUPERADMIN_SCOPE, id);
   });
 
   it('checks Feishu app permission grants through the admin route', async () => {

@@ -165,10 +165,14 @@ export interface SlackInboundDispatchDeps {
    */
   dispatchTask?: (message: InboundMessage) => Promise<void>;
   /**
-   * Bot user id for the @-mention addressing gate. Unset ⇒ no message is
-   * addressed, so no task is ever dispatched (safe-by-default opt-in).
+   * Resolve the bot user id for the @-mention addressing gate, scoped to the
+   * message's Slack `team_id` (Slack Milestone 1a). Returns the per-team
+   * `bot_user_id` (env `SLACK_BOT_USER_ID` only as the single-workspace fallback,
+   * see {@link createSlackInstallationResolver}). Unset, or resolving to
+   * `undefined`, ⇒ no message is addressed, so no task is dispatched for that team
+   * (safe-by-default opt-in + fail-closed for an un-onboarded workspace).
    */
-  botUserId?: string;
+  resolveBotUserId?: (installationId: string | undefined) => Promise<string | undefined>;
 }
 
 /**
@@ -239,12 +243,17 @@ export function createSlackInboundDispatch(deps: SlackInboundDispatchDeps): Slac
     // duplicate while the task sits jobless until the 5-minute stale takeover —
     // by when Slack may have stopped retrying. dispatchNeutralMessage makes
     // enqueue the durable boundary, so the re-attempt cannot double-dispatch.
-    if (deps.dispatchTask && isMessageAddressedToBot(message, deps.botUserId)) {
-      try {
-        await deps.dispatchTask(message);
-      } catch (err) {
-        await releaseClaimBestEffort(deps, message.dedupeKey);
-        throw err;
+    if (deps.dispatchTask && deps.resolveBotUserId) {
+      // Resolve the per-team bot user id before the gate (Slack Milestone 1a) so a
+      // multi-workspace deploy addresses each message against ITS workspace's bot.
+      const botUserId = await deps.resolveBotUserId(message.scope.installationId);
+      if (isMessageAddressedToBot(message, botUserId)) {
+        try {
+          await deps.dispatchTask(message);
+        } catch (err) {
+          await releaseClaimBestEffort(deps, message.dedupeKey);
+          throw err;
+        }
       }
     }
 

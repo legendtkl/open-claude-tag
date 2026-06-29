@@ -22,6 +22,7 @@ import {
   machines,
   messages,
   sessions,
+  slackInstallations,
   taskRunEvents,
   taskSteps,
   tasks,
@@ -85,6 +86,31 @@ describe('agent identity schema', () => {
           name: 'idx_channel_observations_dedupe',
           unique: true,
           columns: ['channel_kind', 'scope_id', 'dedupe_hash'],
+          where: false,
+        },
+      ]),
+    );
+  });
+
+  it('exports the per-team Slack installation token store (ADR-0013)', () => {
+    expect(slackInstallations.id).toBeDefined();
+    expect(slackInstallations.teamId.notNull).toBe(true);
+    // Token pair copies feishu_apps' appSecret/appSecretRef: token nullable,
+    // ref NOT NULL (default 'stored') so the env-ref-vs-stored convention reuses.
+    expect(slackInstallations.botToken.notNull).toBe(false);
+    expect(slackInstallations.botTokenRef.notNull).toBe(true);
+    expect(slackInstallations.botUserId.notNull).toBe(false);
+    expect(slackInstallations.status.notNull).toBe(true);
+    // Fail-closed console owner (mirrors feishuApps.platformOwnerId); nullable so a
+    // legacy/ops row stays superadmin-only.
+    expect(slackInstallations.platformOwnerId.notNull).toBe(false);
+    // team_id is the unique inbound routing key (the feishuApps.appId analogue).
+    expect(summarizeIndexes(slackInstallations)).toEqual(
+      expect.arrayContaining([
+        {
+          name: 'idx_slack_installations_team',
+          unique: true,
+          columns: ['team_id'],
           where: false,
         },
       ]),

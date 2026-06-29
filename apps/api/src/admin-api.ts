@@ -26,6 +26,7 @@ import {
   PAIRING_TOKEN_TTL_MS,
   platformUsers,
   sessions,
+  slackInstallations,
   taskRunEvents,
   taskRuns,
   tasks,
@@ -49,6 +50,8 @@ import {
  *  - `superadmin`: sees and mutates everything (the scope is a no-op).
  *  - plain `user`:
  *    - feishu_apps  → visible/mutable iff `platform_owner_id === platformUserId`.
+ *    - slack_installations → visible/mutable iff `platform_owner_id === platformUserId`
+ *                     (the per-team Slack bot-token store; same fail-closed rule).
  *    - agents       → visible/mutable iff `platform_owner_id === platformUserId`.
  *    - bot bindings → a binding is owned iff its app OR its agent is owned;
  *                     bind/unbind requires owning BOTH the agent and the app.
@@ -251,6 +254,53 @@ const PatchFeishuAppSchema = z.object({
   status: FeishuAppStatusSchema.optional(),
 });
 
+// ── Slack installation (per-team bot-token store, ADR-0013) ──
+const SlackInstallationStatusSchema = z.enum(['enabled', 'disabled']);
+const DELETED_SLACK_TEAM_ID_PREFIX = '__deleted__';
+// A stored bot token must look like a Slack bot token (`xoxb-…`); this is a cheap,
+// no-network paste-error guard (Codex M1a design-gate finding 2, partial). An env
+// reference (`botTokenRef`) is validated by SecretRefSchema instead and may hold
+// any value. Live `auth.test` / team-id match / bot_user_id derivation are deferred
+// to the M1b OAuth path, which mints these authoritatively.
+const SlackBotTokenSchema = z.preprocess(
+  (value) => (typeof value === 'string' && value.trim() === '' ? undefined : value),
+  z
+    .string()
+    .trim()
+    .min(1)
+    .refine((token) => token.startsWith('xoxb-'), 'A stored Slack bot token must start with "xoxb-"')
+    .optional(),
+);
+
+const CreateSlackInstallationSchema = z
+  .object({
+    teamId: z.string().trim().min(1),
+    slackAppId: OptionalBotMetadataSchema,
+    botTokenRef: SecretRefSchema.optional(),
+    botToken: SlackBotTokenSchema,
+    botUserId: OptionalBotMetadataSchema,
+    teamName: OptionalBotMetadataSchema,
+    botName: OptionalBotMetadataSchema,
+    tenantKey: z.string().trim().min(1).optional(),
+    status: SlackInstallationStatusSchema.default('enabled'),
+  })
+  .refine((input) => (input.botTokenRef && input.botTokenRef !== 'stored') || input.botToken, {
+    message: 'Either an env botTokenRef or a stored botToken is required',
+    path: ['botTokenRef'],
+  });
+
+const PatchSlackInstallationSchema = z.object({
+  teamId: z.string().trim().min(1).optional(),
+  slackAppId: OptionalBotMetadataSchema,
+  botTokenRef: SecretRefSchema.optional(),
+  botToken: SlackBotTokenSchema,
+  botUserId: OptionalBotMetadataSchema,
+  teamName: OptionalBotMetadataSchema,
+  botName: OptionalBotMetadataSchema,
+  tenantKey: z.string().trim().min(1).optional(),
+  status: SlackInstallationStatusSchema.optional(),
+});
+
 const StartFeishuAppRegistrationSchema = z.object({
   botName: OptionalPresetTextSchema(80),
   description: OptionalPresetTextSchema(300),
@@ -326,6 +376,8 @@ type CreateAgentInput = z.infer<typeof CreateAgentSchema>;
 type PatchAgentInput = z.infer<typeof PatchAgentSchema>;
 type CreateFeishuAppInput = z.infer<typeof CreateFeishuAppSchema>;
 type PatchFeishuAppInput = z.infer<typeof PatchFeishuAppSchema>;
+type CreateSlackInstallationInput = z.infer<typeof CreateSlackInstallationSchema>;
+type PatchSlackInstallationInput = z.infer<typeof PatchSlackInstallationSchema>;
 type StartFeishuAppRegistrationInput = z.infer<typeof StartFeishuAppRegistrationSchema>;
 type BindBotInput = z.infer<typeof BindBotSchema>;
 type PatchChatInput = z.infer<typeof PatchChatSchema>;
@@ -356,6 +408,17 @@ export interface AdminApiStore {
   updateFeishuApp(scope: OwnerScope, id: string, input: PatchFeishuAppInput): Promise<FeishuAppDto>;
   syncFeishuAppMetadata(scope: OwnerScope, id: string): Promise<FeishuAppDto>;
   deleteFeishuApp(scope: OwnerScope, id: string): Promise<FeishuAppDto>;
+  listSlackInstallations(scope: OwnerScope): Promise<SlackInstallationDto[]>;
+  createSlackInstallation(
+    scope: OwnerScope,
+    input: CreateSlackInstallationInput,
+  ): Promise<SlackInstallationDto>;
+  updateSlackInstallation(
+    scope: OwnerScope,
+    id: string,
+    input: PatchSlackInstallationInput,
+  ): Promise<SlackInstallationDto>;
+  deleteSlackInstallation(scope: OwnerScope, id: string): Promise<SlackInstallationDto>;
   checkFeishuAppPermissions(scope: OwnerScope, id: string): Promise<FeishuAppPermissionCheckDto>;
   applyFeishuAppPermissions(scope: OwnerScope, id: string): Promise<FeishuAppPermissionApplyDto>;
   startFeishuAppRegistration(
@@ -520,6 +583,29 @@ export interface FeishuAppDto {
   platformOwnerId: string | null;
   platformOwner: OwnerLabelDto | null;
   binding: BotBindingSummaryDto | null;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+/**
+ * Admin view of a per-team Slack installation (ADR-0013). Mirrors
+ * {@link FeishuAppDto}'s `hasStoredSecret` masking: it exposes
+ * `hasStoredToken` (whether a token is stored at rest) but NEVER the bot token
+ * itself, the same way the Feishu DTO never returns `appSecret`.
+ */
+export interface SlackInstallationDto {
+  id: string;
+  teamId: string;
+  slackAppId: string | null;
+  botTokenRef: string;
+  hasStoredToken: boolean;
+  botUserId: string | null;
+  teamName: string | null;
+  botName: string | null;
+  status: string;
+  tenantKey: string | null;
+  platformOwnerId: string | null;
+  platformOwner: OwnerLabelDto | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -1425,6 +1511,36 @@ function buildDeletedFeishuAppId(): string {
 
 function isDeletedFeishuAppRow(row: { appId: string; status: string }): boolean {
   return row.status === 'disabled' && row.appId.startsWith(DELETED_FEISHU_APP_ID_PREFIX);
+}
+
+/**
+ * Drizzle predicate matching slack_installations owned by the scope, or `undefined`
+ * for a superadmin (no filter). Mirrors {@link feishuAppOwnerFilter}: a plain user
+ * matches only rows whose `platform_owner_id` equals their id; NULL-owner rows never
+ * match (fail closed).
+ */
+function slackInstallationOwnerFilter(scope: OwnerScope): SQL | undefined {
+  if (scope.isSuperadmin) return undefined;
+  if (!scope.platformUserId) return sql`false`;
+  return eq(slackInstallations.platformOwnerId, scope.platformUserId);
+}
+
+function notDeletedSlackInstallationFilter(): SQL {
+  return sql`not (${slackInstallations.status} = 'disabled' and left(${slackInstallations.teamId}, ${DELETED_SLACK_TEAM_ID_PREFIX.length}) = ${DELETED_SLACK_TEAM_ID_PREFIX})`;
+}
+
+function visibleSlackInstallationFilter(scope: OwnerScope): SQL {
+  const ownerFilter = slackInstallationOwnerFilter(scope);
+  const deletedFilter = notDeletedSlackInstallationFilter();
+  return ownerFilter ? and(ownerFilter, deletedFilter)! : deletedFilter;
+}
+
+function buildDeletedSlackTeamId(): string {
+  return `${DELETED_SLACK_TEAM_ID_PREFIX}${randomUUID().replaceAll('-', '')}`;
+}
+
+function isDeletedSlackInstallationRow(row: { teamId: string; status: string }): boolean {
+  return row.status === 'disabled' && row.teamId.startsWith(DELETED_SLACK_TEAM_ID_PREFIX);
 }
 
 /** Drizzle predicate matching agents owned by the scope, or `undefined` for superadmin. */
@@ -2701,6 +2817,132 @@ export function createDrizzleAdminApiStore(
           .returning({ id: feishuApps.id });
         if (!row) throw rowNotFound('Feishu app');
       });
+      return deleted;
+    },
+
+    async listSlackInstallations(scope) {
+      const filter = visibleSlackInstallationFilter(scope);
+      const rows = await db
+        .select()
+        .from(slackInstallations)
+        .where(filter)
+        .orderBy(desc(slackInstallations.updatedAt));
+      const ownerLabels = scope.isSuperadmin
+        ? await loadOwnerLabels(
+            db,
+            rows.map((row) => row.platformOwnerId),
+          )
+        : new Map<string, OwnerLabelDto>();
+      // The DTO masks the bot token: it surfaces only `hasStoredToken`, never the
+      // token itself — the mirror of FeishuAppDto's `hasStoredSecret` masking.
+      return rows.map((row) => ({
+        id: row.id,
+        teamId: row.teamId,
+        slackAppId: row.slackAppId,
+        botTokenRef: row.botTokenRef,
+        hasStoredToken: Boolean(row.botToken),
+        botUserId: row.botUserId,
+        teamName: row.teamName,
+        botName: row.botName,
+        status: row.status,
+        tenantKey: row.tenantKey,
+        platformOwnerId: row.platformOwnerId,
+        platformOwner: row.platformOwnerId
+          ? (ownerLabels.get(row.platformOwnerId) ?? null)
+          : null,
+        createdAt: row.createdAt,
+        updatedAt: row.updatedAt,
+      }));
+    },
+
+    async createSlackInstallation(scope, input) {
+      // Stamp the creating SSO user as owner — the self-service path (D-A2/D-A4).
+      // Token/loopback admins create ops-owned rows (NULL owner, superadmin-only).
+      const platformOwnerId = scope.platformUserId ?? null;
+      const [row] = await db
+        .insert(slackInstallations)
+        .values({
+          ...input,
+          botTokenRef: input.botTokenRef ?? 'stored',
+          botToken: input.botToken ?? undefined,
+          slackAppId: input.slackAppId ?? undefined,
+          botUserId: input.botUserId ?? undefined,
+          teamName: input.teamName ?? undefined,
+          botName: input.botName ?? undefined,
+          tenantKey: input.tenantKey ?? undefined,
+          platformOwnerId: platformOwnerId ?? undefined,
+        })
+        .returning();
+      return (await this.listSlackInstallations(scope)).find((item) => item.id === row.id)!;
+    },
+
+    async updateSlackInstallation(scope, id, input) {
+      const [current] = await db
+        .select()
+        .from(slackInstallations)
+        .where(eq(slackInstallations.id, id))
+        .limit(1);
+      if (!current) throw rowNotFound('Slack installation');
+      if (isDeletedSlackInstallationRow(current)) throw rowNotFound('Slack installation');
+      assertOwnsRow(scope, current.platformOwnerId, 'Slack installation');
+
+      // Post-merge validity (Codex M1a design-gate finding 3): an ENABLED install
+      // must have a usable token source, else it is "enabled but dead" — the
+      // registries skip a tokenless row. `botToken` is write-through (undefined
+      // leaves the stored token; there is no clear-token verb in M1a), so the
+      // effective token is the patched ref/token or the current one.
+      const effectiveStatus = input.status ?? current.status;
+      const effectiveTokenRef = input.botTokenRef ?? current.botTokenRef;
+      const effectiveHasToken =
+        (effectiveTokenRef && effectiveTokenRef !== 'stored' && effectiveTokenRef !== 'deleted') ||
+        Boolean(input.botToken ?? current.botToken);
+      if (effectiveStatus === 'enabled' && !effectiveHasToken) {
+        throw new AdminApiError(
+          400,
+          'An enabled Slack installation requires an env botTokenRef or a stored botToken',
+        );
+      }
+
+      const [row] = await db
+        .update(slackInstallations)
+        .set({
+          ...input,
+          botToken: input.botToken ?? undefined,
+          updatedAt: new Date(),
+        })
+        .where(eq(slackInstallations.id, id))
+        .returning({ id: slackInstallations.id });
+      if (!row) throw rowNotFound('Slack installation');
+      return (await this.listSlackInstallations(scope)).find((item) => item.id === id)!;
+    },
+
+    async deleteSlackInstallation(scope, id) {
+      const [current] = await db
+        .select()
+        .from(slackInstallations)
+        .where(eq(slackInstallations.id, id))
+        .limit(1);
+      if (!current) throw rowNotFound('Slack installation');
+      if (isDeletedSlackInstallationRow(current)) throw rowNotFound('Slack installation');
+      assertOwnsRow(scope, current.platformOwnerId, 'Slack installation');
+      const deleted = (await this.listSlackInstallations(scope)).find((item) => item.id === id);
+      if (!deleted) throw rowNotFound('Slack installation');
+      // Soft delete: free the unique team_id (sentinel), wipe the token, disable.
+      // No bindings to unwind (Slack installs are not agent-bound in M1a), so a
+      // single update suffices (Feishu needs a tx to drop bindings).
+      const [row] = await db
+        .update(slackInstallations)
+        .set({
+          teamId: buildDeletedSlackTeamId(),
+          botToken: null,
+          botTokenRef: 'deleted',
+          botUserId: null,
+          status: 'disabled',
+          updatedAt: new Date(),
+        })
+        .where(eq(slackInstallations.id, id))
+        .returning({ id: slackInstallations.id });
+      if (!row) throw rowNotFound('Slack installation');
       return deleted;
     },
 
@@ -4147,6 +4389,39 @@ export function registerAdminApiRoutes(
       await options.afterFeishuRuntimeChange?.();
       return result;
     });
+  });
+
+  // Slack installations (per-team bot-token store, ADR-0013). Owned, fail-closed
+  // exactly like the Feishu-app routes (requireIdentity(request).scope). No runtime
+  // reload hook: the API resolver looks up per request and the worker registry
+  // refreshes on its own staleness interval.
+  app.get('/admin/slack-installations', { preHandler }, async (request, reply) =>
+    respond(reply, () => store.listSlackInstallations(requireIdentity(request).scope)),
+  );
+
+  app.post('/admin/slack-installations', { preHandler }, async (request, reply) => {
+    const body = parseWithReply(CreateSlackInstallationSchema, request.body, reply);
+    if (!body) return;
+    return respond(reply, () =>
+      store.createSlackInstallation(requireIdentity(request).scope, body),
+    );
+  });
+
+  app.patch('/admin/slack-installations/:id', { preHandler }, async (request, reply) => {
+    const params = parseWithReply(IdParamsSchema, request.params, reply);
+    const body = parseWithReply(PatchSlackInstallationSchema, request.body, reply);
+    if (!params || !body) return;
+    return respond(reply, () =>
+      store.updateSlackInstallation(requireIdentity(request).scope, params.id, body),
+    );
+  });
+
+  app.delete('/admin/slack-installations/:id', { preHandler }, async (request, reply) => {
+    const params = parseWithReply(IdParamsSchema, request.params, reply);
+    if (!params) return;
+    return respond(reply, () =>
+      store.deleteSlackInstallation(requireIdentity(request).scope, params.id),
+    );
   });
 
   app.post('/admin/feishu-apps/:id/permission-check', { preHandler }, async (request, reply) => {

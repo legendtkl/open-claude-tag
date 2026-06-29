@@ -122,6 +122,54 @@ export const feishuApps = pgTable(
   ],
 );
 
+// ── 4a. slack_installations ──
+// Per-team Slack bot-token store (Slack Milestone 1a, issue #21, ADR-0013). ONE
+// Slack app (signing secret stays in env for signature verify) installs into MANY
+// workspaces, each yielding its own bot token + bot user id keyed on `team_id`.
+// Modeled cell-for-cell on `feishuApps` so the SecretRefSchema / resolveSecretRef
+// (env-ref vs stored) and the fail-closed `platformOwnerId` ownership model reuse
+// directly. Rows are admin-CRUD created in M1a; OAuth auto-provisioning is M1b.
+export const slackInstallations = pgTable(
+  'slack_installations',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    // Slack `team_id` — the inbound routing key (ChannelScope.installationId). One
+    // enabled row per workspace (the UNIQUE index below).
+    teamId: varchar('team_id', { length: 128 }).notNull(),
+    // Slack `api_app_id` (which Slack app this install belongs to); groups one
+    // app's installs together. Nullable for manually-entered M1a rows.
+    slackAppId: varchar('slack_app_id', { length: 128 }),
+    // The issued bot token (`xoxb-…`). Stored verbatim (OAuth-minted in M1b) OR
+    // sourced from an env var via `botTokenRef`, copying the feishuApps
+    // appSecret/appSecretRef pair so SecretRefSchema/resolveSecretRef reuse for free.
+    botToken: text('bot_token'),
+    botTokenRef: varchar('bot_token_ref', { length: 256 }).notNull().default('stored'),
+    // The bot user id (`U…`) used for the inbound @-mention addressing gate.
+    botUserId: varchar('bot_user_id', { length: 64 }),
+    teamName: varchar('team_name', { length: 128 }),
+    botName: varchar('bot_name', { length: 128 }),
+    status: varchar('status', { length: 16 }).notNull().default('enabled'),
+    // Audit/parity field; production routing keys on `teamId`. Nullable.
+    tenantKey: varchar('tenant_key', { length: 128 }),
+    // Console (SSO) owner of this installation (design D-A2/D-A3, mirrors
+    // feishuApps.platformOwnerId). NULL = a legacy/ops-created row, visible to
+    // superadmins only (fail-closed).
+    platformOwnerId: uuid('platform_owner_id').references(() => platformUsers.id, {
+      onDelete: 'set null',
+    }),
+    // Raw OAuth `oauth.v2.access` payload (scopes, authed_user, …) for audit; only
+    // populated by the M1b OAuth path. Nullable.
+    installation: jsonb('installation').$type<Record<string, unknown>>(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('idx_slack_installations_team').on(table.teamId),
+    index('idx_slack_installations_status').on(table.status),
+    index('idx_slack_installations_platform_owner').on(table.platformOwnerId),
+  ],
+);
+
 // A per-agent token/spend budget cap, persisted as the `agents.budget` jsonb.
 // Structurally identical to the registry `IdentityBudget` (kept duplicated here so
 // storage stays a leaf that registry composes over, never the reverse). NULL on
