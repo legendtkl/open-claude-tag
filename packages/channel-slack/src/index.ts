@@ -18,6 +18,17 @@ export type {
   SlackInteractionOutcome,
   HandleSlackInteractionInput,
 } from './interactive-handler.js';
+export {
+  handleSlackCommand,
+  parseSlackSubcommand,
+  SLACK_COMMAND_NAME,
+  SLACK_HELP_TEXT,
+} from './commands-handler.js';
+export type {
+  SlackCommandOutcome,
+  SlackCommandSubcommand,
+  HandleSlackCommandInput,
+} from './commands-handler.js';
 export { exchangeSlackOAuthCode, buildSanitizedSlackInstallation } from './oauth.js';
 export type {
   ExchangeSlackOAuthCodeInput,
