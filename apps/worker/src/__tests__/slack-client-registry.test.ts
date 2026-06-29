@@ -11,14 +11,32 @@ interface SlackInstallationRow {
   status: string;
 }
 
-/** A `select().from().where().orderBy()` chain resolving to the current rows ref. */
+/** A row is soft-deleted iff it is disabled AND its team id carries the sentinel. */
+function hasNonDeletedRow(rows: SlackInstallationRow[]): boolean {
+  return rows.some((r) => !(r.status === 'disabled' && r.teamId.startsWith('__deleted__')));
+}
+
+/**
+ * A `db` distinguishing the two queries by the `select` projection:
+ *  - `db.select()` (no projection) → `listEnabledSlackInstallations`: resolves
+ *    through `.orderBy(...)` to the ENABLED rows only (mirroring real Postgres).
+ *  - `db.select({...})` (a projection) → `hasAnySlackInstallation`: resolves
+ *    through `.limit(1)` to `{exists:1}` when ANY non-deleted row exists.
+ */
 function makeDb(rowsRef: { rows: SlackInstallationRow[] }): Database {
-  const chain = {
-    from: () => chain,
-    where: () => chain,
-    orderBy: async () => rowsRef.rows,
+  const listChain = {
+    from: () => listChain,
+    where: () => listChain,
+    orderBy: async () => rowsRef.rows.filter((r) => r.status === 'enabled'),
   };
-  return { select: vi.fn(() => chain) } as unknown as Database;
+  const probeChain = {
+    from: () => probeChain,
+    where: () => probeChain,
+    limit: async () => (hasNonDeletedRow(rowsRef.rows) ? [{ exists: 1 }] : []),
+  };
+  return {
+    select: vi.fn((...args: unknown[]) => (args.length === 0 ? listChain : probeChain)),
+  } as unknown as Database;
 }
 
 function makeChannel(token: string): SlackChannel {
@@ -122,14 +140,99 @@ describe('createWorkerSlackClientRegistry', () => {
     await expect(registry.getClient('T_unknown')).resolves.toBeNull();
   });
 
-  it('never throws on a missing install: a reload failure keeps serving (null skip)', async () => {
-    const failingDb = {
-      select: vi.fn(() => ({
-        from: () => ({ where: () => ({ orderBy: async () => [] }) }),
-      })),
+  it('does NOT borrow the env token for a known-but-DISABLED only team (multi-workspace)', async () => {
+    // The sole row is disabled (non-deleted): listEnabled is empty so no per-team
+    // channel resolves, but the gate sees a non-deleted row ⇒ env fallback stays
+    // suppressed for any team (Copilot finding #1).
+    const rowsRef = {
+      rows: [{ id: 'i1', teamId: 'T1', botTokenRef: 'stored', botToken: 'xoxb-t1', status: 'disabled' }],
+    };
+    const registry = await createWorkerSlackClientRegistry({
+      db: makeDb(rowsRef),
+      primaryToken: 'xoxb-env',
+      createChannel: makeChannel,
+      refreshIntervalMs: 60_000,
+    });
+    expect(registry.registeredTeamIds()).toEqual([]);
+    await expect(registry.getClient('T1')).resolves.toBeNull();
+    await expect(registry.getClient('T_unknown')).resolves.toBeNull();
+  });
+
+  it('treats a soft-deleted-only row as single-workspace: env fallback still serves', async () => {
+    // A soft-deleted row (status disabled + __deleted__ team id) is excluded from
+    // the non-deleted gate, so a deploy whose only row is soft-deleted is back to
+    // single-workspace mode and the env token serves an unknown team.
+    const rowsRef = {
+      rows: [
+        {
+          id: 'i1',
+          teamId: '__deleted__abc123',
+          botTokenRef: 'deleted',
+          botToken: null,
+          status: 'disabled',
+        },
+      ],
+    };
+    const registry = await createWorkerSlackClientRegistry({
+      db: makeDb(rowsRef),
+      primaryToken: 'xoxb-env',
+      createChannel: makeChannel,
+      refreshIntervalMs: 60_000,
+    });
+    await expect(registry.getClient('T_unknown')).resolves.toMatchObject({ token: 'xoxb-env' });
+    await expect(registry.getClient(undefined)).resolves.toMatchObject({ token: 'xoxb-env' });
+  });
+
+  it('fails closed (null, no env borrow) for an unknown team once a refresh errors', async () => {
+    // Starts single-workspace (zero rows ⇒ env sender). Then the DB errors on the
+    // staleness refresh: a reload error may hide a freshly-added install, so the
+    // gate must assume multi-workspace and skip rather than borrow the env token
+    // (Copilot M1a review). refreshIntervalMs 0 ⇒ every getClient forces a reload.
+    const rowsRef = { rows: [] as SlackInstallationRow[] };
+    const failRef = { fail: false };
+    const listChain = {
+      from: () => listChain,
+      where: () => listChain,
+      orderBy: async () => {
+        if (failRef.fail) throw new Error('db down');
+        return rowsRef.rows.filter((r) => r.status === 'enabled');
+      },
+    };
+    const probeChain = {
+      from: () => probeChain,
+      where: () => probeChain,
+      limit: async () => {
+        if (failRef.fail) throw new Error('db down');
+        return hasNonDeletedRow(rowsRef.rows) ? [{ exists: 1 }] : [];
+      },
+    };
+    const db = {
+      select: vi.fn((...args: unknown[]) => (args.length === 0 ? listChain : probeChain)),
     } as unknown as Database;
     const registry = await createWorkerSlackClientRegistry({
-      db: failingDb,
+      db,
+      primaryToken: 'xoxb-env',
+      createChannel: makeChannel,
+      refreshIntervalMs: 0,
+    });
+    // Healthy single-workspace: env sender serves an unknown team.
+    await expect(registry.getClient('T_unknown')).resolves.toMatchObject({ token: 'xoxb-env' });
+    // DB now errors on refresh ⇒ fail closed: null, never the env token.
+    failRef.fail = true;
+    await expect(registry.getClient('T_unknown')).resolves.toBeNull();
+    await expect(registry.getClient(undefined)).resolves.toBeNull();
+  });
+
+  it('never throws on a missing install: an empty DB keeps serving (null skip)', async () => {
+    const emptyDb = {
+      select: vi.fn((...args: unknown[]) =>
+        args.length === 0
+          ? { from: () => ({ where: () => ({ orderBy: async () => [] }) }) }
+          : { from: () => ({ where: () => ({ limit: async () => [] }) }) },
+      ),
+    } as unknown as Database;
+    const registry = await createWorkerSlackClientRegistry({
+      db: emptyDb,
       primaryToken: '',
       createChannel: makeChannel,
     });

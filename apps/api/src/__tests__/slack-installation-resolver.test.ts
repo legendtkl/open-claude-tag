@@ -12,25 +12,36 @@ interface SlackInstallationRow {
   status: string;
 }
 
+/** A row is soft-deleted iff it is disabled AND its team id carries the sentinel. */
+function hasNonDeletedRow(rows: SlackInstallationRow[]): boolean {
+  return rows.some((r) => !(r.status === 'disabled' && r.teamId.startsWith('__deleted__')));
+}
+
 /**
- * A `db` whose `getSlackInstallationByTeamId` (select…where…limit) returns the
- * row matching the queried team id, and whose `listEnabledSlackInstallations`
- * (select…where…orderBy) returns all rows. The where predicate is not inspected;
- * instead the limit/orderBy terminals consult `rowsByTeam` / `allRows`.
+ * A `db` that distinguishes the two queries by the `select` projection:
+ *  - `db.select()` (no projection) → `getSlackInstallationByTeamId`: resolves
+ *    through `.limit(1)` to the ENABLED row matching the queried team id.
+ *  - `db.select({...})` (a projection) → `hasAnySlackInstallation`: resolves
+ *    through `.limit(1)` to a single `{exists:1}` when ANY non-deleted row exists.
+ * The where predicate is not inspected; the terminals consult `rows` / `teamIdRef`.
  */
 function makeDb(rows: SlackInstallationRow[], teamIdRef: { teamId?: string }): Database {
-  const chain = {
-    from: () => chain,
-    where: (..._args: unknown[]) => chain,
-    // getSlackInstallationByTeamId resolves through `.limit(1)`.
+  const teamChain = {
+    from: () => teamChain,
+    where: (..._args: unknown[]) => teamChain,
     limit: async () => {
       const row = rows.find((r) => r.teamId === teamIdRef.teamId && r.status === 'enabled');
       return row ? [row] : [];
     },
-    // listEnabledSlackInstallations resolves through `.orderBy(...)`.
-    orderBy: async () => rows.filter((r) => r.status === 'enabled'),
   };
-  return { select: vi.fn(() => chain) } as unknown as Database;
+  const probeChain = {
+    from: () => probeChain,
+    where: (..._args: unknown[]) => probeChain,
+    limit: async () => (hasNonDeletedRow(rows) ? [{ exists: 1 }] : []),
+  };
+  return {
+    select: vi.fn((...args: unknown[]) => (args.length === 0 ? teamChain : probeChain)),
+  } as unknown as Database;
 }
 
 function makeChannel(token: string): SlackChannel {
@@ -93,19 +104,47 @@ describe('createSlackInstallationResolver', () => {
     await expect(resolver.resolveBotUserId('T_unknown')).resolves.toBeUndefined();
   });
 
-  it('fails closed (no env fallback) when the enabled-row probe errors for an unknown team', async () => {
-    // getSlackInstallationByTeamId returns no row, then the "any enabled?" probe
+  it('does NOT borrow the env default for an empty-string installation id once rows exist', async () => {
+    const rows: SlackInstallationRow[] = [
+      { id: 'i1', teamId: 'T1', botTokenRef: 'stored', botToken: 'xoxb-t1', botUserId: 'U1', status: 'enabled' },
+    ];
+    const { resolver } = setup(rows, { token: 'xoxb-env', userId: 'U_env' });
+    // No team lookup can match '' ; the multi-workspace gate must still suppress env.
+    await expect(resolver.resolveSender('')).resolves.toBeUndefined();
+    await expect(resolver.resolveBotUserId('')).resolves.toBeUndefined();
+  });
+
+  it('does NOT borrow the env default for a known-but-DISABLED only team', async () => {
+    // The sole row is disabled (non-deleted): no ENABLED row resolves, but the gate
+    // sees a non-deleted row ⇒ multi-workspace ⇒ no env borrow (Copilot finding #1).
+    const rows: SlackInstallationRow[] = [
+      { id: 'i1', teamId: 'T1', botTokenRef: 'stored', botToken: 'xoxb-t1', botUserId: 'U1', status: 'disabled' },
+    ];
+    const { resolver, teamIdRef } = setup(rows, { token: 'xoxb-env', userId: 'U_env' });
+    teamIdRef.teamId = 'T1';
+    await expect(resolver.resolveSender('T1')).resolves.toBeUndefined();
+    await expect(resolver.resolveBotUserId('T1')).resolves.toBeUndefined();
+  });
+
+  it('fails closed (no env fallback) when the existence probe errors for an unknown team', async () => {
+    // getSlackInstallationByTeamId returns no row, then the "any installation?" probe
     // throws (DB blip). The cross-workspace gate must NOT borrow the env token
-    // (Codex impl-gate finding 2).
-    const throwingChain = {
-      from: () => throwingChain,
-      where: () => throwingChain,
+    // (Codex impl-gate finding 2 / Copilot M1a review).
+    const teamChain = {
+      from: () => teamChain,
+      where: () => teamChain,
       limit: async () => [] as unknown[],
-      orderBy: async () => {
+    };
+    const probeChain = {
+      from: () => probeChain,
+      where: () => probeChain,
+      limit: async () => {
         throw new Error('db down');
       },
     };
-    const db = { select: vi.fn(() => throwingChain) } as unknown as Database;
+    const db = {
+      select: vi.fn((...args: unknown[]) => (args.length === 0 ? teamChain : probeChain)),
+    } as unknown as Database;
     const resolver = createSlackInstallationResolver({
       getDb: () => db,
       defaultBotToken: 'xoxb-env',
@@ -114,6 +153,44 @@ describe('createSlackInstallationResolver', () => {
     });
     await expect(resolver.resolveSender('T_unknown')).resolves.toBeUndefined();
     await expect(resolver.resolveBotUserId('T_unknown')).resolves.toBeUndefined();
+  });
+
+  it('fails closed AFTER a cached single-workspace result once a later probe errors', async () => {
+    // First probe returns no rows (single-workspace ⇒ env sender, caches `false`).
+    // The TTL is 0 so the next call re-probes; that probe errors. The gate must NOT
+    // reuse the stale `false` to borrow the env token (Copilot M1a review): a DB
+    // blip right after the first install lands cannot resurrect a cross-workspace
+    // borrow.
+    let probeCalls = 0;
+    const teamChain = {
+      from: () => teamChain,
+      where: () => teamChain,
+      limit: async () => [] as unknown[],
+    };
+    const probeChain = {
+      from: () => probeChain,
+      where: () => probeChain,
+      limit: async () => {
+        probeCalls += 1;
+        if (probeCalls === 1) return [] as unknown[];
+        throw new Error('db down');
+      },
+    };
+    const db = {
+      select: vi.fn((...args: unknown[]) => (args.length === 0 ? teamChain : probeChain)),
+    } as unknown as Database;
+    const resolver = createSlackInstallationResolver({
+      getDb: () => db,
+      defaultBotToken: 'xoxb-env',
+      defaultBotUserId: 'U_env',
+      createChannel: makeChannel,
+      enabledProbeTtlMs: 0,
+    });
+    // Cache the single-workspace `false`.
+    await expect(resolver.resolveSender('T_x')).resolves.toMatchObject({ token: 'xoxb-env' });
+    // Re-probe errors ⇒ fail closed, no env borrow despite the cached `false`.
+    await expect(resolver.resolveSender('T_y')).resolves.toBeUndefined();
+    await expect(resolver.resolveBotUserId('T_y')).resolves.toBeUndefined();
   });
 
   it('uses the per-team bot user id for the @-mention gate, not the env default', async () => {
