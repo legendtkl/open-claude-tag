@@ -287,6 +287,11 @@ describePg('upsertSlackInstallationFromOAuth + disable lifecycle (Postgres)', ()
     expect(row.botToken).toBe('xoxb-second');
     expect(row.botUserId).toBe('U_BOT2');
     expect(row.platformOwnerId).toBe(ownerA);
+    // Write-through (Copilot M1b review): a re-install that OMITS installation /
+    // tenantKey preserves the existing values instead of clobbering them to
+    // null / teamId. Step 2 above omitted both, so they must be unchanged.
+    expect(row.installation).toEqual({ team: { id: teamId, name: 'Acme' }, bot_user_id: 'U_BOT1' });
+    expect(row.tenantKey).toBe(teamId);
 
     // 3. A DIFFERENT user re-install is rejected; nothing mutates.
     await expect(

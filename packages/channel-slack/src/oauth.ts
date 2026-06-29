@@ -26,8 +26,10 @@ interface SlackOAuthAccessResponse {
   app_id?: string;
   team?: { id?: string; name?: string } | null;
   authed_user?: { id?: string; scope?: string; access_token?: string; token_type?: string } | null;
-  // Token-rotation fields (present only when the app enables rotation). NOT
-  // persisted by M1b; surfaced so a caller can detect rotation.
+  // Raw wire token-rotation fields (present only when the app enables rotation).
+  // NOT persisted by M1b. The PUBLIC `exchangeSlackOAuthCode` result intentionally
+  // surfaces only `expiresIn` and does NOT expose `refresh_token`, so the rotation
+  // secret never propagates beyond this wire type (deferred to a later milestone).
   expires_in?: number;
   refresh_token?: string;
   is_enterprise_install?: boolean;
