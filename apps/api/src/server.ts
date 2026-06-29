@@ -34,6 +34,7 @@ import {
   setWaitingContractAckMessageId,
   setTaskAckDelivery,
   getTaskAckDelivery,
+  disableSlackInstallationByTeamId,
 } from '@open-tag/storage';
 import { sql, eq, desc, and, isNull, or } from 'drizzle-orm';
 import type { AgentAccessContext, Database } from '@open-tag/storage';
@@ -261,6 +262,17 @@ const SLACK_BOT_TOKEN = process.env.SLACK_BOT_TOKEN?.trim() ?? '';
 // Slack stays observation-only (no task dispatch), so production behavior is
 // unchanged by default.
 const SLACK_BOT_USER_ID = process.env.SLACK_BOT_USER_ID?.trim() ?? '';
+// Slack OAuth install flow (Slack Milestone 1b, ADR-0014). The install/callback
+// routes are registered ONLY when BOTH a client id and secret are set; otherwise
+// they 404 and the M1a admin-CRUD path is unaffected.
+const SLACK_CLIENT_ID = process.env.SLACK_CLIENT_ID?.trim() ?? '';
+const SLACK_CLIENT_SECRET = process.env.SLACK_CLIENT_SECRET?.trim() ?? '';
+const SLACK_OAUTH_REDIRECT_URI = process.env.SLACK_OAUTH_REDIRECT_URI?.trim() ?? '';
+// HMAC key for the signed OAuth `state` (CSRF). Prefer a dedicated secret, then
+// fall back to the app signing secret, then the client secret (always present
+// when OAuth is enabled) — all server-only secrets never sent to a client.
+const SLACK_STATE_SECRET =
+  process.env.SLACK_STATE_SECRET?.trim() || SLACK_SIGNING_SECRET || SLACK_CLIENT_SECRET;
 const FEISHU_WEBHOOK_MAX_TIMESTAMP_SKEW_SECONDS = Number.parseInt(
   process.env.FEISHU_WEBHOOK_MAX_TIMESTAMP_SKEW_SECONDS ?? '600',
   10,
@@ -3401,6 +3413,14 @@ if (SLACK_SIGNING_SECRET) {
   const slackHandler = createSlackEventsHandler({
     signingSecret: SLACK_SIGNING_SECRET,
     channel: slackChannel,
+    // app_uninstalled / bot tokens_revoked → disable that team's install
+    // (ADR-0014). Wired whenever the events route exists (gated on the signing
+    // secret), independent of the OAuth gate, since a manually-CRUD'd M1a install
+    // should also be retired when its workspace removes the app. `db` is read at
+    // request time (assigned during async startup).
+    onUninstall: async (teamId) => {
+      await disableSlackInstallationByTeamId(db, teamId);
+    },
     dispatch: (message, ctx) =>
       createSlackInboundDispatch({
         db,
@@ -4474,6 +4494,19 @@ async function start(): Promise<void> {
     feishuTaskTrackingEnabled: createFeishuTaskTrackingConfigFromEnv().enabled,
     feishuDocumentCommentsEnabled: FEISHU_DOCUMENT_COMMENTS_ENABLED,
     afterFeishuRuntimeChange: reloadFeishuRuntimeFromAdmin,
+    // Slack OAuth install flow (ADR-0014): only when BOTH client id + secret are
+    // set. Absent ⇒ the install/callback routes are not registered (404), leaving
+    // the M1a admin-CRUD path untouched.
+    ...(SLACK_CLIENT_ID && SLACK_CLIENT_SECRET
+      ? {
+          slackOAuth: {
+            clientId: SLACK_CLIENT_ID,
+            clientSecret: SLACK_CLIENT_SECRET,
+            stateSecret: SLACK_STATE_SECRET,
+            ...(SLACK_OAUTH_REDIRECT_URI ? { redirectUri: SLACK_OAUTH_REDIRECT_URI } : {}),
+          },
+        }
+      : {}),
   });
 
   // 2. Feishu app runtime and primary REST client

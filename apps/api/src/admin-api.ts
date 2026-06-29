@@ -32,8 +32,11 @@ import {
   tasks,
   updateChatMemoryConfig,
   upsertPlatformUserByDevAuth,
+  upsertSlackInstallationFromOAuth,
   type Database,
   type PlatformUser,
+  type UpsertSlackInstallationFromOAuthInput,
+  type UpsertSlackInstallationFromOAuthResult,
 } from '@open-tag/storage';
 import { extractDevAuthSub, validateDevAuthSub } from './admin-identity.js';
 import {
@@ -41,6 +44,13 @@ import {
   evaluateFeishuPermissionScopes,
   type FeishuPermissionCheckResult,
 } from './feishu-permission-check.js';
+import {
+  createSlackOAuthCallbackHandler,
+  createSlackOAuthInstallHandler,
+  SLACK_OAUTH_CALLBACK_PATH,
+  SLACK_OAUTH_INSTALL_PATH,
+  type SlackOAuthRegistration,
+} from './slack-oauth.js';
 
 /**
  * Authorization scope resolved once per request by the admin guard and threaded
@@ -419,6 +429,15 @@ export interface AdminApiStore {
     input: PatchSlackInstallationInput,
   ): Promise<SlackInstallationDto>;
   deleteSlackInstallation(scope: OwnerScope, id: string): Promise<SlackInstallationDto>;
+  /**
+   * Provision/re-provision a Slack install from a completed OAuth exchange
+   * (ADR-0014). Unlike the admin CRUD methods this takes NO `OwnerScope` — the
+   * owner + superadmin status come from the signed OAuth `state`, not a console
+   * request. The bot token is supplied in `input` and stored; never returned.
+   */
+  upsertSlackInstallationFromOAuth(
+    input: UpsertSlackInstallationFromOAuthInput,
+  ): Promise<UpsertSlackInstallationFromOAuthResult>;
   checkFeishuAppPermissions(scope: OwnerScope, id: string): Promise<FeishuAppPermissionCheckDto>;
   applyFeishuAppPermissions(scope: OwnerScope, id: string): Promise<FeishuAppPermissionApplyDto>;
   startFeishuAppRegistration(
@@ -2946,6 +2965,13 @@ export function createDrizzleAdminApiStore(
       return deleted;
     },
 
+    async upsertSlackInstallationFromOAuth(input) {
+      // The owner + superadmin status are carried in `input.ownerPlatformUserId`
+      // (decoded from the signed OAuth state), so this path is intentionally
+      // scope-free. The repo enforces cross-owner protection + update-not-duplicate.
+      return upsertSlackInstallationFromOAuth(db, input);
+    },
+
     async checkFeishuAppPermissions(scope, id) {
       const [row] = await db.select().from(feishuApps).where(eq(feishuApps.id, id)).limit(1);
       if (!row) throw rowNotFound('Feishu app');
@@ -3778,6 +3804,14 @@ export interface RegisterAdminApiOptions {
    * be resolved.
    */
   desktopVersion?: string | null;
+  /**
+   * Slack OAuth install config (Slack Milestone 1b, ADR-0014). Present ONLY when
+   * server.ts found `SLACK_CLIENT_ID` + `SLACK_CLIENT_SECRET`; when absent the
+   * `/slack/oauth/install` and `/slack/oauth/callback` routes are NOT registered
+   * (so they 404), leaving the M1a admin-CRUD path untouched. `exchange` is a test
+   * seam for the `oauth.v2.access` call.
+   */
+  slackOAuth?: SlackOAuthRegistration;
 }
 
 /**
@@ -4423,6 +4457,33 @@ export function registerAdminApiRoutes(
       store.deleteSlackInstallation(requireIdentity(request).scope, params.id),
     );
   });
+
+  // Slack OAuth install flow (Slack Milestone 1b, ADR-0014). Registered ONLY when
+  // server.ts supplied SLACK_CLIENT_ID/SLACK_CLIENT_SECRET; otherwise both routes
+  // are absent (404) and the M1a admin-CRUD path above is unaffected.
+  if (options.slackOAuth) {
+    const slackOAuth = options.slackOAuth;
+    // The install START is behind the admin guard so only an authenticated
+    // console user (or loopback/token superadmin) can initiate; the initiating
+    // platform user id is signed into the state to stamp ownership + CSRF-verify.
+    app.get(
+      SLACK_OAUTH_INSTALL_PATH,
+      { preHandler },
+      createSlackOAuthInstallHandler({
+        ...slackOAuth,
+        resolvePlatformUserId: (request) => requireIdentity(request).scope.platformUserId,
+      }),
+    );
+    // The CALLBACK is PUBLIC (Slack's browser redirect) — CSRF is the signed state,
+    // not the admin guard. It upserts through the store's OAuth provisioning path.
+    app.get(
+      SLACK_OAUTH_CALLBACK_PATH,
+      createSlackOAuthCallbackHandler({
+        ...slackOAuth,
+        upsertInstallation: (input) => store.upsertSlackInstallationFromOAuth(input),
+      }),
+    );
+  }
 
   app.post('/admin/feishu-apps/:id/permission-check', { preHandler }, async (request, reply) => {
     const params = parseWithReply(IdParamsSchema, request.params, reply);

@@ -26,9 +26,9 @@ orchestrator core speaks a neutral message contract, so adding a new option on e
 axis means implementing one contract, not forking the core:
 
 - **Channel** — where the chat lives. Lark/Feishu is the fully-featured channel today;
-  Slack is a working second channel (inbound dispatch + outbound send), with OAuth,
-  multi-workspace install, and Socket Mode still in progress. New channels implement the
-  `Channel` contract in `packages/channel-core`.
+  Slack is a working second channel (inbound dispatch + outbound send) with OAuth
+  multi-workspace install (ADR-0014); Socket Mode is still in progress. New channels
+  implement the `Channel` contract in `packages/channel-core`.
 - **Runtime** — what executes the task. Claude Code (the default) and Codex are full
   runtimes. New runtimes plug into the descriptor-driven registry in
   `packages/runtime-adapters`.
@@ -89,7 +89,7 @@ vendor nor a runtime (see [`doc/decisions/0004`](./doc/decisions/0004-inbound-me
 | Axis | Option | Status |
 | --- | --- | --- |
 | Channel | Lark / Feishu | Full — events, interactive cards, threaded feedback, reactions, approvals, and Feishu Task tracking (`packages/feishu-adapter`, `LarkChannel`). |
-| Channel | Slack | Inbound dispatch + outbound send (`packages/channel-slack`, `SlackChannel`). A signature-verified `POST /slack/events` route feeds channel-neutral observation memory and, when `SLACK_BOT_USER_ID` is set and the bot is @mentioned, dispatches a task through the neutral path (ADR-0005); when `SLACK_BOT_TOKEN` is also set, it ACKs through the Slack Web API. The worker also delivers the task's terminal completion as a neutral message (ADR-0008). OAuth / multi-workspace install, Socket Mode, richer running-card / Block Kit parity, and the Lark-only extras (slash-command tree, buffering, thread/reference enrichment, agent routing) are not built yet. |
+| Channel | Slack | Inbound dispatch + outbound send (`packages/channel-slack`, `SlackChannel`). A signature-verified `POST /slack/events` route feeds channel-neutral observation memory and, when `SLACK_BOT_USER_ID` is set and the bot is @mentioned, dispatches a task through the neutral path (ADR-0005); when `SLACK_BOT_TOKEN` is also set, it ACKs through the Slack Web API. The worker also delivers the task's terminal completion as a neutral message (ADR-0008). OAuth multi-workspace install (the `SLACK_CLIENT_ID`/`SLACK_CLIENT_SECRET`-gated `/slack/oauth/install` + `/slack/oauth/callback` routes) and `app_uninstalled` auto-disable are supported (ADR-0014). Socket Mode, richer running-card / Block Kit parity, and the Lark-only extras (slash-command tree, buffering, thread/reference enrichment, agent routing) are not built yet. |
 | Runtime | Claude Code | Full — the default runtime. |
 | Runtime | Codex | Full. |
 
@@ -393,9 +393,13 @@ marked **code-only**. Variables are read from `process.env`.
 
 | Variable | Required | Default | Description |
 | --- | --- | --- | --- |
-| `SLACK_SIGNING_SECRET` | To enable Slack | — | Enables and signature-verifies the `POST /slack/events` route. |
+| `SLACK_SIGNING_SECRET` | To enable Slack | — | Enables and signature-verifies the `POST /slack/events` route. Also handles `app_uninstalled` / bot `tokens_revoked` events by disabling that workspace's install. |
 | `SLACK_BOT_USER_ID` | To dispatch tasks | — | When set, an @mention of this bot dispatches a task through the neutral path. |
 | `SLACK_BOT_TOKEN` | For outbound delivery | — | Slack Web API token for the inbound ACK; the worker also reads it to deliver the task's terminal completion (ADR-0008). |
+| `SLACK_CLIENT_ID` | To enable OAuth install | — | With `SLACK_CLIENT_SECRET`, registers the `GET /slack/oauth/install` + `GET /slack/oauth/callback` multi-workspace install routes (ADR-0014). Unset ⇒ routes 404. |
+| `SLACK_CLIENT_SECRET` | To enable OAuth install | — | Slack app client secret for the `oauth.v2.access` code exchange. Required alongside `SLACK_CLIENT_ID`. |
+| `SLACK_OAUTH_REDIRECT_URI` | No | Slack app default | The OAuth redirect URI; must match the Slack app config. Omit to use the app's single configured redirect. |
+| `SLACK_STATE_SECRET` | No | falls back to `SLACK_SIGNING_SECRET`, then `SLACK_CLIENT_SECRET` | HMAC key for the signed OAuth `state` (CSRF + ownership). |
 
 ### Feature flags
 
@@ -518,23 +522,40 @@ Example form card structure:
 
 ## Slack Setup (Experimental)
 
-Slack is a working second channel for inbound task dispatch and outbound ACK, but
-it is **partial / experimental**: OAuth, multi-workspace install, Socket Mode, and
-richer running-card / Block Kit parity are not built yet, and a live end-to-end run
-with real workspace credentials has not been performed. (Worker-side terminal
-completion delivery does exist — see ADR-0008.)
+Slack is a working second channel for inbound task dispatch and outbound ACK, with
+**OAuth multi-workspace install now supported** (ADR-0014). It is still
+**partial / experimental**: Socket Mode and richer running-card / Block Kit parity
+are not built yet, and a live end-to-end run with real workspace credentials has
+not been performed. (Worker-side terminal completion delivery does exist — see
+ADR-0008.)
 
 1. Set `SLACK_SIGNING_SECRET`. This registers and signature-verifies the
-   `POST /slack/events` route; without it the route is not mounted.
+   `POST /slack/events` route; without it the route is not mounted. The route also
+   handles `app_uninstalled` / bot `tokens_revoked` by disabling that workspace's
+   install (ADR-0014).
 2. Set `SLACK_BOT_USER_ID`. An @mention of this bot user then dispatches a task
    through the same vendor-neutral path as Lark (ADR-0005).
 3. Set `SLACK_BOT_TOKEN` for outbound delivery — the Slack Web API token for the
    inbound ACK; the worker also reads it to deliver the task's terminal completion
-   (ADR-0008).
+   (ADR-0008). For OAuth installs the token is minted per workspace and stored, so
+   this env token is only the single-workspace fallback (ADR-0013).
 
-Point your Slack app's Events API request URL at `https://<your-host>/slack/events`.
-See [`doc/decisions/0005`](./doc/decisions/0005-neutral-non-lark-task-dispatch.md)
-for the deferred items.
+**OAuth multi-workspace install (ADR-0014).** Set `SLACK_CLIENT_ID` +
+`SLACK_CLIENT_SECRET` (and optionally `SLACK_OAUTH_REDIRECT_URI` /
+`SLACK_STATE_SECRET`) to register the install routes. An authenticated console
+user opens `GET /slack/oauth/install`, which 302-redirects to Slack's consent
+screen with a signed `state`; Slack redirects back to
+`GET /slack/oauth/callback`, which verifies the state (CSRF + the initiating
+owner), exchanges the `code` via `oauth.v2.access`, and upserts the workspace's
+per-team install (keyed on `team_id`, owner-preserving on re-install). When
+`SLACK_CLIENT_ID` / `SLACK_CLIENT_SECRET` are unset the routes 404 and the admin
+manual-CRUD path (ADR-0013) is unaffected.
+
+Point your Slack app's Events API request URL at `https://<your-host>/slack/events`,
+and (for OAuth) its Redirect URL at `https://<your-host>/slack/oauth/callback`.
+See [`doc/decisions/0005`](./doc/decisions/0005-neutral-non-lark-task-dispatch.md),
+[`0013`](./doc/decisions/0013-per-team-slack-token-model.md), and
+[`0014`](./doc/decisions/0014-slack-oauth-install-and-app-uninstall.md) for details.
 
 ## Usage
 

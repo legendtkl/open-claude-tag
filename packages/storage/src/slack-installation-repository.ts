@@ -92,3 +92,148 @@ export async function listEnabledSlackInstallations(db: Database): Promise<Slack
     .where(eq(slackInstallations.status, 'enabled'))
     .orderBy(sql`${slackInstallations.updatedAt} desc`);
 }
+
+/**
+ * Raised when an OAuth re-install targets a `team_id` already owned by a
+ * DIFFERENT platform user. The OAuth callback maps this to a 403 and performs NO
+ * mutation, so user B can never re-enable, rotate, or hijack user A's workspace
+ * install (Codex M1b design-gate finding 1, ADR-0014).
+ */
+export class SlackInstallationOwnershipError extends Error {
+  constructor(readonly teamId: string) {
+    super('Slack workspace is already connected by another owner');
+    this.name = 'SlackInstallationOwnershipError';
+  }
+}
+
+/** Input for {@link upsertSlackInstallationFromOAuth}; carries NO user token. */
+export interface UpsertSlackInstallationFromOAuthInput {
+  teamId: string;
+  teamName?: string | null;
+  /** The bot token (`xoxb-…`) to store at rest. */
+  botToken: string;
+  botUserId?: string | null;
+  slackAppId?: string | null;
+  tenantKey?: string | null;
+  /** Sanitized audit payload (NO tokens) — see `buildSanitizedSlackInstallation`. */
+  installation?: Record<string, unknown> | null;
+  /**
+   * The platform user that initiated the install (from the signed OAuth state).
+   * `null` ⇒ a token/loopback SUPERADMIN-initiated install: it may update ANY
+   * existing row, and a fresh insert is ops-owned (NULL owner). A non-null user
+   * may only update a row they already own (mirrors `assertOwnsRow`).
+   */
+  ownerPlatformUserId: string | null;
+}
+
+export interface UpsertSlackInstallationFromOAuthResult {
+  teamId: string;
+  teamName: string | null;
+  /** `true` ⇒ a new install row was created; `false` ⇒ an existing row updated. */
+  created: boolean;
+}
+
+/**
+ * Provision (or re-provision) a workspace's bot install from a completed OAuth
+ * exchange (ADR-0014). Atomic on the unique `team_id`, so a re-install UPDATES
+ * the existing row instead of creating a duplicate:
+ *
+ *  - INSERT (new team): stamps `platform_owner_id` from the initiating user;
+ *    `status='enabled'`, `bot_token_ref='stored'`.
+ *  - UPDATE (existing team, incl. a previously-uninstalled/disabled row): rotates
+ *    the bot token + identity, re-enables it, and refreshes the audit payload —
+ *    but NEVER changes `platform_owner_id`, so the ORIGINAL owner is preserved.
+ *
+ * Ownership is enforced BEFORE the update under a row lock: a non-superadmin user
+ * may only touch a row they own, else {@link SlackInstallationOwnershipError} is
+ * thrown and nothing is mutated.
+ */
+export async function upsertSlackInstallationFromOAuth(
+  db: Database,
+  input: UpsertSlackInstallationFromOAuthInput,
+): Promise<UpsertSlackInstallationFromOAuthResult> {
+  return db.transaction(async (tx) => {
+    // Lock the live row for this team (deleted rows carry a mangled team_id, so a
+    // real team_id only ever matches the single non-deleted row, if any).
+    const [existing] = await tx
+      .select()
+      .from(slackInstallations)
+      .where(eq(slackInstallations.teamId, input.teamId))
+      .for('update')
+      .limit(1);
+
+    if (existing) {
+      const isSuperadmin = input.ownerPlatformUserId === null;
+      const ownsRow =
+        existing.platformOwnerId !== null &&
+        existing.platformOwnerId === input.ownerPlatformUserId;
+      if (!isSuperadmin && !ownsRow) {
+        throw new SlackInstallationOwnershipError(input.teamId);
+      }
+
+      await tx
+        .update(slackInstallations)
+        .set({
+          botToken: input.botToken,
+          botTokenRef: 'stored',
+          botUserId: input.botUserId ?? null,
+          teamName: input.teamName ?? existing.teamName,
+          slackAppId: input.slackAppId ?? existing.slackAppId,
+          tenantKey: input.tenantKey ?? input.teamId,
+          status: 'enabled',
+          installation: input.installation ?? null,
+          updatedAt: new Date(),
+          // platform_owner_id intentionally omitted: re-install keeps the
+          // original owner (Codex M1b design-gate finding 1).
+        })
+        .where(eq(slackInstallations.id, existing.id));
+
+      return {
+        teamId: input.teamId,
+        teamName: input.teamName ?? existing.teamName,
+        created: false,
+      };
+    }
+
+    const [row] = await tx
+      .insert(slackInstallations)
+      .values({
+        teamId: input.teamId,
+        botToken: input.botToken,
+        botTokenRef: 'stored',
+        botUserId: input.botUserId ?? undefined,
+        teamName: input.teamName ?? undefined,
+        slackAppId: input.slackAppId ?? undefined,
+        tenantKey: input.tenantKey ?? input.teamId,
+        status: 'enabled',
+        installation: input.installation ?? undefined,
+        platformOwnerId: input.ownerPlatformUserId ?? undefined,
+      })
+      .returning({ teamName: slackInstallations.teamName });
+
+    return { teamId: input.teamId, teamName: row?.teamName ?? null, created: true };
+  });
+}
+
+/**
+ * Disable a workspace's install when its Slack app is uninstalled or its bot
+ * token is revoked (ADR-0014). Sets `status='disabled'` and WIPES the stored bot
+ * token, but KEEPS the `team_id` (and `platform_owner_id`) so a later OAuth
+ * re-install re-enables the SAME row and preserves the original owner.
+ *
+ * Distinct from the admin soft-delete, which mangles `team_id` to free the unique
+ * index for a user-initiated removal. Idempotent — a missing/already-disabled row
+ * is a no-op. Returns whether a row was affected. The unique `team_id` (deleted
+ * rows are mangled) means a real `team_id` only ever targets the live row.
+ */
+export async function disableSlackInstallationByTeamId(
+  db: Database,
+  teamId: string,
+): Promise<boolean> {
+  const [row] = await db
+    .update(slackInstallations)
+    .set({ status: 'disabled', botToken: null, updatedAt: new Date() })
+    .where(eq(slackInstallations.teamId, teamId))
+    .returning({ id: slackInstallations.id });
+  return row !== undefined;
+}

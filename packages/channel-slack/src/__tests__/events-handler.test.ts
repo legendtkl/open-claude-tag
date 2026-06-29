@@ -83,4 +83,44 @@ describe('handleSlackEvent', () => {
     const outcome = handleSlackEvent({ parsed: 'not-json', channel });
     expect(outcome).toEqual({ type: 'ignore', reason: 'non_object_payload' });
   });
+
+  it('emits a lifecycle outcome for an app_uninstalled event', () => {
+    const outcome = handleSlackEvent({
+      parsed: { type: 'event_callback', team_id: 'T999', event: { type: 'app_uninstalled' } },
+      channel,
+    });
+    expect(outcome).toEqual({ type: 'lifecycle', lifecycle: 'app_uninstalled', teamId: 'T999' });
+  });
+
+  it('ignores app_uninstalled without a team_id', () => {
+    const outcome = handleSlackEvent({
+      parsed: { type: 'event_callback', event: { type: 'app_uninstalled' } },
+      channel,
+    });
+    expect(outcome).toEqual({ type: 'ignore', reason: 'app_uninstalled_missing_team_id' });
+  });
+
+  it('emits a lifecycle outcome for tokens_revoked when the BOT token was revoked', () => {
+    const outcome = handleSlackEvent({
+      parsed: {
+        type: 'event_callback',
+        team_id: 'T999',
+        event: { type: 'tokens_revoked', tokens: { oauth: ['U1'], bot: ['U_BOT'] } },
+      },
+      channel,
+    });
+    expect(outcome).toEqual({ type: 'lifecycle', lifecycle: 'tokens_revoked', teamId: 'T999' });
+  });
+
+  it('ignores tokens_revoked that only revokes user (oauth) tokens', () => {
+    const outcome = handleSlackEvent({
+      parsed: {
+        type: 'event_callback',
+        team_id: 'T999',
+        event: { type: 'tokens_revoked', tokens: { oauth: ['U1'], bot: [] } },
+      },
+      channel,
+    });
+    expect(outcome).toEqual({ type: 'ignore', reason: 'tokens_revoked_no_bot_token' });
+  });
 });
