@@ -582,12 +582,16 @@ describePg('admin api store ownership matrix', () => {
   });
 
   it('rejects enabling a Slack installation with no usable token (Codex finding 3)', async () => {
+    // Create with an env ref and NO stored token (passes the create refine).
+    // There is no clear-token verb in M1a, so this is the only route to a
+    // tokenless row: pointing the ref back to 'stored' leaves no resolvable token.
     const created = await store().createSlackInstallation(aliceScope, {
       teamId: `TS_dead_${randomUUID().slice(0, 8)}`,
-      botToken: 'xoxb-temp',
+      botTokenRef: 'env:SLACK_UNSET_TOKEN',
       status: 'disabled',
     });
-    // Clearing the token source (ref back to 'stored', no env) while enabling is
+    expect(created.hasStoredToken).toBe(false);
+    // Pointing the ref back to 'stored' (no stored token) while enabling is
     // rejected: an enabled-but-tokenless install would be silently dead.
     await expect(
       store().updateSlackInstallation(aliceScope, created.id, {
