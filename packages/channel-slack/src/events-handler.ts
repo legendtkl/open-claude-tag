@@ -15,11 +15,19 @@ export interface SlackEventNormalizer {
   normalize(raw: unknown): InboundMessage | null;
 }
 
+/** App-lifecycle events that retire a workspace's bot token (Milestone 1b). */
+export type SlackLifecycleKind = 'app_uninstalled' | 'tokens_revoked';
+
 export type SlackEventOutcome =
   /** Slack endpoint handshake — echo `challenge` back in the 200 body. */
   | { type: 'url_verification'; challenge: string }
   /** A normalized human message the transport should dispatch (then ack 200). */
   | { type: 'dispatch'; message: InboundMessage; retryNum?: number }
+  /**
+   * The Slack app was uninstalled (or its BOT token revoked) for a workspace; the
+   * transport should disable that team's installation, then ack 200 (ADR-0014).
+   */
+  | { type: 'lifecycle'; lifecycle: SlackLifecycleKind; teamId: string }
   /** Nothing to do (handshake-less non-message, bot/subtype, unknown type). Ack 200. */
   | { type: 'ignore'; reason: string };
 
@@ -40,8 +48,10 @@ function isRecord(value: unknown): value is Record<string, unknown> {
  * Decide what to do with a verified Slack Events API request.
  *
  * - `url_verification` → echo the challenge (the endpoint handshake).
- * - `event_callback` → `normalize`; a parseable human message dispatches, while a
- *   bot/subtype/non-message (normalize → null) is ignored.
+ * - `event_callback` with `app_uninstalled` / bot-token `tokens_revoked` → a
+ *   `lifecycle` outcome so the transport disables that team's installation.
+ * - `event_callback` (other) → `normalize`; a parseable human message dispatches,
+ *   while a bot/subtype/non-message (normalize → null) is ignored.
  * - anything else → ignored.
  */
 export function handleSlackEvent(input: HandleSlackEventInput): SlackEventOutcome {
@@ -61,6 +71,9 @@ export function handleSlackEvent(input: HandleSlackEventInput): SlackEventOutcom
   }
 
   if (type === 'event_callback') {
+    const lifecycle = lifecycleOutcome(parsed);
+    if (lifecycle) return lifecycle;
+
     const message = channel.normalize(parsed);
     if (!message) {
       return { type: 'ignore', reason: 'non_dispatchable_event' };
@@ -69,4 +82,32 @@ export function handleSlackEvent(input: HandleSlackEventInput): SlackEventOutcom
   }
 
   return { type: 'ignore', reason: `unsupported_type:${type ?? 'unknown'}` };
+}
+
+/**
+ * Recognize the two app-lifecycle events that retire a workspace's bot token.
+ *
+ * `app_uninstalled` always retires the install. `tokens_revoked` carries a
+ * `tokens: { oauth: string[]; bot: string[] }` split — `oauth` lists user-token
+ * owners, `bot` lists bot-token owners. We disable ONLY when the BOT token was
+ * revoked (`tokens.bot` non-empty); an oauth-only (user-token) revocation must
+ * NOT take down the workspace's bot install (Codex M1b design gate). Returns
+ * `null` for any other event (so the caller falls through to `normalize`), or
+ * when the `team_id` is missing (nothing to key the disable on).
+ */
+function lifecycleOutcome(parsed: Record<string, unknown>): SlackEventOutcome | null {
+  const event = isRecord(parsed.event) ? parsed.event : undefined;
+  const eventType = typeof event?.type === 'string' ? event.type : undefined;
+  if (eventType !== 'app_uninstalled' && eventType !== 'tokens_revoked') return null;
+
+  const teamId = typeof parsed.team_id === 'string' ? parsed.team_id.trim() : '';
+  if (!teamId) return { type: 'ignore', reason: `${eventType}_missing_team_id` };
+
+  if (eventType === 'tokens_revoked') {
+    const tokens = isRecord(event?.tokens) ? event.tokens : undefined;
+    const botRevoked = Array.isArray(tokens?.bot) && tokens.bot.length > 0;
+    if (!botRevoked) return { type: 'ignore', reason: 'tokens_revoked_no_bot_token' };
+  }
+
+  return { type: 'lifecycle', lifecycle: eventType, teamId };
 }

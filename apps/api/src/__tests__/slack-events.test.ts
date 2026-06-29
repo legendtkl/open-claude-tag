@@ -304,4 +304,83 @@ describe('createSlackEventsHandler', () => {
     expect(reply.statusCode).toBe(500);
     expect(result).toEqual({ ok: false });
   });
+
+  it('disables the installation on a signed app_uninstalled event (acks 200)', async () => {
+    const dispatch = makeDispatchSpy();
+    const onUninstall = vi.fn(async (_teamId: string) => {});
+    const handler = createSlackEventsHandler({
+      signingSecret: SECRET,
+      channel,
+      dispatch,
+      onUninstall,
+      logger: silentLogger,
+      now: () => NOW_MS,
+    });
+    const body = { type: 'event_callback', team_id: 'T_GONE', event: { type: 'app_uninstalled' } };
+    const raw = JSON.stringify(body);
+    const reply = makeReply();
+
+    const result = await handler(
+      makeRequest({ body, rawBody: raw, signature: sign(SECRET, TS, raw), timestamp: TS }),
+      reply as unknown as FastifyReply,
+    );
+
+    expect(reply.statusCode).toBe(200);
+    expect(result).toEqual({ ok: true });
+    expect(onUninstall).toHaveBeenCalledWith('T_GONE');
+    expect(dispatch).not.toHaveBeenCalled();
+  });
+
+  it('returns 500 when the lifecycle disable fails (so Slack retries)', async () => {
+    const onUninstall = vi.fn(async () => {
+      throw new Error('db down');
+    });
+    const handler = createSlackEventsHandler({
+      signingSecret: SECRET,
+      channel,
+      dispatch: makeDispatchSpy(),
+      onUninstall,
+      logger: silentLogger,
+      now: () => NOW_MS,
+    });
+    const body = { type: 'event_callback', team_id: 'T_GONE', event: { type: 'app_uninstalled' } };
+    const raw = JSON.stringify(body);
+    const reply = makeReply();
+
+    const result = await handler(
+      makeRequest({ body, rawBody: raw, signature: sign(SECRET, TS, raw), timestamp: TS }),
+      reply as unknown as FastifyReply,
+    );
+
+    expect(reply.statusCode).toBe(500);
+    expect(result).toEqual({ ok: false });
+  });
+
+  it('does not disable when tokens_revoked carries only user (oauth) tokens', async () => {
+    const onUninstall = vi.fn(async () => {});
+    const handler = createSlackEventsHandler({
+      signingSecret: SECRET,
+      channel,
+      dispatch: makeDispatchSpy(),
+      onUninstall,
+      logger: silentLogger,
+      now: () => NOW_MS,
+    });
+    const body = {
+      type: 'event_callback',
+      team_id: 'T_KEEP',
+      event: { type: 'tokens_revoked', tokens: { oauth: ['U1'], bot: [] } },
+    };
+    const raw = JSON.stringify(body);
+    const reply = makeReply();
+
+    const result = await handler(
+      makeRequest({ body, rawBody: raw, signature: sign(SECRET, TS, raw), timestamp: TS }),
+      reply as unknown as FastifyReply,
+    );
+
+    expect(reply.statusCode).toBe(200);
+    expect(result).toEqual({ ok: true });
+    expect(onUninstall).not.toHaveBeenCalled();
+  });
 });

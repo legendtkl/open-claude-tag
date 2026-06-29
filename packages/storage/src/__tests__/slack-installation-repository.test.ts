@@ -5,12 +5,15 @@ import postgres from 'postgres';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { Database } from '../db.js';
 import * as schema from '../schema.js';
-import { slackInstallations } from '../schema.js';
+import { platformUsers, slackInstallations } from '../schema.js';
 import {
+  disableSlackInstallationByTeamId,
   getSlackInstallationByTeamId,
   hasAnySlackInstallation,
   listEnabledSlackInstallations,
   resolveSlackInstallationToken,
+  SlackInstallationOwnershipError,
+  upsertSlackInstallationFromOAuth,
 } from '../slack-installation-repository.js';
 
 /** A select chain whose terminal step (`limit` / `orderBy`) resolves to `rows`. */
@@ -23,6 +26,17 @@ function makeDb(rows: unknown[]): { db: Database; where: ReturnType<typeof vi.fn
     orderBy: async () => rows,
   };
   return { db: { select: vi.fn(() => chain) } as unknown as Database, where };
+}
+
+/** An update chain (`update→set→where→returning`) resolving to `rows`. */
+function makeUpdateDb(rows: unknown[]): { db: Database; set: ReturnType<typeof vi.fn> } {
+  const set = vi.fn(() => chain);
+  const chain = {
+    set,
+    where: () => chain,
+    returning: async () => rows,
+  };
+  return { db: { update: vi.fn(() => chain) } as unknown as Database, set };
 }
 
 describe('resolveSlackInstallationToken', () => {
@@ -92,6 +106,21 @@ describe('hasAnySlackInstallation', () => {
   it('is false when the existence probe returns no row', async () => {
     const { db } = makeDb([]);
     await expect(hasAnySlackInstallation(db)).resolves.toBe(false);
+  });
+});
+
+describe('disableSlackInstallationByTeamId (unit)', () => {
+  it('disables + wipes the token and reports a row was affected', async () => {
+    const { db, set } = makeUpdateDb([{ id: 'i1' }]);
+    await expect(disableSlackInstallationByTeamId(db, 'T1')).resolves.toBe(true);
+    expect(set).toHaveBeenCalledWith(
+      expect.objectContaining({ status: 'disabled', botToken: null }),
+    );
+  });
+
+  it('reports no row affected when the team has no live install', async () => {
+    const { db } = makeUpdateDb([]);
+    await expect(disableSlackInstallationByTeamId(db, 'T_unknown')).resolves.toBe(false);
   });
 });
 
@@ -170,5 +199,139 @@ describePg('hasAnySlackInstallation non-deleted predicate (Postgres)', () => {
 
     // Smoke: with our non-deleted rows present the global probe is true and stable.
     await expect(hasAnySlackInstallation(db)).resolves.toBe(true);
+  });
+});
+
+// Real-Postgres proof of the M1b OAuth upsert + uninstall-disable lifecycle: the
+// onConflict-on-team_id update-not-duplicate, owner-preservation, cross-owner
+// rejection, and disable-keeps-team_id semantics can only be verified on the SQL
+// backend (the unique team_id index, the FK to platform_users, and the row lock).
+describePg('upsertSlackInstallationFromOAuth + disable lifecycle (Postgres)', () => {
+  let client: postgres.Sql;
+  let db: Database;
+  const run = randomUUID().slice(0, 8);
+  const teamId = `T_oauth_${run}`;
+  let ownerA = '';
+  let ownerB = '';
+
+  beforeAll(async () => {
+    if (!process.env.DATABASE_URL) {
+      throw new Error('DATABASE_URL is required for storage Postgres integration tests');
+    }
+    client = postgres(process.env.DATABASE_URL, { max: 4, idle_timeout: 5, connect_timeout: 5 });
+    db = drizzle(client, { schema }) as unknown as Database;
+    const [a] = await db
+      .insert(platformUsers)
+      .values({ ssoSub: `sso_a_${run}` })
+      .returning({ id: platformUsers.id });
+    const [b] = await db
+      .insert(platformUsers)
+      .values({ ssoSub: `sso_b_${run}` })
+      .returning({ id: platformUsers.id });
+    ownerA = a.id;
+    ownerB = b.id;
+  });
+
+  afterAll(async () => {
+    await db.delete(slackInstallations).where(eq(slackInstallations.teamId, teamId));
+    await db.delete(platformUsers).where(inArray(platformUsers.id, [ownerA, ownerB]));
+    await client.end({ timeout: 5 });
+  });
+
+  async function loadRow() {
+    const [row] = await db
+      .select()
+      .from(slackInstallations)
+      .where(eq(slackInstallations.teamId, teamId))
+      .limit(1);
+    return row;
+  }
+
+  async function countRows() {
+    const rows = await db
+      .select({ id: slackInstallations.id })
+      .from(slackInstallations)
+      .where(eq(slackInstallations.teamId, teamId));
+    return rows.length;
+  }
+
+  it('runs the full install → re-install → cross-owner → uninstall → reinstall lifecycle', async () => {
+    // 1. Fresh install owned by A.
+    const created = await upsertSlackInstallationFromOAuth(db, {
+      teamId,
+      teamName: 'Acme',
+      botToken: 'xoxb-first',
+      botUserId: 'U_BOT1',
+      slackAppId: 'A_APP',
+      installation: { team: { id: teamId, name: 'Acme' }, bot_user_id: 'U_BOT1' },
+      ownerPlatformUserId: ownerA,
+    });
+    expect(created).toMatchObject({ teamId, created: true });
+    expect(await countRows()).toBe(1);
+    let row = await loadRow();
+    expect(row.platformOwnerId).toBe(ownerA);
+    expect(row.botToken).toBe('xoxb-first');
+    expect(row.status).toBe('enabled');
+
+    // 2. Same owner re-installs (token rotates) → UPDATE, not a duplicate.
+    const updated = await upsertSlackInstallationFromOAuth(db, {
+      teamId,
+      teamName: 'Acme Corp',
+      botToken: 'xoxb-second',
+      botUserId: 'U_BOT2',
+      ownerPlatformUserId: ownerA,
+    });
+    expect(updated.created).toBe(false);
+    expect(await countRows()).toBe(1);
+    row = await loadRow();
+    expect(row.botToken).toBe('xoxb-second');
+    expect(row.botUserId).toBe('U_BOT2');
+    expect(row.platformOwnerId).toBe(ownerA);
+
+    // 3. A DIFFERENT user re-install is rejected; nothing mutates.
+    await expect(
+      upsertSlackInstallationFromOAuth(db, {
+        teamId,
+        botToken: 'xoxb-hijack',
+        ownerPlatformUserId: ownerB,
+      }),
+    ).rejects.toBeInstanceOf(SlackInstallationOwnershipError);
+    row = await loadRow();
+    expect(row.botToken).toBe('xoxb-second'); // unchanged
+    expect(row.platformOwnerId).toBe(ownerA);
+
+    // 4. A superadmin-initiated re-install (null owner) updates but PRESERVES owner A.
+    const superUpdate = await upsertSlackInstallationFromOAuth(db, {
+      teamId,
+      botToken: 'xoxb-superadmin',
+      ownerPlatformUserId: null,
+    });
+    expect(superUpdate.created).toBe(false);
+    row = await loadRow();
+    expect(row.botToken).toBe('xoxb-superadmin');
+    expect(row.platformOwnerId).toBe(ownerA); // owner preserved
+
+    // 5. Uninstall: disable + wipe token, keep team_id + owner.
+    await expect(disableSlackInstallationByTeamId(db, teamId)).resolves.toBe(true);
+    expect(await countRows()).toBe(1); // row kept (NOT soft-deleted)
+    row = await loadRow();
+    expect(row.status).toBe('disabled');
+    expect(row.botToken).toBeNull();
+    expect(row.platformOwnerId).toBe(ownerA);
+    // Enabled-only lookup now fails closed.
+    await expect(getSlackInstallationByTeamId(db, teamId)).resolves.toBeNull();
+
+    // 6. Re-install re-enables the SAME row, owner still A.
+    const reinstalled = await upsertSlackInstallationFromOAuth(db, {
+      teamId,
+      botToken: 'xoxb-reinstall',
+      ownerPlatformUserId: ownerA,
+    });
+    expect(reinstalled.created).toBe(false);
+    expect(await countRows()).toBe(1);
+    row = await loadRow();
+    expect(row.status).toBe('enabled');
+    expect(row.botToken).toBe('xoxb-reinstall');
+    expect(row.platformOwnerId).toBe(ownerA);
   });
 });

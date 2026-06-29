@@ -11,4 +11,11 @@ export type {
   SlackEventOutcome,
   SlackEventNormalizer,
   HandleSlackEventInput,
+  SlackLifecycleKind,
 } from './events-handler.js';
+export { exchangeSlackOAuthCode, buildSanitizedSlackInstallation } from './oauth.js';
+export type {
+  ExchangeSlackOAuthCodeInput,
+  SlackOAuthResult,
+  SlackOAuthAuthedUser,
+} from './oauth.js';

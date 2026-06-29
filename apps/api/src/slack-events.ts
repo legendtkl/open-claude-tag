@@ -48,6 +48,14 @@ export interface SlackEventsHandlerDeps {
   channel: { normalize(raw: unknown): InboundMessage | null };
   /** Side-effecting dispatch for accepted messages (dedupe + observation). */
   dispatch: SlackInboundDispatcher;
+  /**
+   * Disable a workspace's installation when its Slack app is uninstalled or its
+   * bot token is revoked (ADR-0014). Wired whenever the events route is
+   * registered (gated on the signing secret), independent of OAuth. Idempotent;
+   * a throw surfaces as a 500 so Slack retries. Omitted ⇒ lifecycle events ack
+   * 200 with no effect.
+   */
+  onUninstall?: (teamId: string) => Promise<void>;
   logger: Logger;
   /** Injectable clock (epoch ms) for tests. */
   now?: () => number;
@@ -130,6 +138,27 @@ export function createSlackEventsHandler(deps: SlackEventsHandlerDeps) {
 
     if (outcome.type === 'ignore') {
       deps.logger.info({ reason: outcome.reason, retryNum }, 'Slack event ignored');
+      return { ok: true };
+    }
+
+    if (outcome.type === 'lifecycle') {
+      // App uninstalled / bot token revoked: disable that team's install, then ack
+      // 200. Disabling is idempotent, so a Slack redelivery is harmless. A failure
+      // returns 500 so Slack retries (better a retried disable than a stale token).
+      try {
+        await deps.onUninstall?.(outcome.teamId);
+      } catch (err) {
+        deps.logger.error(
+          { err, lifecycle: outcome.lifecycle, teamId: outcome.teamId },
+          'Slack lifecycle disable failed; returning 500 for retry',
+        );
+        reply.code(500);
+        return { ok: false };
+      }
+      deps.logger.info(
+        { lifecycle: outcome.lifecycle, teamId: outcome.teamId },
+        'Slack installation disabled by lifecycle event',
+      );
       return { ok: true };
     }
 

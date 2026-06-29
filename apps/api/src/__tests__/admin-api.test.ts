@@ -22,6 +22,8 @@ import {
   type OwnerScope,
   type SlackInstallationDto,
 } from '../admin-api.js';
+import { signSlackOAuthState } from '../slack-oauth.js';
+import type { SlackOAuthResult } from '@open-tag/channel-slack';
 import type { Database } from '@open-tag/storage';
 
 const now = new Date('2026-06-06T00:00:00Z');
@@ -271,6 +273,11 @@ function makeStore(overrides: Partial<AdminApiStore> = {}): AdminApiStore {
     ),
     updateSlackInstallation: vi.fn(async (_scope, id) => makeSlackInstallationDto({ id })),
     deleteSlackInstallation: vi.fn(async (_scope, id) => makeSlackInstallationDto({ id })),
+    upsertSlackInstallationFromOAuth: vi.fn(async (input) => ({
+      teamId: input.teamId,
+      teamName: input.teamName ?? null,
+      created: true,
+    })),
     checkFeishuAppPermissions: vi.fn(
       async (_scope, id): Promise<FeishuAppPermissionCheckDto> => ({
         feishuAppId: id,
@@ -2998,6 +3005,140 @@ describe('admin api routes', () => {
 
     expect(response.statusCode).toBe(400);
     expect(store.updateChat).not.toHaveBeenCalled();
+  });
+});
+
+describe('Slack OAuth install routes (Milestone 1b, ADR-0014)', () => {
+  const STATE_SECRET = 'slack-state-secret-fixture';
+
+  function oauthResult(overrides: Partial<SlackOAuthResult> = {}): SlackOAuthResult {
+    return {
+      accessToken: 'xoxb-real-secret',
+      tokenType: 'bot',
+      scope: 'chat:write',
+      botUserId: 'U_BOT',
+      appId: 'A_APP',
+      team: { id: 'T_NEW', name: 'Acme' },
+      authedUser: { id: 'U_HUMAN', scope: 'identify' },
+      ...overrides,
+    };
+  }
+
+  function makeOAuthApp(
+    store: AdminApiStore,
+    oauth: {
+      exchange?: (input: unknown) => Promise<SlackOAuthResult>;
+    } = {},
+  ) {
+    const app = Fastify({ logger: false });
+    registerAdminApiRoutes(app, {
+      store,
+      adminToken: 'secret-token',
+      slackOAuth: {
+        clientId: 'client-id-123',
+        clientSecret: 'client-secret-456',
+        stateSecret: STATE_SECRET,
+        ...(oauth.exchange
+          ? { exchange: oauth.exchange as never }
+          : { exchange: (async () => oauthResult()) as never }),
+      },
+    });
+    return app;
+  }
+
+  it('install-start redirects (302) to Slack authorize with a state param', async () => {
+    const app = makeOAuthApp(makeStore());
+    const response = await app.inject({
+      method: 'GET',
+      url: '/slack/oauth/install',
+      headers: tokenHeaders(),
+    });
+    expect(response.statusCode).toBe(302);
+    const location = response.headers.location as string;
+    expect(location.startsWith('https://slack.com/oauth/v2/authorize')).toBe(true);
+    const url = new URL(location);
+    expect(url.searchParams.get('client_id')).toBe('client-id-123');
+    expect(url.searchParams.get('scope')).toContain('chat:write');
+    expect(url.searchParams.get('state')).toBeTruthy();
+  });
+
+  it('install-start is guarded (403 for a non-loopback request without a token)', async () => {
+    const app = makeOAuthApp(makeStore());
+    const response = await app.inject({
+      method: 'GET',
+      url: '/slack/oauth/install',
+      remoteAddress: '10.0.0.8',
+    });
+    expect(response.statusCode).toBe(403);
+  });
+
+  it('callback upserts an owned, enabled install and never returns the token', async () => {
+    const store = makeStore();
+    const app = makeOAuthApp(store, { exchange: async () => oauthResult() });
+    const state = signSlackOAuthState({ platformUserId: 'U-owner' }, STATE_SECRET);
+
+    const response = await app.inject({
+      method: 'GET',
+      url: `/slack/oauth/callback?code=the-code&state=${encodeURIComponent(state)}`,
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.body).not.toContain('xoxb');
+    expect(store.upsertSlackInstallationFromOAuth).toHaveBeenCalledTimes(1);
+    const arg = (store.upsertSlackInstallationFromOAuth as ReturnType<typeof vi.fn>).mock
+      .calls[0][0];
+    expect(arg).toMatchObject({
+      teamId: 'T_NEW',
+      botToken: 'xoxb-real-secret',
+      botUserId: 'U_BOT',
+      slackAppId: 'A_APP',
+      ownerPlatformUserId: 'U-owner',
+    });
+    // The audit payload carries no token.
+    expect(JSON.stringify(arg.installation)).not.toContain('xoxb');
+  });
+
+  it('callback rejects a tampered/invalid state with 400 and does NOT upsert', async () => {
+    const store = makeStore();
+    const app = makeOAuthApp(store);
+    const response = await app.inject({
+      method: 'GET',
+      url: '/slack/oauth/callback?code=the-code&state=not-a-valid-state',
+    });
+    expect(response.statusCode).toBe(400);
+    expect(store.upsertSlackInstallationFromOAuth).not.toHaveBeenCalled();
+  });
+
+  it('callback returns 5xx and does NOT upsert when the code exchange fails', async () => {
+    const store = makeStore();
+    const app = makeOAuthApp(store, {
+      exchange: async () => {
+        throw new Error('invalid_code');
+      },
+    });
+    const state = signSlackOAuthState({ platformUserId: 'U-owner' }, STATE_SECRET);
+    const response = await app.inject({
+      method: 'GET',
+      url: `/slack/oauth/callback?code=bad&state=${encodeURIComponent(state)}`,
+    });
+    expect(response.statusCode).toBeGreaterThanOrEqual(500);
+    expect(response.body).not.toContain('xoxb');
+    expect(store.upsertSlackInstallationFromOAuth).not.toHaveBeenCalled();
+  });
+
+  it('does NOT register the OAuth routes when slackOAuth is absent (404), leaving admin CRUD intact', async () => {
+    const store = makeStore();
+    const app = makeApp(store); // no slackOAuth
+    const install = await app.inject({ method: 'GET', url: '/slack/oauth/install' });
+    expect(install.statusCode).toBe(404);
+
+    // The M1a admin-CRUD path is unaffected.
+    const list = await app.inject({
+      method: 'GET',
+      url: '/admin/slack-installations',
+      headers: tokenHeaders(),
+    });
+    expect(list.statusCode).toBe(200);
   });
 });
 

@@ -32,6 +32,13 @@ and admin CRUD. OAuth auto-provisioning (`oauth.v2.access` code exchange, the
 install-start/callback routes) and `app_uninstalled` handling are deferred to a
 separate Milestone 1b.
 
+> **Update (Milestone 1b, DELIVERED):** the deferred OAuth install flow and
+> `app_uninstalled` / `tokens_revoked` handling have shipped — see
+> [ADR-0014](0014-slack-oauth-install-and-app-uninstall.md). It adds the
+> `SLACK_CLIENT_ID` / `SLACK_CLIENT_SECRET`-gated install-start + callback routes
+> (signed-state CSRF, owner-preserving upsert) and the lifecycle disable path,
+> building on this store.
+
 ## Decision
 
 1. **One app, one signing secret, many per-team bot tokens.** Keep
