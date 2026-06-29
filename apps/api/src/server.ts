@@ -143,6 +143,7 @@ import {
   createSlackInteractiveHandler,
   createSlackInteractionDispatch,
 } from './slack-interactive.js';
+import { SLACK_COMMANDS_PATH, createSlackCommandsHandler } from './slack-commands.js';
 import { dispatchNeutralMessage } from './neutral-dispatch.js';
 import type { NeutralAckDelivery } from './neutral-dispatch.js';
 import { createSlackInstallationResolver } from './slack-installation-resolver.js';
@@ -3018,6 +3019,10 @@ function isSlackInteractivePath(url: string): boolean {
   return SLACK_SIGNING_SECRET !== '' && (url.split('?')[0] ?? '') === SLACK_INTERACTIVE_PATH;
 }
 
+function isSlackCommandsPath(url: string): boolean {
+  return SLACK_SIGNING_SECRET !== '' && (url.split('?')[0] ?? '') === SLACK_COMMANDS_PATH;
+}
+
 // Slack interactivity (`/slack/interactive`) is `application/x-www-form-urlencoded`,
 // for which Fastify has no built-in parser (it would 415). Register a thin
 // passthrough ONCE so the route is reachable; the interactive handler reads
@@ -3030,13 +3035,15 @@ app.addContentTypeParser(
 );
 
 app.addHook('preParsing', async (request, _reply, payload) => {
-  // The Feishu webhook, the Slack Events API, and Slack interactivity all need the
-  // EXACT raw bytes for signature verification, so capture them here and re-stream
-  // so Fastify still parses. This only ADDS the Slack paths; Feishu is unchanged.
+  // The Feishu webhook, the Slack Events API, Slack interactivity, and Slack
+  // slash commands all need the EXACT raw bytes for signature verification, so
+  // capture them here and re-stream so Fastify still parses. This only ADDS the
+  // Slack paths; Feishu is unchanged.
   if (
     !isFeishuWebhookPath(request.url) &&
     !isSlackEventsPath(request.url) &&
-    !isSlackInteractivePath(request.url)
+    !isSlackInteractivePath(request.url) &&
+    !isSlackCommandsPath(request.url)
   ) {
     return payload;
   }
@@ -3518,6 +3525,24 @@ if (SLACK_SIGNING_SECRET) {
     slackInteractiveHandler,
   );
   logger.info({ path: SLACK_INTERACTIVE_PATH }, 'Slack interactivity inbound route registered');
+
+  // Slack slash-command (`/opentag`) callback transport (#21 M4, D-M4S-1..5).
+  // Same signing-secret gate; verification runs on the raw bytes captured by the
+  // preParsing hook BEFORE the urlencoded form is trusted. help/status are OPEN,
+  // cheap, idempotent, read-only, so the handler answers synchronously with an
+  // ephemeral 200 body — no async response_url, no dedupe. `db` is assigned during
+  // async startup (below), so build the handler per request to read it at request
+  // time — the same deferred-`db` pattern the events/interactive transports use.
+  app.post(
+    SLACK_COMMANDS_PATH,
+    { bodyLimit: FEISHU_WEBHOOK_MAX_BODY_BYTES },
+    (request, reply) =>
+      createSlackCommandsHandler({ signingSecret: SLACK_SIGNING_SECRET, db, logger })(
+        request,
+        reply,
+      ),
+  );
+  logger.info({ path: SLACK_COMMANDS_PATH }, 'Slack slash-command route registered');
 }
 
 app.get('/health', async () => {
