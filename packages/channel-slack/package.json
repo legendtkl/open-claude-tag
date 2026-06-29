@@ -17,7 +17,8 @@
     "typecheck": "tsc --noEmit",
     "clean": "rm -rf dist *.tsbuildinfo",
     "test": "vitest run",
-    "test:unit": "vitest run"
+    "test:unit": "vitest run",
+    "test:slack:e2e": "vitest run --config vitest.slack-e2e.config.ts --reporter=verbose"
   },
   "dependencies": {
     "@open-tag/channel-core": "workspace:*"
