@@ -3387,14 +3387,15 @@ if (SLACK_SIGNING_SECRET) {
     defaultBotUserId: SLACK_BOT_USER_ID || undefined,
     logger,
   });
-  // With no per-team rows AND no env token, an enabled-without-token instance
-  // degrades to no-ACK (the resolver returns undefined, resolveChannelSender
-  // throws, and the neutral path's best-effort ACK swallows it) rather than losing
-  // tasks — warned at startup so the single-workspace misconfig is not silent.
+  // SLACK_BOT_TOKEN is ONLY the single-workspace env fallback (used when there are
+  // zero per-team slack_installations rows). Per-team installs supply their own
+  // tokens and ACK normally without it. So this is a single-workspace-only caveat,
+  // not a blanket "no ACKs": warn that a single-workspace deploy with no env token
+  // will not ACK until a bot token is set (env or a per-team installation).
   if (SLACK_BOT_USER_ID && !SLACK_BOT_TOKEN) {
     logger.warn(
       { path: SLACK_EVENTS_PATH },
-      'Slack task dispatch is enabled (SLACK_BOT_USER_ID set) but no SLACK_BOT_TOKEN is configured; single-workspace queued Slack tasks will not receive an ACK until a bot token (env or a per-team installation) is set',
+      'Slack task dispatch is enabled (SLACK_BOT_USER_ID set) but no SLACK_BOT_TOKEN is configured; per-team slack_installations still ACK normally, but a single-workspace deploy (no per-team rows) will not ACK until a bot token is set (env SLACK_BOT_TOKEN or a per-team installation)',
     );
   }
   const slackHandler = createSlackEventsHandler({

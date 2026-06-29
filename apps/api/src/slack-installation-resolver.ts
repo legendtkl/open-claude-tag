@@ -7,16 +7,18 @@
  *  - {@link SlackInstallationResolver.resolveSender} — a {@link SlackChannel} built
  *    from the team's stored/env bot token, doubling as the neutral ACK sender.
  *
- * Fallback rule (Codex M1a design-gate finding 1): the env defaults
- * (`SLACK_BOT_TOKEN` / `SLACK_BOT_USER_ID`) act as a SYNTHETIC single-workspace
- * install, but ONLY when there are zero enabled `slack_installations` rows. Once
- * any per-team row exists the deploy is multi-workspace, so an unknown team
- * resolves to nothing (fail-closed) rather than borrowing the env token of some
- * other workspace. A known team always uses its own row (never the env fallback).
+ * Fallback rule (Copilot M1a review): the env defaults (`SLACK_BOT_TOKEN` /
+ * `SLACK_BOT_USER_ID`) act as a SYNTHETIC single-workspace install ONLY in
+ * single-workspace mode — defined as ZERO non-deleted `slack_installations` rows
+ * of ANY status. The moment any non-deleted row exists (enabled OR disabled) the
+ * deploy is multi-workspace, and the env token is NEVER a fallback: an unknown
+ * team, an empty-string installation id, or a known-but-DISABLED team all resolve
+ * to nothing (fail-closed) rather than borrowing some other workspace's token. A
+ * known ENABLED team always uses its own row (never the env fallback).
  */
 import {
   getSlackInstallationByTeamId,
-  listEnabledSlackInstallations,
+  hasAnySlackInstallation,
   resolveSlackInstallationToken,
 } from '@open-tag/storage';
 import type { Database } from '@open-tag/storage';
@@ -39,7 +41,7 @@ export interface SlackInstallationResolverOptions {
   /** Override channel construction in tests. */
   createChannel?: (token: string) => SlackChannel;
   logger?: Logger;
-  /** TTL for the cached "any enabled installation exists?" probe (default 5s). */
+  /** TTL for the cached "any non-deleted installation exists?" probe (default 5s). */
   enabledProbeTtlMs?: number;
 }
 
@@ -56,8 +58,8 @@ export function createSlackInstallationResolver(
     ? channelFor(options.defaultBotToken.trim())
     : undefined;
 
-  let hasEnabled: boolean | undefined;
-  let hasEnabledAt = 0;
+  let hasInstall: boolean | undefined;
+  let hasInstallAt = 0;
 
   function channelFor(token: string): SlackChannel {
     let channel = channelsByToken.get(token);
@@ -69,60 +71,69 @@ export function createSlackInstallationResolver(
   }
 
   /**
-   * Whether ANY enabled installation row exists — gates the env fallback (see the
-   * module header). Cached with a short TTL so the hot inbound path does not query
-   * on every event. This is the cross-workspace SAFETY gate, so it fails CLOSED: a
-   * probe failure with no prior successful answer is treated as "rows exist"
-   * (`true` ⇒ NO env fallback for an unknown team), so a transient DB error can
-   * never make an unknown team borrow the env token. A previously-known answer is
-   * kept on failure (Codex impl-gate finding 2).
+   * Whether ANY non-deleted installation row exists (enabled OR disabled) — gates
+   * the env fallback (see the module header). Cached with a short TTL so the hot
+   * inbound path does not query on every event. This is the cross-workspace SAFETY
+   * gate, so it fails CLOSED: ANY probe error is treated as "rows exist"
+   * (`true` ⇒ NO env fallback) regardless of any cached value, so a transient DB
+   * error can never make an unknown team borrow the env token — not even right
+   * after a cached single-workspace (`false`) answer once the first install lands
+   * (Copilot M1a review). The cache is left untouched so the next call re-probes
+   * and self-heals when the DB recovers.
    */
-  async function anyEnabledInstallation(): Promise<boolean> {
-    if (hasEnabled !== undefined && Date.now() - hasEnabledAt < ttl) return hasEnabled;
+  async function anyInstallation(): Promise<boolean> {
+    if (hasInstall !== undefined && Date.now() - hasInstallAt < ttl) return hasInstall;
     try {
-      const rows = await listEnabledSlackInstallations(options.getDb());
-      hasEnabled = rows.length > 0;
-      hasEnabledAt = Date.now();
+      hasInstall = await hasAnySlackInstallation(options.getDb());
+      hasInstallAt = Date.now();
     } catch (err) {
       options.logger?.warn({ err }, 'Slack installation probe failed; failing closed (no env fallback)');
-      // Fail closed: assume multi-workspace until a probe succeeds.
-      return hasEnabled ?? true;
+      // Fail closed: assume multi-workspace on ANY error (never reuse a stale
+      // `false`), so a DB blip cannot resurrect a cross-workspace env borrow.
+      return true;
     }
-    return hasEnabled;
+    return hasInstall;
   }
 
   return {
     async resolveBotUserId(installationId) {
-      if (!installationId) return defaultBotUserId;
-      try {
-        const row = await getSlackInstallationByTeamId(options.getDb(), installationId);
-        // A row exists ⇒ use its bot user id ONLY (no env borrow across workspaces).
-        if (row) return row.botUserId?.trim() || undefined;
-      } catch (err) {
-        options.logger?.warn(
-          { err, installationId },
-          'Slack bot-user-id lookup failed; falling through to single-workspace rule',
-        );
+      const teamId = installationId?.trim();
+      if (teamId) {
+        try {
+          const row = await getSlackInstallationByTeamId(options.getDb(), teamId);
+          // An ENABLED row exists ⇒ use its bot user id ONLY (no env borrow).
+          if (row) return row.botUserId?.trim() || undefined;
+        } catch (err) {
+          options.logger?.warn(
+            { err, installationId },
+            'Slack bot-user-id lookup failed; falling through to single-workspace rule',
+          );
+        }
       }
-      // No row: env fallback only in single-workspace mode (no enabled rows).
-      return (await anyEnabledInstallation()) ? undefined : defaultBotUserId;
+      // No enabled row for this team (unknown / disabled-only / empty id): env
+      // fallback ONLY in single-workspace mode (zero non-deleted rows).
+      return (await anyInstallation()) ? undefined : defaultBotUserId;
     },
 
     async resolveSender(installationId) {
-      if (!installationId) return envSender;
-      try {
-        const row = await getSlackInstallationByTeamId(options.getDb(), installationId);
-        if (row) {
-          const token = resolveSlackInstallationToken(row, env);
-          return token ? channelFor(token) : undefined;
+      const teamId = installationId?.trim();
+      if (teamId) {
+        try {
+          const row = await getSlackInstallationByTeamId(options.getDb(), teamId);
+          if (row) {
+            const token = resolveSlackInstallationToken(row, env);
+            return token ? channelFor(token) : undefined;
+          }
+        } catch (err) {
+          options.logger?.warn(
+            { err, installationId },
+            'Slack sender lookup failed; falling through to single-workspace rule',
+          );
         }
-      } catch (err) {
-        options.logger?.warn(
-          { err, installationId },
-          'Slack sender lookup failed; falling through to single-workspace rule',
-        );
       }
-      return (await anyEnabledInstallation()) ? undefined : envSender;
+      // No enabled row for this team (unknown / disabled-only / empty id): env
+      // sender ONLY in single-workspace mode (zero non-deleted rows).
+      return (await anyInstallation()) ? undefined : envSender;
     },
   };
 }
