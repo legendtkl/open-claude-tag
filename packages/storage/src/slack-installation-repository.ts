@@ -176,12 +176,16 @@ export async function upsertSlackInstallationFromOAuth(
         .set({
           botToken: input.botToken,
           botTokenRef: 'stored',
-          botUserId: input.botUserId ?? null,
+          // Write-through on re-install: an omitted optional field PRESERVES the
+          // existing value rather than clobbering it (so re-auth never silently
+          // drops the audit `installation` payload, the `tenantKey`, or a
+          // previously-resolved bot user id). teamName/slackAppId already do this.
+          botUserId: input.botUserId ?? existing.botUserId,
           teamName: input.teamName ?? existing.teamName,
           slackAppId: input.slackAppId ?? existing.slackAppId,
-          tenantKey: input.tenantKey ?? input.teamId,
+          tenantKey: input.tenantKey ?? existing.tenantKey,
           status: 'enabled',
-          installation: input.installation ?? null,
+          installation: input.installation ?? existing.installation,
           updatedAt: new Date(),
           // platform_owner_id intentionally omitted: re-install keeps the
           // original owner (Codex M1b design-gate finding 1).
