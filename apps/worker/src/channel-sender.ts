@@ -259,8 +259,11 @@ export interface NeutralChannelFeedbackOptions {
   ackRef?: DeliveryRef;
   logger?: Logger;
   /**
-   * Monotonic clock for the running-update rate gate; injectable so tests drive a
-   * deterministic window. Defaults to {@link Date.now}.
+   * Clock (epoch ms) for the running-update rate gate; injectable so tests drive a
+   * deterministic window. Defaults to wall-clock {@link Date.now} (not a monotonic
+   * source). The gate only needs the elapsed ms between calls, so wall-clock is
+   * fine: a backward clock step at worst delays one cosmetic running update by up
+   * to the window — it never over-sends.
    */
   now?: () => number;
 }
@@ -274,12 +277,15 @@ export interface NeutralRunningFeedbackInput {
 }
 
 /**
- * Coalesce neutral running-card updates to the channel's `chat.update` cap
- * (`SlackChannel.capabilities().maxUpdateRateHz` = 1, i.e. 1000ms / 1Hz). A
- * leading-edge gate sends at most one running update per window and DROPS
- * intermediate updates inside it (no trailing timer), mirroring the lark running
- * card's `RUNNING_CARD_UPDATE_INTERVAL_MS` time-gate. The terminal update bypasses
- * this gate and always flushes the final state (see {@link ThreePhaseFeedback}).
+ * Coalesce neutral running-card updates. This is a FIXED 1000ms constant chosen
+ * for the only neutral channel today, Slack, whose `chat.update` cap is 1Hz
+ * (`SlackChannel.capabilities().maxUpdateRateHz` = 1 ⇒ 1000ms). It does NOT
+ * auto-adapt per channel; if another neutral channel with a different cap is
+ * added, derive the interval from its capability instead. A leading-edge gate
+ * sends at most one running update per window and DROPS intermediate updates
+ * inside it (no trailing timer), mirroring the lark running card's
+ * `RUNNING_CARD_UPDATE_INTERVAL_MS` time-gate. The terminal update bypasses this
+ * gate and always flushes the final state (see {@link ThreePhaseFeedback}).
  */
 export const NEUTRAL_RUNNING_UPDATE_MIN_INTERVAL_MS = 1000;
 
