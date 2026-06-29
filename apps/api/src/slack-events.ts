@@ -55,7 +55,7 @@ export interface SlackEventsHandlerDeps {
    * a throw surfaces as a 500 so Slack retries. Omitted ⇒ lifecycle events ack
    * 200 with no effect.
    */
-  onUninstall?: (teamId: string) => Promise<void>;
+  onUninstall?: (teamId: string, opts?: { eventTimeMs?: number }) => Promise<void>;
   logger: Logger;
   /** Injectable clock (epoch ms) for tests. */
   now?: () => number;
@@ -146,7 +146,7 @@ export function createSlackEventsHandler(deps: SlackEventsHandlerDeps) {
       // 200. Disabling is idempotent, so a Slack redelivery is harmless. A failure
       // returns 500 so Slack retries (better a retried disable than a stale token).
       try {
-        await deps.onUninstall?.(outcome.teamId);
+        await deps.onUninstall?.(outcome.teamId, { eventTimeMs: outcome.eventTimeMs });
       } catch (err) {
         deps.logger.error(
           { err, lifecycle: outcome.lifecycle, teamId: outcome.teamId },

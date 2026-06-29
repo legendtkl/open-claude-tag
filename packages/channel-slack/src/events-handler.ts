@@ -27,7 +27,17 @@ export type SlackEventOutcome =
    * The Slack app was uninstalled (or its BOT token revoked) for a workspace; the
    * transport should disable that team's installation, then ack 200 (ADR-0014).
    */
-  | { type: 'lifecycle'; lifecycle: SlackLifecycleKind; teamId: string }
+  | {
+      type: 'lifecycle';
+      lifecycle: SlackLifecycleKind;
+      teamId: string;
+      /**
+       * Envelope `event_time` (epoch ms). Slack does NOT guarantee lifecycle
+       * ordering, so a stale `app_uninstalled` can arrive AFTER a re-install; the
+       * transport uses this to skip disabling a row that was re-written later.
+       */
+      eventTimeMs?: number;
+    }
   /** Nothing to do (handshake-less non-message, bot/subtype, unknown type). Ack 200. */
   | { type: 'ignore'; reason: string };
 
@@ -109,5 +119,13 @@ function lifecycleOutcome(parsed: Record<string, unknown>): SlackEventOutcome | 
     if (!botRevoked) return { type: 'ignore', reason: 'tokens_revoked_no_bot_token' };
   }
 
-  return { type: 'lifecycle', lifecycle: eventType, teamId };
+  // `event_time` is epoch SECONDS on the event_callback envelope; carry it (in ms)
+  // so the transport can ignore a lifecycle event older than the install row.
+  const eventTimeSec = typeof parsed.event_time === 'number' ? parsed.event_time : undefined;
+  return {
+    type: 'lifecycle',
+    lifecycle: eventType,
+    teamId,
+    ...(eventTimeSec !== undefined ? { eventTimeMs: eventTimeSec * 1000 } : {}),
+  };
 }
