@@ -249,11 +249,18 @@ export class SlackChannel implements Channel {
       supportsStreamingEdit: true, // chat.update
       supportsThreads: true,
       supportsReactions: true,
-      // Honest until the stage-6 Slack interactive work lands: form render is a
-      // read-only summary, not a submittable modal; there is no
-      // block_actions/view_submission endpoint, so buttons receive no callbacks;
-      // and uploadArtifact does not yet reach the thread, so result artifacts are
-      // not delivered as files.
+      // Honest about what actually round-trips today (Milestone 3a):
+      //  - The `/slack/interactive` callback transport now EXISTS and normalizes a
+      //    Block Kit `block_actions` click into a neutral inbound `interaction`.
+      //    But `supportsApprovalButtons` stays FALSE until a neutral approval
+      //    CONSUMER consumes that inbound interaction (Codex FLAW-1): advertising
+      //    true while no consumer acts on the click would falsely promise the core
+      //    that an approval round-trips.
+      //  - `supportsForms` stays false: a submittable modal is a separate
+      //    `views.open`/`trigger_id` flow (deferred to M4), and form render here is
+      //    still a read-only summary, not an input surface.
+      //  - uploadArtifact does not yet reach the thread (M3b), so result artifacts
+      //    are not delivered as files.
       supportsForms: false,
       supportsApprovalButtons: false,
       supportsAttachmentsIn: ['image', 'file', 'audio'],

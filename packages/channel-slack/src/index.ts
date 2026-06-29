@@ -13,6 +13,11 @@ export type {
   HandleSlackEventInput,
   SlackLifecycleKind,
 } from './events-handler.js';
+export { handleSlackInteraction, normalizeSlackInteraction } from './interactive-handler.js';
+export type {
+  SlackInteractionOutcome,
+  HandleSlackInteractionInput,
+} from './interactive-handler.js';
 export { exchangeSlackOAuthCode, buildSanitizedSlackInstallation } from './oauth.js';
 export type {
   ExchangeSlackOAuthCodeInput,
