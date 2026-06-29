@@ -1150,6 +1150,11 @@ async function processTask(job: { id: string; data: TaskJobData }): Promise<void
   logger.info({ taskId, sessionId, runtimeHint }, 'Processing task');
 
   let feedback: TaskFeedback | null = null;
+  // The neutral feedback, concretely typed so the running-card path can call its
+  // channel-specific `updateRunning` (Slack Milestone 2) without widening the
+  // shared `TaskFeedback` interface (which would clash with ThreePhaseFeedback's
+  // own `updateRunning` signature). Set only on the non-lark branch below.
+  let neutralFeedback: NeutralChannelFeedback | null = null;
   let taskFeishuClient: FeishuClient | null = null;
   let taskChannelSender: ChannelSender | null = null;
   // Additional "show your work" surface: a live named-stage checklist driven by
@@ -1194,30 +1199,47 @@ async function processTask(job: { id: string; data: TaskJobData }): Promise<void
       runningProgress = progress;
     }
 
-    if (feedback) {
-      const now = Date.now();
-      const shouldFlush = shouldFlushRunningCardUpdate({
-        now,
-        lastUpdatedAt: lastRunningCardUpdateAt,
-        source,
-        force,
+    if (!feedback) return;
+
+    if (neutralFeedback) {
+      // Neutral (Slack) running phase (Slack Milestone 2): the feedback object owns
+      // its own rate cap (≤ channel maxUpdateRateHz) and no-throw delivery, so hand
+      // it the latest running snapshot and let it coalesce. We bypass the lark
+      // throttle here because it always flushes `progress` events, which would
+      // exceed Slack's chat.update cap. A missing ack handle / sender makes this a
+      // best-effort no-op inside updateRunning.
+      await neutralFeedback.updateRunning({
+        description: runningDescription,
+        progress: runningProgress,
+        recentActivity: runningActivity,
+        workDir: runningWorkDir,
       });
-      if (!shouldFlush) {
-        return;
-      }
-      await updateRunningFeedbackCard(
-        taskChannelSender,
-        {
-          ackMessageId,
-          description: runningDescription,
-          progress: runningProgress,
-          recentActivity: runningActivity,
-          workDir: runningWorkDir,
-        },
-        logger,
-      );
-      lastRunningCardUpdateAt = now;
+      return;
     }
+
+    // Lark path — unchanged.
+    const now = Date.now();
+    const shouldFlush = shouldFlushRunningCardUpdate({
+      now,
+      lastUpdatedAt: lastRunningCardUpdateAt,
+      source,
+      force,
+    });
+    if (!shouldFlush) {
+      return;
+    }
+    await updateRunningFeedbackCard(
+      taskChannelSender,
+      {
+        ackMessageId,
+        description: runningDescription,
+        progress: runningProgress,
+        recentActivity: runningActivity,
+        workDir: runningWorkDir,
+      },
+      logger,
+    );
+    lastRunningCardUpdateAt = now;
   };
 
   const updateFeedbackState = async (state: 'running' | 'completed' | 'failed') => {
@@ -1355,7 +1377,7 @@ async function processTask(job: { id: string; data: TaskJobData }): Promise<void
       const neutralSender = resolveTaskChannelSender(channelKind, { slackSender: teamSlackSender });
       const ackDeliveryRef = reconstructAckDeliveryRef(taskConstraints.ackDelivery);
       if (chatId && neutralSender) {
-        feedback = new NeutralChannelFeedback({
+        neutralFeedback = new NeutralChannelFeedback({
           sender: neutralSender,
           conversation: {
             kind: channelKind,
@@ -1365,6 +1387,7 @@ async function processTask(job: { id: string; data: TaskJobData }): Promise<void
           ...(ackDeliveryRef ? { ackRef: ackDeliveryRef } : {}),
           logger,
         });
+        feedback = neutralFeedback;
       } else {
         logger.warn(
           {
