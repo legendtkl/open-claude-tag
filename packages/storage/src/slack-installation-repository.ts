@@ -229,15 +229,35 @@ export async function upsertSlackInstallationFromOAuth(
  * index for a user-initiated removal. Idempotent — a missing/already-disabled row
  * is a no-op. Returns whether a row was affected. The unique `team_id` (deleted
  * rows are mangled) means a real `team_id` only ever targets the live row.
+ *
+ * `opts.eventTimeMs` (the lifecycle event's `event_time`): Slack does NOT
+ * guarantee lifecycle ordering, so a stale `app_uninstalled`/`tokens_revoked` can
+ * arrive AFTER an OAuth re-install. When provided, this STALE-GUARDS the disable:
+ * if the live row was last written in a strictly later second than the event, the
+ * event is stale (the row was re-installed after it) and the disable is skipped.
+ * The second granularity matches Slack's integer `event_time`, so a sub-second
+ * newer legitimate uninstall still fires.
  */
 export async function disableSlackInstallationByTeamId(
   db: Database,
   teamId: string,
+  opts: { eventTimeMs?: number } = {},
 ): Promise<boolean> {
+  // Single conditional UPDATE (atomic; no read-then-write TOCTOU). The stale guard
+  // is a WHERE clause: when an event_time is given, only disable a row whose
+  // last-write SECOND is not after the event (second granularity matches Slack's
+  // integer event_time, so a sub-second-newer legitimate uninstall still fires).
+  const conds = [eq(slackInstallations.teamId, teamId)];
+  if (typeof opts.eventTimeMs === 'number') {
+    const eventSec = Math.floor(opts.eventTimeMs / 1000);
+    conds.push(
+      sql`date_trunc('second', ${slackInstallations.updatedAt}) <= to_timestamp(${eventSec})`,
+    );
+  }
   const [row] = await db
     .update(slackInstallations)
     .set({ status: 'disabled', botToken: null, updatedAt: new Date() })
-    .where(eq(slackInstallations.teamId, teamId))
+    .where(and(...conds))
     .returning({ id: slackInstallations.id });
   return row !== undefined;
 }

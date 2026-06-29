@@ -3418,8 +3418,8 @@ if (SLACK_SIGNING_SECRET) {
     // secret), independent of the OAuth gate, since a manually-CRUD'd M1a install
     // should also be retired when its workspace removes the app. `db` is read at
     // request time (assigned during async startup).
-    onUninstall: async (teamId) => {
-      await disableSlackInstallationByTeamId(db, teamId);
+    onUninstall: async (teamId, opts) => {
+      await disableSlackInstallationByTeamId(db, teamId, opts);
     },
     dispatch: (message, ctx) =>
       createSlackInboundDispatch({

@@ -338,5 +338,25 @@ describePg('upsertSlackInstallationFromOAuth + disable lifecycle (Postgres)', ()
     expect(row.status).toBe('enabled');
     expect(row.botToken).toBe('xoxb-reinstall');
     expect(row.platformOwnerId).toBe(ownerA);
+
+    // 7. Stale-lifecycle guard (Copilot M1b review): Slack does NOT guarantee
+    // lifecycle ordering, so a delayed app_uninstalled from BEFORE the re-install
+    // must NOT wipe the freshly-enabled row. An event_time older than the row's
+    // last-write second is ignored; a current one still disables.
+    const staleDisabled = await disableSlackInstallationByTeamId(db, teamId, {
+      eventTimeMs: Date.now() - 5000,
+    });
+    expect(staleDisabled).toBe(false);
+    row = await loadRow();
+    expect(row.status).toBe('enabled');
+    expect(row.botToken).toBe('xoxb-reinstall');
+
+    const freshDisabled = await disableSlackInstallationByTeamId(db, teamId, {
+      eventTimeMs: Date.now() + 5000,
+    });
+    expect(freshDisabled).toBe(true);
+    row = await loadRow();
+    expect(row.status).toBe('disabled');
+    expect(row.botToken).toBeNull();
   });
 });

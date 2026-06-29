@@ -316,7 +316,12 @@ describe('createSlackEventsHandler', () => {
       logger: silentLogger,
       now: () => NOW_MS,
     });
-    const body = { type: 'event_callback', team_id: 'T_GONE', event: { type: 'app_uninstalled' } };
+    const body = {
+      type: 'event_callback',
+      team_id: 'T_GONE',
+      event_time: 1710000000,
+      event: { type: 'app_uninstalled' },
+    };
     const raw = JSON.stringify(body);
     const reply = makeReply();
 
@@ -327,7 +332,8 @@ describe('createSlackEventsHandler', () => {
 
     expect(reply.statusCode).toBe(200);
     expect(result).toEqual({ ok: true });
-    expect(onUninstall).toHaveBeenCalledWith('T_GONE');
+    // event_time is threaded through (ms) so the disable can stale-guard (#21 M1b).
+    expect(onUninstall).toHaveBeenCalledWith('T_GONE', { eventTimeMs: 1710000000000 });
     expect(dispatch).not.toHaveBeenCalled();
   });
 

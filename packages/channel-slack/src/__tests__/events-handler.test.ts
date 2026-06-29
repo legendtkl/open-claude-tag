@@ -92,6 +92,24 @@ describe('handleSlackEvent', () => {
     expect(outcome).toEqual({ type: 'lifecycle', lifecycle: 'app_uninstalled', teamId: 'T999' });
   });
 
+  it('carries event_time (ms) so the transport can stale-guard the disable', () => {
+    const outcome = handleSlackEvent({
+      parsed: {
+        type: 'event_callback',
+        team_id: 'T999',
+        event_time: 1710000000,
+        event: { type: 'app_uninstalled' },
+      },
+      channel,
+    });
+    expect(outcome).toEqual({
+      type: 'lifecycle',
+      lifecycle: 'app_uninstalled',
+      teamId: 'T999',
+      eventTimeMs: 1710000000000,
+    });
+  });
+
   it('ignores app_uninstalled without a team_id', () => {
     const outcome = handleSlackEvent({
       parsed: { type: 'event_callback', event: { type: 'app_uninstalled' } },
